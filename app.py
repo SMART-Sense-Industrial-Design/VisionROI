@@ -44,6 +44,22 @@ async def ws():
         await websocket.send(frame_b64)
         await asyncio.sleep(0.05)
 
+@app.route("/set_camera", methods=["POST"])
+async def set_camera():
+    global camera
+    data = await request.get_json()
+    source_val = data.get("source", "")
+    if camera and camera.isOpened():
+        camera.release()
+    try:
+        source = int(source_val)
+    except ValueError:
+        source = source_val
+    camera = cv2.VideoCapture(source)
+    if not camera.isOpened():
+        return jsonify({"status": "error"}), 400
+    return jsonify({"status": "ok"})
+
 # ✅ หยุด stream
 @app.route('/stop_stream', methods=["POST"])
 async def stop_stream():
