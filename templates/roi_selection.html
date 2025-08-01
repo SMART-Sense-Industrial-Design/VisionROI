@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Quart ROI Selector</title>
+    <style>
+        #video { border: 1px solid black; position: relative; }
+        #canvas { position: absolute; left: 0; top: 0; }
+    </style>
+</head>
+<body>
+    <button onclick="startStream()">Start</button>
+    <button onclick="saveAllRois()">Save All</button>
+    <br><br>
+    <div style="position: relative; display: inline-block;">
+        <img id="video" width="640" height="480" />
+        <canvas id="canvas" width="640" height="480"></canvas>
+    </div>
+
+    <script>
+        let socket;
+        let drawing = false;
+        let startX, startY;
+        let rois = [];
+
+        const video = document.getElementById("video");
+        const canvas = document.getElementById("canvas");
+        const ctx = canvas.getContext("2d");
+
+        function startStream() {
+            socket = new WebSocket("ws://" + location.host + "/ws");
+            socket.onmessage = function(event) {
+                video.src = 'data:image/jpeg;base64,' + event.data;
+            };
+        }
+
+        canvas.onmousedown = (e) => {
+            drawing = true;
+            const rect = canvas.getBoundingClientRect();
+            startX = e.clientX - rect.left;
+            startY = e.clientY - rect.top;
+        };
+
+        canvas.onmouseup = (e) => {
+            if (!drawing) return;
+            drawing = false;
+            const rect = canvas.getBoundingClientRect();
+            const endX = e.clientX - rect.left;
+            const endY = e.clientY - rect.top;
+            const roi = {
+                x: Math.min(startX, endX),
+                y: Math.min(startY, endY),
+                width: Math.abs(endX - startX),
+                height: Math.abs(endY - startY)
+            };
+            rois.push(roi);
+            drawAllRois();
+        };
+
+        canvas.onmousemove = (e) => {
+            if (!drawing) return;
+            const rect = canvas.getBoundingClientRect();
+            const currX = e.clientX - rect.left;
+            const currY = e.clientY - rect.top;
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            drawAllRois();
+            ctx.beginPath();
+            ctx.rect(startX, startY, currX - startX, currY - startY);
+            ctx.strokeStyle = 'red';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+        };
+
+        function drawAllRois() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            rois.forEach(r => {
+                ctx.beginPath();
+                ctx.rect(r.x, r.y, r.width, r.height);
+                ctx.strokeStyle = 'blue';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+            });
+        }
+
+        function saveAllRois() {
+            if (rois.length === 0) {
+                alert("No ROI selected.");
+                return;
+            }
+            if (!confirm("Save all ROIs?")) return;
+
+            fetch("/save_roi", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ rois: rois })
+            })
+            .then(res => res.json())
+            .then(data => {
+                alert("Saved to: " + data.filename);
+                rois = [];
+                drawAllRois();
+            });
+        }
+    
+        function stopStream() {
+            if (socket) socket.close();
+            fetch("/stop_stream", { method: "POST" })
+                .then(res => res.json())
+                .then(data => alert("Stream stopped"));
+        }
+    </script>
+</body>
+</html>
