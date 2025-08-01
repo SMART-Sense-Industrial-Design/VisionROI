@@ -5,7 +5,8 @@
 </head>
 <body>
     <h2>Inference with Saved ROI</h2>
-    <button onclick="loadAndStart()">Load ROI & Start Stream</button>
+    <input id="cameraSource" placeholder="Camera source">
+    <button id="startButton">Load ROI & Start Stream</button>
     <p id="status"></p>
     <div style="position: relative; display: inline-block;">
         <img id="video" width="640" height="480" />
@@ -18,8 +19,20 @@
         const video = document.getElementById("video");
         const canvas = document.getElementById("canvas");
         const ctx = canvas.getContext("2d");
+        document.getElementById("startButton").onclick = loadAndStart;
 
         async function loadAndStart() {
+            const source = document.getElementById("cameraSource").value;
+            const camRes = await fetch("/set_camera", {
+                method: "POST",
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify({source})
+            });
+            if (!camRes.ok) {
+                document.getElementById("status").innerText = "Camera error";
+                return;
+            }
+
             const res = await fetch("/load_roi");
             const data = await res.json();
             document.getElementById("status").innerText = "Loaded: " + data.filename;
