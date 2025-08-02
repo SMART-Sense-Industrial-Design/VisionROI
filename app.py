@@ -8,6 +8,8 @@ import shutil
 
 frame_queue: asyncio.Queue[str] = asyncio.Queue(maxsize=1)
 inference_task: asyncio.Task | None = None
+roi_frame_queue: asyncio.Queue[str] = asyncio.Queue(maxsize=1)
+roi_task: asyncio.Task | None = None
 
 app = Quart(__name__)
 # กำหนดเพดานขนาดไฟล์ที่เซิร์ฟเวอร์ยอมรับ (100 MB)
@@ -56,6 +58,26 @@ async def run_inference_loop():
         await asyncio.sleep(0.05)
 
 
+async def run_roi_loop():
+    while True:
+        if camera is None:
+            await asyncio.sleep(0.1)
+            continue
+        success, frame = camera.read()
+        if not success:
+            await asyncio.sleep(0.1)
+            continue
+        _, buffer = cv2.imencode('.jpg', frame)
+        frame_b64 = base64.b64encode(buffer).decode("utf-8")
+        if roi_frame_queue.full():
+            try:
+                roi_frame_queue.get_nowait()
+            except asyncio.QueueEmpty:
+                pass
+        await roi_frame_queue.put(frame_b64)
+        await asyncio.sleep(0.05)
+
+
 # ✅ WebSocket video stream
 @app.websocket('/ws')
 async def ws():
@@ -63,9 +85,17 @@ async def ws():
         frame_b64 = await frame_queue.get()
         await websocket.send(frame_b64)
 
+
+# ✅ WebSocket ROI stream
+@app.websocket('/ws_roi')
+async def ws_roi():
+    while True:
+        frame_b64 = await roi_frame_queue.get()
+        await websocket.send(frame_b64)
+
 @app.route("/set_camera", methods=["POST"])
 async def set_camera():
-    global camera, camera_source, inference_task
+    global camera, camera_source, inference_task, roi_task
     data = await request.get_json()
     source_val = data.get("source", "")
     if camera and camera.isOpened():
@@ -75,7 +105,11 @@ async def set_camera():
         camera_source = int(source_val)
     except ValueError:
         camera_source = source_val
-    if inference_task is not None and not inference_task.done():
+    if (
+        inference_task is not None and not inference_task.done()
+    ) or (
+        roi_task is not None and not roi_task.done()
+    ):
         camera = cv2.VideoCapture(camera_source)
         if not camera.isOpened():
             return jsonify({"status": "error"}), 400
@@ -127,7 +161,9 @@ async def create_source():
 # ✅ เริ่มงาน inference
 @app.route('/start_inference', methods=["POST"])
 async def start_inference():
-    global inference_task, camera
+    global inference_task, camera, roi_task
+    if roi_task is not None and not roi_task.done():
+        return jsonify({"status": "roi_running"}), 400
     if inference_task is None or inference_task.done():
         camera = cv2.VideoCapture(camera_source)
         if not camera.isOpened():
@@ -149,6 +185,43 @@ async def stop_inference():
         except asyncio.CancelledError:
             pass
         inference_task = None
+        if camera and camera.isOpened():
+            camera.release()
+            camera = None
+        return jsonify({"status": "stopped"})
+    if camera and camera.isOpened():
+        camera.release()
+        camera = None
+    return jsonify({"status": "no_task"})
+
+
+# ✅ เริ่มงาน ROI stream
+@app.route('/start_roi_stream', methods=["POST"])
+async def start_roi_stream():
+    global roi_task, camera, inference_task
+    if inference_task is not None and not inference_task.done():
+        return jsonify({"status": "inference_running"}), 400
+    if roi_task is None or roi_task.done():
+        camera = cv2.VideoCapture(camera_source)
+        if not camera.isOpened():
+            camera = None
+            return jsonify({"status": "error", "message": "open_failed"}), 400
+        roi_task = asyncio.create_task(run_roi_loop())
+        return jsonify({"status": "started"})
+    return jsonify({"status": "already_running"})
+
+
+# ✅ หยุดงาน ROI stream
+@app.route('/stop_roi_stream', methods=["POST"])
+async def stop_roi_stream():
+    global roi_task, camera
+    if roi_task is not None and not roi_task.done():
+        roi_task.cancel()
+        try:
+            await roi_task
+        except asyncio.CancelledError:
+            pass
+        roi_task = None
         if camera and camera.isOpened():
             camera.release()
             camera = None

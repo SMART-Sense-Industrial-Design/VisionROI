@@ -63,8 +63,8 @@
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ source: cfg.source })
             });
-            await fetch("/start_inference", { method: "POST" });
-            socket = new WebSocket("ws://" + location.host + "/ws");
+            await fetch("/start_roi_stream", { method: "POST" });
+            socket = new WebSocket("ws://" + location.host + "/ws_roi");
             socket.onmessage = function(event) {
                 video.src = 'data:image/jpeg;base64,' + event.data;
             };
@@ -72,14 +72,14 @@
         }
 
         async function stopStream() {
-            await fetch("/stop_inference", { method: "POST" });
+
             if (socket) {
                 socket.close();
                 socket = null;
             }
-            video.src = "";
-            rois = [];
-            drawAllRois();
+
+            await fetch("/stop_roi_stream", { method: "POST" });
+
         }
 
         canvas.onmousedown = (e) => {
