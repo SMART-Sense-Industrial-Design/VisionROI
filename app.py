@@ -69,7 +69,8 @@ async def run_inference_loop():
         if not inference_rois:
             if custom_module and hasattr(custom_module, "process"):
                 try:
-                    await asyncio.to_thread(custom_module.process, frame)
+                    await asyncio.to_thread(custom_module.process, frame, roi)
+
                 except Exception:
                     pass
         else:
@@ -202,9 +203,10 @@ async def create_source():
         custom_path = os.path.join(source_dir, "custom.py")
         with open(custom_path, "w") as f:
             f.write(
-                "def process(img):\n"
-                "    # รับภาพ ROI และเขียนโค้ดประมวลผลตามต้องการ\n"
-                "    return img\n"
+                "def process(frame, roi):\n"
+                "    \"\"\"รับเฟรมเต็มและภาพ ROI ที่ตัดแล้ว\"\"\"\n"
+                "    # เขียนโค้ดประมวลผลตามต้องการ เช่น OCR\n"
+                "    return roi\n"
             )
         with open(os.path.join(source_dir, "config.json"), "w") as f:
             json.dump(config, f)
