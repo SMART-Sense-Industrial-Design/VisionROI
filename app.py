@@ -186,11 +186,20 @@ async def source_config():
         cfg = json.load(f)
     return jsonify(cfg)
 
+"""ROI save and load helpers"""
+
 # ✅ บันทึก ROI
 @app.route("/save_roi", methods=["POST"])
 async def save_roi():
     data = await request.get_json()
     rois = data.get("rois", [])
+    path = request.args.get("path", "")
+    if path:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w") as f:
+            json.dump(rois, f, indent=2)
+        return jsonify({"status": "saved", "filename": path})
+
     name = data.get("source", "")
     if not name:
         return jsonify({"status": "error", "message": "missing source"}), 400
@@ -222,6 +231,16 @@ async def load_roi(name: str):
     with open(roi_path, "r") as f:
         rois = json.load(f)
     return jsonify({"rois": rois, "filename": roi_file})
+
+# ✅ โหลด ROI ตามพาธที่ระบุใน config
+@app.route("/load_roi_file")
+async def load_roi_file():
+    path = request.args.get("path", "")
+    if not path or not os.path.exists(path):
+        return jsonify({"rois": [], "filename": "None"})
+    with open(path, "r") as f:
+        rois = json.load(f)
+    return jsonify({"rois": rois, "filename": os.path.basename(path)})
 
 # ✅ ส่ง snapshot 1 เฟรม (ใช้ในหน้า inference)
 @app.route("/ws_snapshot")
