@@ -39,8 +39,6 @@
             });
         }
 
-        loadSources();
-
         async function startInference() {
             const name = document.getElementById("sourceSelect").value;
             if (!name) {
@@ -51,14 +49,14 @@
             const camRes = await fetch("/set_camera", {
                 method: "POST",
                 headers: {"Content-Type": "application/json"},
-                body: JSON.stringify({ source: cfg.source })
+                body: JSON.stringify(cfg)
             });
             if (!camRes.ok) {
                 statusEl.innerText = "Camera error";
                 return;
             }
 
-            const res = await fetch("/load_roi");
+            const res = await fetch(`/load_roi/${encodeURIComponent(name)}`);
             const data = await res.json();
             statusEl.innerText = "Loaded: " + data.filename;
             rois = data.rois;
@@ -91,10 +89,11 @@
         }
 
         async function checkStatus() {
+            const name = document.getElementById("sourceSelect").value;
             const res = await fetch("/inference_status");
             const data = await res.json();
-            if (data.running) {
-                const roiRes = await fetch("/load_roi");
+            if (data.running && name) {
+                const roiRes = await fetch(`/load_roi/${encodeURIComponent(name)}`);
                 const roiData = await roiRes.json();
                 rois = roiData.rois;
                 openSocket();
@@ -114,8 +113,11 @@
             startButton.innerText = "Start";
         }
 
-        // ตรวจสอบสถานะ inference เมื่อหน้าเพจโหลด
-        window.addEventListener('load', checkStatus);
+        // โหลดรายชื่อ source และตรวจสอบสถานะเมื่อหน้าเพจโหลด
+        window.addEventListener('load', async () => {
+            await loadSources();
+            await checkStatus();
+        });
 
         // รอให้ภาพกล้องแสดงก่อน แล้ววาดกรอบ ROI ซ้อนบน canvas
         video.onload = () => {

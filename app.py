@@ -180,14 +180,20 @@ async def save_roi():
         json.dump(rois, f, indent=2)
     return jsonify({"status": "saved", "filename": filename})
 
-# ✅ โหลด ROI จากไฟล์ล่าสุด
-@app.route("/load_roi")
-async def load_roi():
-    roi_files = [f for f in os.listdir() if f.startswith("rois_") and f.endswith(".json")]
+# ✅ โหลด ROI จากไฟล์ล่าสุดของ source
+@app.route("/load_roi/<name>")
+async def load_roi(name: str):
+    directory = os.path.join("sources", name)
+    if not os.path.isdir(directory):
+        return jsonify({"rois": [], "filename": "None"})
+    roi_files = [
+        f for f in os.listdir(directory)
+        if f.startswith("rois_") and f.endswith(".json")
+    ]
     if not roi_files:
         return jsonify({"rois": [], "filename": "None"})
     latest_file = sorted(roi_files)[-1]
-    with open(latest_file, "r") as f:
+    with open(os.path.join(directory, latest_file), "r") as f:
         rois = json.load(f)
     return jsonify({"rois": rois, "filename": latest_file})
 
