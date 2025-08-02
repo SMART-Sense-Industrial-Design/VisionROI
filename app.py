@@ -21,6 +21,7 @@ app = Quart(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 100 * 1024 * 1024
 camera: cv2.VideoCapture | None = None
 camera_source: int | str = 0
+ALLOWED_ROI_DIR = os.path.realpath("sources")
 
 # ✅ Redirect root ไปหน้า home
 @app.route("/")
@@ -378,25 +379,33 @@ async def save_roi():
     data = await request.get_json()
     rois = data.get("rois", [])
     path = request.args.get("path", "")
+    base_dir = ALLOWED_ROI_DIR
     if path:
-        dir_path = os.path.dirname(path)
+        full_path = os.path.realpath(os.path.join(base_dir, path))
+        if not full_path.startswith(base_dir + os.sep):
+            return jsonify({"status": "error", "message": "path outside allowed directory"}), 400
+        dir_path = os.path.dirname(full_path)
         if dir_path:
             os.makedirs(dir_path, exist_ok=True)
-        with open(path, "w") as f:
+        with open(full_path, "w") as f:
             json.dump(rois, f, indent=2)
-        return jsonify({"status": "saved", "filename": path})
+        return jsonify({"status": "saved", "filename": full_path})
 
     name = data.get("source", "")
     if not name:
         return jsonify({"status": "error", "message": "missing source"}), 400
-    directory = os.path.join("sources", name)
+    directory = os.path.realpath(os.path.join(base_dir, name))
+    if not directory.startswith(base_dir + os.sep):
+        return jsonify({"status": "error", "message": "invalid source path"}), 400
     config_path = os.path.join(directory, "config.json")
     if not os.path.exists(config_path):
         return jsonify({"status": "error", "message": "config not found"}), 404
     with open(config_path, "r") as f:
         cfg = json.load(f)
     roi_file = cfg.get("rois", "rois.json")
-    roi_path = os.path.join(directory, roi_file)
+    roi_path = os.path.realpath(os.path.join(directory, roi_file))
+    if not roi_path.startswith(directory + os.sep):
+        return jsonify({"status": "error", "message": "invalid ROI filename"}), 400
     with open(roi_path, "w") as f:
         json.dump(rois, f, indent=2)
     return jsonify({"status": "saved", "filename": roi_path})
