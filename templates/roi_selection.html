@@ -8,6 +8,7 @@
     </style>
 </head>
 <body>
+    <select id="sourceSelect"></select>
     <button onclick="startStream()">Start</button>
     <button onclick="saveAllRois()">Save All</button>
     <br><br>
@@ -26,7 +27,32 @@
         const canvas = document.getElementById("canvas");
         const ctx = canvas.getContext("2d");
 
+        async function loadSources() {
+            const res = await fetch("/sources");
+            const data = await res.json();
+            const select = document.getElementById("sourceSelect");
+            data.sources.forEach(name => {
+                const opt = document.createElement("option");
+                opt.value = name;
+                opt.textContent = name;
+                select.appendChild(opt);
+            });
+        }
+
+        loadSources();
+
         async function startStream() {
+            const name = document.getElementById("sourceSelect").value;
+            if (!name) {
+                alert("Select source first");
+                return;
+            }
+            const cfg = await fetch(`/source_config?name=${encodeURIComponent(name)}`).then(r => r.json());
+            await fetch("/set_camera", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ source: cfg.source })
+            });
             await fetch("/start_inference", { method: "POST" });
             socket = new WebSocket("ws://" + location.host + "/ws");
             socket.onmessage = function(event) {
@@ -89,10 +115,11 @@
             }
             if (!confirm("Save all ROIs?")) return;
 
+            const name = document.getElementById("sourceSelect").value;
             fetch("/save_roi", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ rois: rois })
+                body: JSON.stringify({ rois: rois, source: name })
             })
             .then(res => res.json())
             .then(data => {
