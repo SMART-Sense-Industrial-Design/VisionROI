@@ -106,11 +106,15 @@ async def create_source():
     try:
         await model.save(os.path.join(source_dir, "model.onnx"))
         await label.save(os.path.join(source_dir, "classes.txt"))
+        rois_path = os.path.join(source_dir, "rois.json")
+        with open(rois_path, "w") as f:
+            f.write("[]")
         config = {
             "name": name,
             "source": source,
             "model": "model.onnx",
             "label": "classes.txt",
+            "rois": "rois.json",
         }
         with open(os.path.join(source_dir, "config.json"), "w") as f:
             json.dump(config, f)
