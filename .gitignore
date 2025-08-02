@@ -207,7 +207,9 @@ marimo/_lsp/
 __marimo__/
 
 # Ignore local sources
-sources/
+sources/*
+!sources/test_source/
+!sources/test_source/**
 
 # ROI files
 rois_*.json
