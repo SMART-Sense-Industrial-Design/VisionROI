@@ -13,7 +13,8 @@ inference_task: asyncio.Task | None = None
 app = Quart(__name__)
 # กำหนดเพดานขนาดไฟล์ที่เซิร์ฟเวอร์ยอมรับ (100 MB)
 app.config["MAX_CONTENT_LENGTH"] = 100 * 1024 * 1024
-camera = cv2.VideoCapture(0)
+camera: cv2.VideoCapture | None = None
+camera_source: int | str = 0
 
 # ✅ Redirect root ไปหน้า home
 @app.route("/")
@@ -37,11 +38,14 @@ async def inference():
 
 async def run_inference_loop():
     while True:
+        if camera is None:
+            await asyncio.sleep(0.1)
+            continue
         success, frame = camera.read()
         if not success:
             await asyncio.sleep(0.1)
             continue
-        # TODO: perform inference and save results
+        # TODO: ทำ inference และบันทึกผลลัพธ์
         _, buffer = cv2.imencode('.jpg', frame)
         frame_b64 = base64.b64encode(buffer).decode("utf-8")
         if frame_queue.full():
@@ -62,18 +66,20 @@ async def ws():
 
 @app.route("/set_camera", methods=["POST"])
 async def set_camera():
-    global camera
+    global camera, camera_source, inference_task
     data = await request.get_json()
     source_val = data.get("source", "")
     if camera and camera.isOpened():
         camera.release()
+        camera = None
     try:
-        source = int(source_val)
+        camera_source = int(source_val)
     except ValueError:
-        source = source_val
-    camera = cv2.VideoCapture(source)
-    if not camera.isOpened():
-        return jsonify({"status": "error"}), 400
+        camera_source = source_val
+    if inference_task is not None and not inference_task.done():
+        camera = cv2.VideoCapture(camera_source)
+        if not camera.isOpened():
+            return jsonify({"status": "error"}), 400
     return jsonify({"status": "ok"})
 
 
@@ -118,8 +124,12 @@ async def create_source():
 # ✅ เริ่มงาน inference
 @app.route('/start_inference', methods=["POST"])
 async def start_inference():
-    global inference_task
+    global inference_task, camera
     if inference_task is None or inference_task.done():
+        camera = cv2.VideoCapture(camera_source)
+        if not camera.isOpened():
+            camera = None
+            return jsonify({"status": "error", "message": "open_failed"}), 400
         inference_task = asyncio.create_task(run_inference_loop())
         return jsonify({"status": "started"})
     return jsonify({"status": "already_running"})
@@ -128,7 +138,7 @@ async def start_inference():
 # ✅ หยุดงาน inference
 @app.route('/stop_inference', methods=["POST"])
 async def stop_inference():
-    global inference_task
+    global inference_task, camera
     if inference_task is not None and not inference_task.done():
         inference_task.cancel()
         try:
@@ -136,7 +146,13 @@ async def stop_inference():
         except asyncio.CancelledError:
             pass
         inference_task = None
+        if camera and camera.isOpened():
+            camera.release()
+            camera = None
         return jsonify({"status": "stopped"})
+    if camera and camera.isOpened():
+        camera.release()
+        camera = None
     return jsonify({"status": "no_task"})
 
 # ✅ สถานะงาน inference
