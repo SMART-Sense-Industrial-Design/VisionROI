@@ -23,6 +23,7 @@
         let drawing = false;
         let startX, startY;
         let rois = [];
+        let currentRoi = null;
         let currentSource = "";
         let initialized = false;
 
@@ -94,6 +95,7 @@
             const scaleY = canvas.height / rect.height;
             startX = (e.clientX - rect.left) * scaleX;
             startY = (e.clientY - rect.top) * scaleY;
+            currentRoi = null;
         };
 
         canvas.onmouseup = (e) => {
@@ -104,13 +106,14 @@
             const scaleY = canvas.height / rect.height;
             const endX = (e.clientX - rect.left) * scaleX;
             const endY = (e.clientY - rect.top) * scaleY;
-            const roi = {
+            currentRoi = {
                 x: Math.min(startX, endX),
                 y: Math.min(startY, endY),
                 width: Math.abs(endX - startX),
                 height: Math.abs(endY - startY)
             };
-            rois.push(roi);
+            rois.push(currentRoi);
+            currentRoi = null;
             drawAllRois();
         };
 
@@ -121,13 +124,13 @@
             const scaleY = canvas.height / rect.height;
             const currX = (e.clientX - rect.left) * scaleX;
             const currY = (e.clientY - rect.top) * scaleY;
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            currentRoi = {
+                x: Math.min(startX, currX),
+                y: Math.min(startY, currY),
+                width: Math.abs(currX - startX),
+                height: Math.abs(currY - startY)
+            };
             drawAllRois();
-            ctx.beginPath();
-            ctx.rect(startX, startY, currX - startX, currY - startY);
-            ctx.strokeStyle = 'red';
-            ctx.lineWidth = 2;
-            ctx.stroke();
         };
 
         function drawAllRois() {
@@ -139,6 +142,13 @@
                 ctx.lineWidth = 2;
                 ctx.stroke();
             });
+            if (currentRoi) {
+                ctx.beginPath();
+                ctx.rect(currentRoi.x, currentRoi.y, currentRoi.width, currentRoi.height);
+                ctx.strokeStyle = 'red';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+            }
         }
 
         async function loadRois() {
