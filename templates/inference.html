@@ -11,15 +11,12 @@
     <p id="status"></p>
     <div style="position: relative; display: inline-block;">
         <img id="video" width="640" height="480" />
-        <canvas id="canvas" width="640" height="480" style="position: absolute; left: 0; top: 0;"></canvas>
     </div>
 
     <script>
         let socket;
         let rois = [];
         const video = document.getElementById("video");
-        const canvas = document.getElementById("canvas");
-        const ctx = canvas.getContext("2d");
         const startButton = document.getElementById("startButton");
         const stopButton = document.getElementById("stopButton");
         const statusEl = document.getElementById("status");
@@ -67,7 +64,11 @@
             statusEl.innerText = "Loaded: " + data.filename;
             rois = data.rois;
 
-            const startRes = await fetch("/start_inference", { method: "POST" });
+            const startRes = await fetch("/start_inference", {
+                method: "POST",
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify({ rois })
+            });
             const startData = await startRes.json();
             if (startData.status === "started" || startData.status === "already_running") {
                 openSocket();
@@ -99,14 +100,6 @@
             const res = await fetch("/inference_status");
             const data = await res.json();
             if (data.running && name) {
-                const cfg = await fetch(`/source_config?name=${encodeURIComponent(name)}`).then(r => r.json());
-                let roiPath = cfg.rois;
-                if (!roiPath.startsWith('/')) {
-                    roiPath = `sources/${cfg.name}/${roiPath}`;
-                }
-                const roiRes = await fetch(`/load_roi_file?path=${encodeURIComponent(roiPath)}`);
-                const roiData = await roiRes.json();
-                rois = roiData.rois;
                 openSocket();
                 setRunningUI();
             } else {
@@ -130,27 +123,7 @@
             await checkStatus();
         });
 
-        // รอให้ภาพกล้องแสดงก่อน แล้ววาดกรอบ ROI ซ้อนบน canvas
-        video.onload = () => {
-            canvas.width = video.width;
-            canvas.height = video.height;
-            drawRois();
-        };
-
-        function drawRois() {
-            requestAnimationFrame(drawRois);  // เรียกวนต่อเนื่อง
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-            ctx.strokeStyle = 'lime';
-            ctx.lineWidth = 2;
-            ctx.font = "14px Arial";
-            ctx.fillStyle = 'yellow';
-            rois.forEach((r, i) => {
-                ctx.beginPath();
-                ctx.rect(r.x, r.y, r.width, r.height);
-                ctx.stroke();
-                ctx.fillText("ROI " + (i + 1), r.x + 5, r.y + 15);
-            });
-        }
+        // ไม่มีการวาด ROI ในฝั่งเบราว์เซอร์อีกต่อไป
     </script>
 </body>
 </html>
