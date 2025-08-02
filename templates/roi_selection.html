@@ -58,6 +58,7 @@
             socket.onmessage = function(event) {
                 video.src = 'data:image/jpeg;base64,' + event.data;
             };
+            await loadRois(name);
         }
 
         canvas.onmousedown = (e) => {
@@ -108,6 +109,13 @@
             });
         }
 
+        async function loadRois(name) {
+            const res = await fetch('/load_roi/' + encodeURIComponent(name));
+            const data = await res.json();
+            rois = data.rois;
+            drawAllRois();
+        }
+
         function saveAllRois() {
             if (rois.length === 0) {
                 alert("No ROI selected.");
@@ -124,8 +132,7 @@
             .then(res => res.json())
             .then(data => {
                 alert("Saved to: " + data.filename);
-                rois = [];
-                drawAllRois();
+                loadRois(name);
             });
         }
     
