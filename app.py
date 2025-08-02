@@ -145,12 +145,37 @@ async def inference_status():
     running = inference_task is not None and not inference_task.done()
     return jsonify({"running": running})
 
+
+@app.route("/sources")
+async def list_sources():
+    try:
+        names = [d for d in os.listdir("sources") if os.path.isdir(os.path.join("sources", d))]
+    except FileNotFoundError:
+        names = []
+    return jsonify({"sources": names})
+
+
+@app.route("/source_config")
+async def source_config():
+    name = request.args.get("name", "")
+    path = os.path.join("sources", name, "config.json")
+    if not os.path.exists(path):
+        return jsonify({"status": "error", "message": "not found"}), 404
+    with open(path, "r") as f:
+        cfg = json.load(f)
+    return jsonify(cfg)
+
 # ✅ บันทึก ROI
 @app.route("/save_roi", methods=["POST"])
 async def save_roi():
     data = await request.get_json()
     rois = data.get("rois", [])
-    filename = f"rois_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+    name = data.get("source", "")
+    if not name:
+        return jsonify({"status": "error", "message": "missing source"}), 400
+    directory = os.path.join("sources", name)
+    os.makedirs(directory, exist_ok=True)
+    filename = os.path.join(directory, f"rois_{datetime.now().strftime('%Y%m%d')}.json")
     with open(filename, "w") as f:
         json.dump(rois, f, indent=2)
     return jsonify({"status": "saved", "filename": filename})
