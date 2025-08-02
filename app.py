@@ -10,6 +10,7 @@ frame_queue: asyncio.Queue[str] = asyncio.Queue(maxsize=1)
 inference_task: asyncio.Task | None = None
 roi_frame_queue: asyncio.Queue[str] = asyncio.Queue(maxsize=1)
 roi_task: asyncio.Task | None = None
+inference_rois: list[dict] = []
 
 app = Quart(__name__)
 # กำหนดเพดานขนาดไฟล์ที่เซิร์ฟเวอร์ยอมรับ (100 MB)
@@ -46,7 +47,19 @@ async def run_inference_loop():
         if not success:
             await asyncio.sleep(0.1)
             continue
-        # TODO: ทำ inference และบันทึกผลลัพธ์
+        for i, r in enumerate(inference_rois):
+            x, y, w, h = int(r["x"]), int(r["y"]), int(r["width"]), int(r["height"])
+            cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
+            cv2.putText(
+                frame,
+                f"ROI {i + 1}",
+                (x, max(0, y - 5)),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.5,
+                (0, 255, 0),
+                1,
+                cv2.LINE_AA,
+            )
         _, buffer = cv2.imencode('.jpg', frame)
         frame_b64 = base64.b64encode(buffer).decode("utf-8")
         if frame_queue.full():
@@ -161,9 +174,11 @@ async def create_source():
 # ✅ เริ่มงาน inference
 @app.route('/start_inference', methods=["POST"])
 async def start_inference():
-    global inference_task, camera, roi_task
+    global inference_task, camera, roi_task, inference_rois
     if roi_task is not None and not roi_task.done():
         return jsonify({"status": "roi_running"}), 400
+    data = await request.get_json() or {}
+    inference_rois = data.get("rois", [])
     if inference_task is None or inference_task.done():
         camera = cv2.VideoCapture(camera_source)
         if not camera.isOpened():
