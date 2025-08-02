@@ -98,6 +98,12 @@ async def stop_inference():
         return jsonify({"status": "stopped"})
     return jsonify({"status": "no_task"})
 
+# ✅ สถานะงาน inference
+@app.route('/inference_status')
+async def inference_status():
+    running = inference_task is not None and not inference_task.done()
+    return jsonify({"running": running})
+
 # ✅ บันทึก ROI
 @app.route("/save_roi", methods=["POST"])
 async def save_roi():
