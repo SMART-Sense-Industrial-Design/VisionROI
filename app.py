@@ -152,7 +152,7 @@ async def list_sources():
         names = [d for d in os.listdir("sources") if os.path.isdir(os.path.join("sources", d))]
     except FileNotFoundError:
         names = []
-    return jsonify({"sources": names})
+    return jsonify(names)
 
 
 @app.route("/source_config")

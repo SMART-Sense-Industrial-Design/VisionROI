@@ -31,7 +31,7 @@
             const res = await fetch("/sources");
             const data = await res.json();
             const select = document.getElementById("sourceSelect");
-            data.sources.forEach(name => {
+            data.forEach(name => {
                 const opt = document.createElement("option");
                 opt.value = name;
                 opt.textContent = name;
