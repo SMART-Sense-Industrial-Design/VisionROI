@@ -12,6 +12,7 @@
     <button onclick="startStream()">Start</button>
     <button onclick="stopStream()">Stop</button>
     <button onclick="saveAllRois()">Save All</button>
+    <button onclick="clearAllRois()">Clear All</button>
     <br><br>
     <div style="position: relative; display: inline-block;">
         <img id="video" />
@@ -182,6 +183,28 @@
             });
         }
     
+        function clearAllRois() {
+            if (rois.length === 0) {
+                alert("No ROI to clear.");
+                return;
+            }
+            if (!confirm("Clear all ROIs?")) return;
+
+            rois = [];
+            drawAllRois();
+
+            fetch(`/save_roi`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ rois: rois, source: currentSource })
+            })
+            .then(res => res.json())
+            .then(data => {
+                alert("Cleared. Saved to: " + data.filename);
+                loadRois();
+            });
+        }
+
     </script>
 </body>
 </html>
