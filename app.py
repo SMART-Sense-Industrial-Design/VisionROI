@@ -20,7 +20,7 @@ app = Quart(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 100 * 1024 * 1024
 camera: cv2.VideoCapture | None = None
 camera_source: int | str = 0
-ALLOWED_ROI_DIR = os.path.realpath("sources")
+ALLOWED_ROI_DIR = os.path.realpath("data_sources")
 
 # ✅ Redirect root ไปหน้า home
 @app.route("/")
@@ -44,7 +44,7 @@ async def inference():
 
 
 def load_custom_module(name: str) -> ModuleType | None:
-    path = os.path.join("sources", name, "custom.py")
+    path = os.path.join("data_sources", name, "custom.py")
     if not os.path.exists(path):
         return None
     module_name = f"custom_{name}"
@@ -177,9 +177,9 @@ async def create_source():
     if not name or not source:
         return jsonify({"status": "error", "message": "missing data"}), 400
 
-    source_dir = f"sources/{name}"
+    source_dir = f"data_sources/{name}"
     try:
-        os.makedirs(f"sources/{name}", exist_ok=False)
+        os.makedirs(f"data_sources/{name}", exist_ok=False)
     except FileExistsError:
         return jsonify({"status": "error", "message": "name exists"}), 400
 
@@ -301,10 +301,10 @@ async def inference_status():
     return jsonify({"running": running})
 
 
-@app.route("/sources")
+@app.route("/data_sources")
 async def list_sources():
     try:
-        names = [d for d in os.listdir("sources") if os.path.isdir(os.path.join("sources", d))]
+        names = [d for d in os.listdir("data_sources") if os.path.isdir(os.path.join("data_sources", d))]
     except FileNotFoundError:
         names = []
     return jsonify(names)
@@ -314,8 +314,8 @@ async def list_sources():
 async def source_list():
     result = []
     try:
-        for d in os.listdir("sources"):
-            path = os.path.join("sources", d)
+        for d in os.listdir("data_sources"):
+            path = os.path.join("data_sources", d)
             if not os.path.isdir(path):
                 continue
             cfg_path = os.path.join(path, "config.json")
@@ -339,7 +339,7 @@ async def source_list():
 @app.route("/source_config")
 async def source_config():
     name = request.args.get("name", "")
-    path = os.path.join("sources", name, "config.json")
+    path = os.path.join("data_sources", name, "config.json")
     if not os.path.exists(path):
         return jsonify({"status": "error", "message": "not found"}), 404
     with open(path, "r") as f:
@@ -349,7 +349,7 @@ async def source_config():
 
 @app.route("/delete_source/<name>", methods=["DELETE"])
 async def delete_source(name: str):
-    directory = os.path.join("sources", name)
+    directory = os.path.join("data_sources", name)
     if not os.path.exists(directory):
         return jsonify({"status": "error", "message": "not found"}), 404
     shutil.rmtree(directory)
@@ -412,7 +412,7 @@ async def save_roi():
 # ✅ โหลด ROI จากไฟล์ล่าสุดของ source
 @app.route("/load_roi/<name>")
 async def load_roi(name: str):
-    directory = os.path.join("sources", name)
+    directory = os.path.join("data_sources", name)
     config_path = os.path.join(directory, "config.json")
     if not os.path.exists(config_path):
         return jsonify({"rois": [], "filename": "None"})

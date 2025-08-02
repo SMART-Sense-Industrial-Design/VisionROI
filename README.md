@@ -25,7 +25,7 @@ pip install -e .
 
 ## หน้าต่างต่าง ๆ
 ### Create Source (`/create_source`)
-สร้าง source ใหม่และอัปโหลดโมเดล/label เพื่อเตรียมไฟล์ใน `sources/<name>`
+สร้าง source ใหม่และอัปโหลดโมเดล/label เพื่อเตรียมไฟล์ใน `data_sources/<name>`
 
 ### ROI Selection (`/roi`)
 เลือกและบันทึกตำแหน่ง ROI ตาม source ที่เลือก
@@ -63,7 +63,7 @@ pip install -e .
 
 - **GET `/load_roi_file`** – โหลด ROI จากพาธที่ระบุในพารามิเตอร์ `path`
   ```bash
-  GET /load_roi_file?path=sources/cam1/rois.json
+  GET /load_roi_file?path=data_sources/cam1/rois.json
   ```
 
 - **GET `/ws_snapshot`** – คืนรูป JPEG หนึ่งเฟรมจากกล้อง
@@ -77,9 +77,9 @@ pip install -e .
   {"running": true}
   ```
 
-## โครงสร้าง `sources/`
+## โครงสร้าง `data_sources/`
 ```
-sources/
+data_sources/
 └── <name>/
     ├─ model.onnx
     ├─ classes.txt
@@ -91,5 +91,5 @@ sources/
 ไฟล์ `custom.py` ต้องมีฟังก์ชัน `process(frame)` เพื่อประมวลผลเฟรมหรือ ROI ตามต้องการ
 
 ## ข้อมูลเพิ่มเติม
-- สร้าง `custom.py` ตามตัวอย่างข้างต้นภายใน `sources/<name>/`
+- สร้าง `custom.py` ตามตัวอย่างข้างต้นภายใน `data_sources/<name>/`
 - `config.json` เก็บข้อมูล source, โมเดล และไฟล์ ROI

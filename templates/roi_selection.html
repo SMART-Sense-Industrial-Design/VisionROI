@@ -44,7 +44,7 @@
         };
 
         async function loadSources() {
-            const res = await fetch("/sources");
+            const res = await fetch("/data_sources");
             const data = await res.json();
             const select = document.getElementById("sourceSelect");
             data.forEach(name => {
