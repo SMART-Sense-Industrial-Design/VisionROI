@@ -6,7 +6,6 @@ import json
 import shutil
 import importlib.util
 import os, sys
-sys.path.insert(0, os.path.abspath("src"))
 from types import ModuleType
 
 frame_queue: asyncio.Queue[str] = asyncio.Queue(maxsize=1)
