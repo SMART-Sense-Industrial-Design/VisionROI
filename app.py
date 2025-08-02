@@ -6,9 +6,11 @@ import json
 from datetime import datetime
 import os
 
+frame_queue: asyncio.Queue[str] = asyncio.Queue(maxsize=1)
+inference_task: asyncio.Task | None = None
+
 app = Quart(__name__)
 camera = cv2.VideoCapture(0)
-streaming = False  # ควบคุมการเริ่ม/หยุด stream
 
 # ✅ Redirect root ไปหน้า home
 @app.route("/")
@@ -30,19 +32,30 @@ async def roi_page():
 async def inference():
     return await render_template("inference.html")
 
+async def run_inference_loop():
+    while True:
+        success, frame = camera.read()
+        if not success:
+            await asyncio.sleep(0.1)
+            continue
+        # TODO: perform inference and save results
+        _, buffer = cv2.imencode('.jpg', frame)
+        frame_b64 = base64.b64encode(buffer).decode("utf-8")
+        if frame_queue.full():
+            try:
+                frame_queue.get_nowait()
+            except asyncio.QueueEmpty:
+                pass
+        await frame_queue.put(frame_b64)
+        await asyncio.sleep(0.05)
+
+
 # ✅ WebSocket video stream
 @app.websocket('/ws')
 async def ws():
-    global streaming
-    streaming = True
-    while streaming:
-        success, frame = camera.read()
-        if not success:
-            continue
-        _, buffer = cv2.imencode('.jpg', frame)
-        frame_b64 = base64.b64encode(buffer).decode('utf-8')
+    while True:
+        frame_b64 = await frame_queue.get()
         await websocket.send(frame_b64)
-        await asyncio.sleep(0.05)
 
 @app.route("/set_camera", methods=["POST"])
 async def set_camera():
@@ -60,12 +73,30 @@ async def set_camera():
         return jsonify({"status": "error"}), 400
     return jsonify({"status": "ok"})
 
-# ✅ หยุด stream
-@app.route('/stop_stream', methods=["POST"])
-async def stop_stream():
-    global streaming
-    streaming = False
-    return jsonify({"status": "stopped"})
+
+# ✅ เริ่มงาน inference
+@app.route('/start_inference', methods=["POST"])
+async def start_inference():
+    global inference_task
+    if inference_task is None or inference_task.done():
+        inference_task = asyncio.create_task(run_inference_loop())
+        return jsonify({"status": "started"})
+    return jsonify({"status": "already_running"})
+
+
+# ✅ หยุดงาน inference
+@app.route('/stop_inference', methods=["POST"])
+async def stop_inference():
+    global inference_task
+    if inference_task is not None and not inference_task.done():
+        inference_task.cancel()
+        try:
+            await inference_task
+        except asyncio.CancelledError:
+            pass
+        inference_task = None
+        return jsonify({"status": "stopped"})
+    return jsonify({"status": "no_task"})
 
 # ✅ บันทึก ROI
 @app.route("/save_roi", methods=["POST"])
