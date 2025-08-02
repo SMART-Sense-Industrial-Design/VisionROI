@@ -10,6 +10,7 @@
 <body>
     <select id="sourceSelect"></select>
     <button onclick="startStream()">Start</button>
+    <button onclick="stopStream()">Stop</button>
     <button onclick="saveAllRois()">Save All</button>
     <br><br>
     <div style="position: relative; display: inline-block;">
@@ -55,12 +56,20 @@
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ source: cfg.source })
             });
-            await fetch("/start_inference", { method: "POST" });
-            socket = new WebSocket("ws://" + location.host + "/ws");
+            await fetch("/start_roi_stream", { method: "POST" });
+            socket = new WebSocket("ws://" + location.host + "/ws_roi");
             socket.onmessage = function(event) {
                 video.src = 'data:image/jpeg;base64,' + event.data;
             };
             await loadRois();
+        }
+
+        async function stopStream() {
+            if (socket) {
+                socket.close();
+                socket = null;
+            }
+            await fetch("/stop_roi_stream", { method: "POST" });
         }
 
         canvas.onmousedown = (e) => {
