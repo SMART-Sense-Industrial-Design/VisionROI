@@ -208,3 +208,6 @@ __marimo__/
 
 # Ignore local sources
 sources/
+
+# ROI files
+rois_*.json
