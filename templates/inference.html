@@ -95,7 +95,8 @@
             startButton.innerText = "Start";
         }
 
-        window.onload = checkStatus;
+        // ตรวจสอบสถานะ inference เมื่อหน้าเพจโหลด
+        window.addEventListener('load', checkStatus);
 
         // รอให้ภาพกล้องแสดงก่อน แล้ววาดกรอบ ROI ซ้อนบน canvas
         video.onload = () => {
