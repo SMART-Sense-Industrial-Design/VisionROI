@@ -264,6 +264,32 @@ async def list_sources():
     return jsonify(names)
 
 
+@app.route("/source_list", methods=["GET"])
+async def source_list():
+    result = []
+    try:
+        for d in os.listdir("sources"):
+            path = os.path.join("sources", d)
+            if not os.path.isdir(path):
+                continue
+            cfg_path = os.path.join(path, "config.json")
+            if not os.path.exists(cfg_path):
+                continue
+            with open(cfg_path, "r") as f:
+                cfg = json.load(f)
+            result.append(
+                {
+                    "name": cfg.get("name", d),
+                    "source": cfg.get("source", ""),
+                    "model": cfg.get("model", ""),
+                    "label": cfg.get("label", ""),
+                }
+            )
+    except FileNotFoundError:
+        pass
+    return jsonify(result)
+
+
 @app.route("/source_config")
 async def source_config():
     name = request.args.get("name", "")
