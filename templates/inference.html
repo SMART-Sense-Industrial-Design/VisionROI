@@ -5,7 +5,7 @@
 </head>
 <body>
     <h2>Inference with Saved ROI</h2>
-    <input id="cameraSource" placeholder="Camera source">
+    <select id="sourceSelect"></select>
     <button id="startButton">Start</button>
     <button id="stopButton" disabled>Stop</button>
     <p id="status"></p>
@@ -27,12 +27,31 @@
         startButton.onclick = startInference;
         stopButton.onclick = stopInference;
 
+        async function loadSources() {
+            const res = await fetch("/sources");
+            const data = await res.json();
+            const select = document.getElementById("sourceSelect");
+            data.forEach(name => {
+                const opt = document.createElement("option");
+                opt.value = name;
+                opt.textContent = name;
+                select.appendChild(opt);
+            });
+        }
+
+        loadSources();
+
         async function startInference() {
-            const source = document.getElementById("cameraSource").value;
+            const name = document.getElementById("sourceSelect").value;
+            if (!name) {
+                statusEl.innerText = "Select source first";
+                return;
+            }
+            const cfg = await fetch(`/source_config?name=${encodeURIComponent(name)}`).then(r => r.json());
             const camRes = await fetch("/set_camera", {
                 method: "POST",
                 headers: {"Content-Type": "application/json"},
-                body: JSON.stringify({source})
+                body: JSON.stringify({ source: cfg.source })
             });
             if (!camRes.ok) {
                 statusEl.innerText = "Camera error";
