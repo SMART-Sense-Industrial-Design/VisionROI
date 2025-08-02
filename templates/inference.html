@@ -46,6 +46,12 @@
                 return;
             }
             const cfg = await fetch(`/source_config?name=${encodeURIComponent(name)}`).then(r => r.json());
+
+            let roiPath = cfg.rois;
+            if (!roiPath.startsWith('/')) {
+                roiPath = `sources/${cfg.name}/${roiPath}`;
+            }
+
             const camRes = await fetch("/set_camera", {
                 method: "POST",
                 headers: {"Content-Type": "application/json"},
@@ -56,7 +62,7 @@
                 return;
             }
 
-            const res = await fetch(`/load_roi/${encodeURIComponent(name)}`);
+            const res = await fetch(`/load_roi_file?path=${encodeURIComponent(roiPath)}`);
             const data = await res.json();
             statusEl.innerText = "Loaded: " + data.filename;
             rois = data.rois;
@@ -93,7 +99,12 @@
             const res = await fetch("/inference_status");
             const data = await res.json();
             if (data.running && name) {
-                const roiRes = await fetch(`/load_roi/${encodeURIComponent(name)}`);
+                const cfg = await fetch(`/source_config?name=${encodeURIComponent(name)}`).then(r => r.json());
+                let roiPath = cfg.rois;
+                if (!roiPath.startsWith('/')) {
+                    roiPath = `sources/${cfg.name}/${roiPath}`;
+                }
+                const roiRes = await fetch(`/load_roi_file?path=${encodeURIComponent(roiPath)}`);
                 const roiData = await roiRes.json();
                 rois = roiData.rois;
                 openSocket();
