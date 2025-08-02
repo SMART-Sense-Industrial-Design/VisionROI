@@ -7,12 +7,10 @@
 - Quart
 - opencv-python
 
-ติดตั้ง dependencies:
+ติดตั้ง dependencies และแพ็กเกจแบบ editable:
 
 ```bash
-pip install -r requirements.txt
-# หรือ
-pip install Quart opencv-python
+pip install -e .
 ```
 
 ## การรันโปรเจ็กต์
