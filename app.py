@@ -71,7 +71,7 @@ async def run_inference_loop():
             roi = frame[y:y + h, x:x + w]
             if custom_module and hasattr(custom_module, "process"):
                 try:
-                    await asyncio.to_thread(custom_module.process, roi)
+                    await asyncio.to_thread(custom_module.process, frame, roi)
                 except Exception:
                     pass
             cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
@@ -195,9 +195,10 @@ async def create_source():
         custom_path = os.path.join(source_dir, "custom.py")
         with open(custom_path, "w") as f:
             f.write(
-                "def process(img):\n"
-                "    # รับภาพ ROI และเขียนโค้ดประมวลผลตามต้องการ\n"
-                "    return img\n"
+                "def process(frame, roi):\n"
+                "    \"\"\"รับเฟรมเต็มและภาพ ROI ที่ตัดแล้ว\"\"\"\n"
+                "    # เขียนโค้ดประมวลผลตามต้องการ เช่น OCR\n"
+                "    return roi\n"
             )
         with open(os.path.join(source_dir, "config.json"), "w") as f:
             json.dump(config, f)
