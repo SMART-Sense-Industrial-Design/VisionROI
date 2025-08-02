@@ -3,10 +3,10 @@ import asyncio
 import cv2
 import base64
 import json
-import os
 import shutil
 import importlib.util
-import sys
+import os, sys
+sys.path.insert(0, os.path.abspath("src"))
 from types import ModuleType
 
 frame_queue: asyncio.Queue[str] = asyncio.Queue(maxsize=1)
