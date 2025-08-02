@@ -5,12 +5,16 @@ import base64
 import json
 import os
 import shutil
+import importlib.util
+import sys
+from types import ModuleType
 
 frame_queue: asyncio.Queue[str] = asyncio.Queue(maxsize=1)
 inference_task: asyncio.Task | None = None
 roi_frame_queue: asyncio.Queue[str] = asyncio.Queue(maxsize=1)
 roi_task: asyncio.Task | None = None
 inference_rois: list[dict] = []
+active_source: str = ""
 
 app = Quart(__name__)
 # กำหนดเพดานขนาดไฟล์ที่เซิร์ฟเวอร์ยอมรับ (100 MB)
@@ -38,7 +42,22 @@ async def roi_page():
 async def inference():
     return await render_template("inference.html")
 
+
+def load_custom_module(name: str) -> ModuleType | None:
+    path = os.path.join("sources", name, "custom.py")
+    if not os.path.exists(path):
+        return None
+    module_name = f"custom_{name}"
+    spec = importlib.util.spec_from_file_location(module_name, path)
+    if not spec or not spec.loader:
+        return None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module
+
 async def run_inference_loop():
+    custom_module = load_custom_module(active_source)
     while True:
         if camera is None:
             await asyncio.sleep(0.1)
@@ -49,6 +68,12 @@ async def run_inference_loop():
             continue
         for i, r in enumerate(inference_rois):
             x, y, w, h = int(r["x"]), int(r["y"]), int(r["width"]), int(r["height"])
+            roi = frame[y:y + h, x:x + w]
+            if custom_module and hasattr(custom_module, "process"):
+                try:
+                    await asyncio.to_thread(custom_module.process, roi)
+                except Exception:
+                    pass
             cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
             cv2.putText(
                 frame,
@@ -108,8 +133,9 @@ async def ws_roi():
 
 @app.route("/set_camera", methods=["POST"])
 async def set_camera():
-    global camera, camera_source, inference_task, roi_task
+    global camera, camera_source, inference_task, roi_task, active_source
     data = await request.get_json()
+    active_source = data.get("name", "")
     source_val = data.get("source", "")
     if camera and camera.isOpened():
         camera.release()
@@ -166,6 +192,13 @@ async def create_source():
         rois_path = os.path.join(source_dir, "rois.json")
         with open(rois_path, "w") as f:
             f.write("[]")
+        custom_path = os.path.join(source_dir, "custom.py")
+        with open(custom_path, "w") as f:
+            f.write(
+                "def process(img):\n"
+                "    # รับภาพ ROI และเขียนโค้ดประมวลผลตามต้องการ\n"
+                "    return img\n"
+            )
         with open(os.path.join(source_dir, "config.json"), "w") as f:
             json.dump(config, f)
     except Exception:

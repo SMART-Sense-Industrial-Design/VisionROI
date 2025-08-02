@@ -10,7 +10,8 @@ sources/
     ├── model.onnx
     ├── classes.txt
     ├── config.json
-    └── rois.json
+    ├── rois.json
+    └── custom.py
 ```
 
 เมื่อใช้หน้า **Create Source** (ที่ `/create_source`) ระบบจะรับชื่อและค่า source พร้อมไฟล์ model และ label (ถ้ามี) แล้วจะสร้างโฟลเดอร์ใหม่ใน `sources/<name>` พร้อมบันทึกไฟล์และไฟล์ `config.json` ที่เก็บข้อมูล:
@@ -26,6 +27,7 @@ sources/
 ```
 
 หน้า **ROI** จะอ่านและบันทึก ROI จากไฟล์ `rois.json` ในโฟลเดอร์ของ source นั้น ๆ
+และจะมีไฟล์ `custom.py` สำหรับเขียนฟังก์ชัน `process(img)` เพื่อประมวลผลภาพ ROI เพิ่มเติมได้ตามต้องการ
 
 ## วิธีใช้งานหน้า Create Source
 
