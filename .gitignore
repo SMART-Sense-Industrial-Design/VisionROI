@@ -213,3 +213,7 @@ sources/*
 
 # ROI files
 rois_*.json
+
+# macOS metadata
+.DS_Store
+*/.DS_Store
