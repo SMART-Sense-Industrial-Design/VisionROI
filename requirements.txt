@@ -1,0 +1,2 @@
+Quart
+opencv-python

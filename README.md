@@ -2,37 +2,46 @@
 
 โปรเจ็กต์นี้เป็นแอป Quart สำหรับทดสอบ OCR และการจัดการ ROI
 
-## โครงสร้าง `sources/`
+## ข้อกำหนดระบบ
+- Python ≥3.10
+- Quart
+- opencv-python
 
+ติดตั้ง dependencies:
+
+```bash
+pip install -r requirements.txt
+# หรือ
+pip install Quart opencv-python
+```
+
+## การรันโปรเจ็กต์
+1. รัน `python app.py`
+2. เปิดเบราว์เซอร์ไปที่ `http://localhost:5000/home`
+
+## หน้าต่างต่าง ๆ
+### Create Source (`/create_source`)
+สร้าง source ใหม่และอัปโหลดโมเดล/label เพื่อเตรียมไฟล์ใน `sources/<name>`
+
+### ROI Selection (`/roi`)
+เลือกและบันทึกตำแหน่ง ROI ตาม source ที่เลือก
+
+### Inference (`/inference`)
+แสดงผลวิดีโอพร้อม ROI และเรียกฟังก์ชัน `custom.py` ถ้ามี
+
+## โครงสร้าง `sources/`
 ```
 sources/
 └── <name>/
-    ├── model.onnx
-    ├── classes.txt
-    ├── config.json
-    ├── rois.json
-    └── custom.py
+    ├─ model.onnx
+    ├─ classes.txt
+    ├─ config.json
+    ├─ rois.json
+    └─ custom.py
 ```
 
-เมื่อใช้หน้า **Create Source** (ที่ `/create_source`) ระบบจะรับชื่อและค่า source พร้อมไฟล์ model และ label (ถ้ามี) แล้วจะสร้างโฟลเดอร์ใหม่ใน `sources/<name>` พร้อมบันทึกไฟล์และไฟล์ `config.json` ที่เก็บข้อมูล:
+ไฟล์ `custom.py` ต้องมีฟังก์ชัน `process(frame, roi)` เพื่อประมวลผลเฟรมหรือ ROI ตามต้องการ
 
-```
-{
-  "name": "...",
-  "source": "...",
-  "model": "model.onnx",  // หรือ "" ถ้าไม่ได้อัปโหลด
-  "label": "classes.txt", // หรือ "" ถ้าไม่ได้อัปโหลด
-  "rois": "rois.json"
-}
-```
-
-หน้า **ROI** จะอ่านและบันทึก ROI จากไฟล์ `rois.json` ในโฟลเดอร์ของ source นั้น ๆ
-และจะมีไฟล์ `custom.py` สำหรับเขียนฟังก์ชัน `process(frame, roi)` เพื่อประมวลผลเฟรมเต็มและภาพ ROI ได้ตามต้องการ
-
-## วิธีใช้งานหน้า Create Source
-
-1. เปิด `/create_source` ในเบราว์เซอร์
-2. กรอก `Name` และ `Source`
-3. (ไม่บังคับ) เลือกไฟล์โมเดล (`model.onnx`) และไฟล์ label (`classes.txt`)
-4. กด **Create** ระบบจะสร้างโฟลเดอร์ใหม่ใน `sources/` พร้อมไฟล์ที่อัปโหลด
-
+## ข้อมูลเพิ่มเติม
+- สร้าง `custom.py` ตามตัวอย่างข้างต้นภายใน `sources/<name>/`
+- `config.json` เก็บข้อมูล source, โมเดล และไฟล์ ROI
