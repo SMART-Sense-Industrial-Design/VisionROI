@@ -66,25 +66,32 @@ async def run_inference_loop():
         if not success:
             await asyncio.sleep(0.1)
             continue
-        for i, r in enumerate(inference_rois):
-            x, y, w, h = int(r["x"]), int(r["y"]), int(r["width"]), int(r["height"])
-            roi = frame[y:y + h, x:x + w]
+        if not inference_rois:
             if custom_module and hasattr(custom_module, "process"):
                 try:
-                    await asyncio.to_thread(custom_module.process, roi)
+                    await asyncio.to_thread(custom_module.process, frame)
                 except Exception:
                     pass
-            cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
-            cv2.putText(
-                frame,
-                f"ROI {i + 1}",
-                (x, max(0, y - 5)),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.5,
-                (0, 255, 0),
-                1,
-                cv2.LINE_AA,
-            )
+        else:
+            for i, r in enumerate(inference_rois):
+                x, y, w, h = int(r["x"]), int(r["y"]), int(r["width"]), int(r["height"])
+                roi = frame[y:y + h, x:x + w]
+                if custom_module and hasattr(custom_module, "process"):
+                    try:
+                        await asyncio.to_thread(custom_module.process, roi)
+                    except Exception:
+                        pass
+                cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
+                cv2.putText(
+                    frame,
+                    f"ROI {i + 1}",
+                    (x, max(0, y - 5)),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.5,
+                    (0, 255, 0),
+                    1,
+                    cv2.LINE_AA,
+                )
         _, buffer = cv2.imencode('.jpg', frame)
         frame_b64 = base64.b64encode(buffer).decode("utf-8")
         if frame_queue.full():
