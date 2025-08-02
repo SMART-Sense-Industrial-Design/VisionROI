@@ -3,7 +3,6 @@ import asyncio
 import cv2
 import base64
 import json
-from datetime import datetime
 import os
 import shutil
 
@@ -196,28 +195,33 @@ async def save_roi():
     if not name:
         return jsonify({"status": "error", "message": "missing source"}), 400
     directory = os.path.join("sources", name)
-    os.makedirs(directory, exist_ok=True)
-    filename = os.path.join(directory, f"rois_{datetime.now().strftime('%Y%m%d')}.json")
-    with open(filename, "w") as f:
+    config_path = os.path.join(directory, "config.json")
+    if not os.path.exists(config_path):
+        return jsonify({"status": "error", "message": "config not found"}), 404
+    with open(config_path, "r") as f:
+        cfg = json.load(f)
+    roi_file = cfg.get("rois", "rois.json")
+    roi_path = os.path.join(directory, roi_file)
+    with open(roi_path, "w") as f:
         json.dump(rois, f, indent=2)
-    return jsonify({"status": "saved", "filename": filename})
+    return jsonify({"status": "saved", "filename": roi_path})
 
 # ✅ โหลด ROI จากไฟล์ล่าสุดของ source
 @app.route("/load_roi/<name>")
 async def load_roi(name: str):
     directory = os.path.join("sources", name)
-    if not os.path.isdir(directory):
+    config_path = os.path.join(directory, "config.json")
+    if not os.path.exists(config_path):
         return jsonify({"rois": [], "filename": "None"})
-    roi_files = [
-        f for f in os.listdir(directory)
-        if f.startswith("rois_") and f.endswith(".json")
-    ]
-    if not roi_files:
-        return jsonify({"rois": [], "filename": "None"})
-    latest_file = sorted(roi_files)[-1]
-    with open(os.path.join(directory, latest_file), "r") as f:
+    with open(config_path, "r") as f:
+        cfg = json.load(f)
+    roi_file = cfg.get("rois", "rois.json")
+    roi_path = os.path.join(directory, roi_file)
+    if not os.path.exists(roi_path):
+        return jsonify({"rois": [], "filename": roi_file})
+    with open(roi_path, "r") as f:
         rois = json.load(f)
-    return jsonify({"rois": rois, "filename": latest_file})
+    return jsonify({"rois": rois, "filename": roi_file})
 
 # ✅ ส่ง snapshot 1 เฟรม (ใช้ในหน้า inference)
 @app.route("/ws_snapshot")
