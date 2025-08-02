@@ -274,6 +274,30 @@ async def source_config():
         cfg = json.load(f)
     return jsonify(cfg)
 
+
+@app.route("/delete_source/<name>", methods=["DELETE"])
+async def delete_source(name: str):
+    directory = os.path.join("sources", name)
+    if not os.path.exists(directory):
+        return jsonify({"status": "error", "message": "not found"}), 404
+    shutil.rmtree(directory)
+    json_path = "sources.json"
+    if os.path.exists(json_path):
+        try:
+            with open(json_path, "r") as f:
+                data = json.load(f)
+            if isinstance(data, list):
+                data = [s for s in data if s != name]
+            elif isinstance(data, dict):
+                data.pop(name, None)
+                if "sources" in data and isinstance(data["sources"], list):
+                    data["sources"] = [s for s in data["sources"] if s != name]
+            with open(json_path, "w") as f:
+                json.dump(data, f, indent=2)
+        except Exception:
+            pass
+    return jsonify({"status": "deleted"})
+
 """ROI save and load helpers"""
 
 # ✅ บันทึก ROI
