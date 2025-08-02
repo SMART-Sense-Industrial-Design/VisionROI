@@ -4,10 +4,16 @@
 
 ## ข้อกำหนดระบบ
 - Python ≥3.10
-- Quart
-- opencv-python
+- dependencies ถูกกำหนดใน `pyproject.toml`
 
-ติดตั้ง dependencies และแพ็กเกจแบบ editable:
+## การติดตั้ง
+ติดตั้งแพ็กเกจและ dependencies ด้วย `pip` โดยไม่จำเป็นต้องใช้ `requirements.txt`:
+
+```bash
+pip install .
+```
+
+หรือหากต้องการติดตั้งแบบ editable:
 
 ```bash
 pip install -e .
