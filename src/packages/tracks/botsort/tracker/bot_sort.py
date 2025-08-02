@@ -3,10 +3,10 @@ import matplotlib.pyplot as plt
 import numpy as np
 from collections import deque
 
-from packages.botsort.tracker import matching
-from packages.botsort.tracker.gmc import GMC
-from packages.botsort.tracker.basetrack import BaseTrack, TrackState
-from packages.botsort.tracker.kalman_filter import KalmanFilter
+from packages.tracks.botsort.tracker import matching
+from packages.tracks.botsort.tracker.gmc import GMC
+from packages.tracks.botsort.tracker.basetrack import BaseTrack, TrackState
+from packages.tracks.botsort.tracker.kalman_filter import KalmanFilter
 
 # from fast_reid.fast_reid_interfece import FastReIDInterface
 
