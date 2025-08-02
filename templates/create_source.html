@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Create Source</title>
+</head>
+<body>
+    <h2>Create Source</h2>
+    <form method="POST" action="/create_source" enctype="multipart/form-data">
+        <div>
+            <label for="name">Name:</label>
+            <input type="text" id="name" name="name" required>
+        </div>
+        <div>
+            <label for="source">Source:</label>
+            <input type="text" id="source" name="source" required>
+        </div>
+        <div>
+            <label for="model">Model:</label>
+            <input type="file" id="model" name="model" required>
+        </div>
+        <div>
+            <label for="label">Label:</label>
+            <input type="file" id="label" name="label" required>
+        </div>
+        <button type="submit">Create</button>
+    </form>
+</body>
+</html>
