@@ -10,6 +10,7 @@
 <body>
     <select id="sourceSelect"></select>
     <button onclick="startStream()">Start</button>
+    <button onclick="stopStream()">Stop</button>
     <button onclick="saveAllRois()">Save All</button>
     <br><br>
     <div style="position: relative; display: inline-block;">
@@ -68,6 +69,17 @@
                 video.src = 'data:image/jpeg;base64,' + event.data;
             };
             await loadRois();
+        }
+
+        async function stopStream() {
+            await fetch("/stop_inference", { method: "POST" });
+            if (socket) {
+                socket.close();
+                socket = null;
+            }
+            video.src = "";
+            rois = [];
+            drawAllRois();
         }
 
         canvas.onmousedown = (e) => {
