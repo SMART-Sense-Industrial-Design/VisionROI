@@ -13,8 +13,8 @@
     <button onclick="saveAllRois()">Save All</button>
     <br><br>
     <div style="position: relative; display: inline-block;">
-        <img id="video" width="640" height="480" />
-        <canvas id="canvas" width="640" height="480"></canvas>
+        <img id="video" />
+        <canvas id="canvas"></canvas>
     </div>
 
     <script>
@@ -27,6 +27,13 @@
         const video = document.getElementById("video");
         const canvas = document.getElementById("canvas");
         const ctx = canvas.getContext("2d");
+
+        video.onload = () => {
+            canvas.width = video.naturalWidth;
+            canvas.height = video.naturalHeight;
+            canvas.style.width = video.naturalWidth + 'px';
+            canvas.style.height = video.naturalHeight + 'px';
+        };
 
         async function loadSources() {
             const res = await fetch("/sources");
@@ -66,16 +73,20 @@
         canvas.onmousedown = (e) => {
             drawing = true;
             const rect = canvas.getBoundingClientRect();
-            startX = e.clientX - rect.left;
-            startY = e.clientY - rect.top;
+            const scaleX = canvas.width / rect.width;
+            const scaleY = canvas.height / rect.height;
+            startX = (e.clientX - rect.left) * scaleX;
+            startY = (e.clientY - rect.top) * scaleY;
         };
 
         canvas.onmouseup = (e) => {
             if (!drawing) return;
             drawing = false;
             const rect = canvas.getBoundingClientRect();
-            const endX = e.clientX - rect.left;
-            const endY = e.clientY - rect.top;
+            const scaleX = canvas.width / rect.width;
+            const scaleY = canvas.height / rect.height;
+            const endX = (e.clientX - rect.left) * scaleX;
+            const endY = (e.clientY - rect.top) * scaleY;
             const roi = {
                 x: Math.min(startX, endX),
                 y: Math.min(startY, endY),
@@ -89,8 +100,10 @@
         canvas.onmousemove = (e) => {
             if (!drawing) return;
             const rect = canvas.getBoundingClientRect();
-            const currX = e.clientX - rect.left;
-            const currY = e.clientY - rect.top;
+            const scaleX = canvas.width / rect.width;
+            const scaleY = canvas.height / rect.height;
+            const currX = (e.clientX - rect.left) * scaleX;
+            const currY = (e.clientY - rect.top) * scaleY;
             ctx.clearRect(0, 0, canvas.width, canvas.height);
             drawAllRois();
             ctx.beginPath();
