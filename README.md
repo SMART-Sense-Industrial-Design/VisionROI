@@ -27,6 +27,50 @@ pip install -e .
 ### Inference (`/inference`)
 แสดงผลวิดีโอพร้อม ROI และเรียกฟังก์ชัน `custom.py` ถ้ามี
 
+## API/Endpoints
+
+- **POST `/set_camera`** – ตั้งค่ากล้องและเลือก source ที่จะใช้
+  ```json
+  {"name": "cam1", "source": "0"}
+  ```
+
+- **POST `/start_inference`** – เริ่มอ่านภาพและประมวลผล ROI ที่ส่งมา
+  ```json
+  {"rois": [{"x": 10, "y": 20, "width": 100, "height": 80}]}
+  ```
+
+- **POST `/stop_inference`** – หยุดงาน inference
+
+- **POST `/start_roi_stream`** – เริ่มส่งภาพสดสำหรับหน้าเลือก ROI
+
+- **POST `/stop_roi_stream`** – หยุดส่งภาพ ROI
+
+- **POST `/save_roi`** – บันทึก ROI ลงไฟล์ของ source หรือพาธที่กำหนด
+  ```json
+  {"source": "cam1", "rois": [{"x": 10, "y": 20, "width": 100, "height": 80}]}
+  ```
+
+- **GET `/load_roi/<name>`** – โหลด ROI ล่าสุดของ source นั้น
+  ```bash
+  GET /load_roi/cam1
+  ```
+
+- **GET `/load_roi_file`** – โหลด ROI จากพาธที่ระบุในพารามิเตอร์ `path`
+  ```bash
+  GET /load_roi_file?path=sources/cam1/rois.json
+  ```
+
+- **GET `/ws_snapshot`** – คืนรูป JPEG หนึ่งเฟรมจากกล้อง
+
+- **WebSocket `/ws`** – ส่งภาพ base64 ต่อเนื่องสำหรับหน้า `/inference`
+
+- **WebSocket `/ws_roi`** – ส่งภาพ base64 ต่อเนื่องสำหรับหน้า `/roi`
+
+- **GET `/inference_status`** – ตรวจสอบว่างาน inference กำลังทำงานอยู่หรือไม่
+  ```json
+  {"running": true}
+  ```
+
 ## โครงสร้าง `sources/`
 ```
 sources/
