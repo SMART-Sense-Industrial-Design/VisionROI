@@ -431,6 +431,8 @@ async def load_roi_file():
 # ✅ ส่ง snapshot 1 เฟรม (ใช้ในหน้า inference)
 @app.route("/ws_snapshot")
 async def ws_snapshot():
+    if camera is None or not camera.isOpened():
+        return "Camera not initialized", 400
     success, frame = camera.read()
     if not success:
         return "Camera error", 500
