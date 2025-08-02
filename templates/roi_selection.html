@@ -24,16 +24,21 @@
         let startX, startY;
         let rois = [];
         let roiPath = "";
+        let initialized = false;
 
         const video = document.getElementById("video");
         const canvas = document.getElementById("canvas");
         const ctx = canvas.getContext("2d");
 
         video.onload = () => {
-            canvas.width = video.naturalWidth;
-            canvas.height = video.naturalHeight;
-            canvas.style.width = video.naturalWidth + 'px';
-            canvas.style.height = video.naturalHeight + 'px';
+            if (!initialized || canvas.width !== video.naturalWidth || canvas.height !== video.naturalHeight) {
+                canvas.width = video.naturalWidth;
+                canvas.height = video.naturalHeight;
+                canvas.style.width = video.naturalWidth + 'px';
+                canvas.style.height = video.naturalHeight + 'px';
+                initialized = true;
+            }
+            drawAllRois();
         };
 
         async function loadSources() {
