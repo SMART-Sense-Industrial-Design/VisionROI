@@ -11,6 +11,8 @@ frame_queue: asyncio.Queue[str] = asyncio.Queue(maxsize=1)
 inference_task: asyncio.Task | None = None
 
 app = Quart(__name__)
+# กำหนดเพดานขนาดไฟล์ที่เซิร์ฟเวอร์ยอมรับ (100 MB)
+app.config["MAX_CONTENT_LENGTH"] = 100 * 1024 * 1024
 camera = cv2.VideoCapture(0)
 
 # ✅ Redirect root ไปหน้า home
