@@ -23,7 +23,7 @@
         let drawing = false;
         let startX, startY;
         let rois = [];
-        let roiPath = "";
+        let currentSource = "";
         let initialized = false;
 
         const video = document.getElementById("video");
@@ -61,8 +61,8 @@
                 alert("Select source first");
                 return;
             }
+            currentSource = name;
             const cfg = await fetch(`/source_config?name=${encodeURIComponent(name)}`).then(r => r.json());
-            roiPath = cfg.rois;
             await fetch("/set_camera", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
@@ -142,12 +142,12 @@
         }
 
         async function loadRois() {
-            if (!roiPath) {
+            if (!currentSource) {
                 rois = [];
                 drawAllRois();
                 return;
             }
-            const res = await fetch(`/load_roi_file?path=${encodeURIComponent(roiPath)}`);
+            const res = await fetch(`/load_roi/${encodeURIComponent(currentSource)}`);
             const data = await res.json();
             rois = data.rois;
             drawAllRois();
@@ -160,10 +160,10 @@
             }
             if (!confirm("Save all ROIs?")) return;
 
-            fetch(`/save_roi?path=${encodeURIComponent(roiPath)}` , {
+            fetch(`/save_roi`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ rois: rois })
+                body: JSON.stringify({ rois: rois, source: currentSource })
             })
             .then(res => res.json())
             .then(data => {
