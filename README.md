@@ -9,7 +9,8 @@ sources/
 └── <name>/
     ├── model.onnx
     ├── classes.txt
-    └── config.json
+    ├── config.json
+    └── rois.json
 ```
 
 เมื่อใช้หน้า **Create Source** (ที่ `/create_source`) ระบบจะรับชื่อ, ค่า source, ไฟล์ model และ label แล้วจะสร้างโฟลเดอร์ใหม่ใน `sources/<name>` พร้อมบันทึกไฟล์และไฟล์ `config.json` ที่เก็บข้อมูล:
@@ -19,9 +20,12 @@ sources/
   "name": "...",
   "source": "...",
   "model": "model.onnx",
-  "label": "classes.txt"
+  "label": "classes.txt",
+  "rois": "rois.json"
 }
 ```
+
+หน้า **ROI** จะอ่านและบันทึก ROI จากไฟล์ `rois.json` ในโฟลเดอร์ของ source นั้น ๆ
 
 ## วิธีใช้งานหน้า Create Source
 
