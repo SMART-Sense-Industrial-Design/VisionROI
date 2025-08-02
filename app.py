@@ -5,6 +5,7 @@ import base64
 import json
 from datetime import datetime
 import os
+import shutil
 
 frame_queue: asyncio.Queue[str] = asyncio.Queue(maxsize=1)
 inference_task: asyncio.Task | None = None
@@ -72,6 +73,44 @@ async def set_camera():
     if not camera.isOpened():
         return jsonify({"status": "error"}), 400
     return jsonify({"status": "ok"})
+
+
+@app.route("/create_source", methods=["GET", "POST"])
+async def create_source():
+    if request.method == "GET":
+        return await render_template("create_source.html")
+
+    form = await request.form
+    files = await request.files
+    name = form.get("name", "").strip()
+    source = form.get("source", "").strip()
+    model = files.get("model")
+    label = files.get("label")
+    if not name or not source or model is None or label is None:
+        return jsonify({"status": "error", "message": "missing data"}), 400
+
+    source_dir = os.path.join("sources", name)
+    try:
+        os.makedirs(source_dir, exist_ok=False)
+    except FileExistsError:
+        return jsonify({"status": "error", "message": "name exists"}), 400
+
+    try:
+        await model.save(os.path.join(source_dir, "model.onnx"))
+        await label.save(os.path.join(source_dir, "classes.txt"))
+        config = {
+            "name": name,
+            "source": source,
+            "model": "model.onnx",
+            "label": "classes.txt",
+        }
+        with open(os.path.join(source_dir, "config.json"), "w") as f:
+            json.dump(config, f)
+    except Exception:
+        shutil.rmtree(source_dir, ignore_errors=True)
+        return jsonify({"status": "error", "message": "save failed"}), 500
+
+    return jsonify({"status": "created"})
 
 
 # ✅ เริ่มงาน inference
