@@ -26,7 +26,8 @@
         const canvas = document.getElementById("canvas");
         const ctx = canvas.getContext("2d");
 
-        function startStream() {
+        async function startStream() {
+            await fetch("/start_inference", { method: "POST" });
             socket = new WebSocket("ws://" + location.host + "/ws");
             socket.onmessage = function(event) {
                 video.src = 'data:image/jpeg;base64,' + event.data;
@@ -101,12 +102,6 @@
             });
         }
     
-        function stopStream() {
-            if (socket) socket.close();
-            fetch("/stop_stream", { method: "POST" })
-                .then(res => res.json())
-                .then(data => alert("Stream stopped"));
-        }
     </script>
 </body>
 </html>

@@ -38,6 +38,8 @@
             document.getElementById("status").innerText = "Loaded: " + data.filename;
             rois = data.rois;
 
+            await fetch("/start_inference", { method: "POST" });
+
             socket = new WebSocket("ws://" + location.host + "/ws");
             socket.onmessage = function(event) {
                 video.src = 'data:image/jpeg;base64,' + event.data;
