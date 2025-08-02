@@ -99,8 +99,10 @@ async def stop_inference():
     return jsonify({"status": "no_task"})
 
 # ✅ สถานะงาน inference
-@app.route('/inference_status')
+# เพิ่ม endpoint สำหรับตรวจสอบว่างาน inference กำลังทำงานอยู่หรือไม่
+@app.route('/inference_status', methods=["GET"])
 async def inference_status():
+    """คืนค่าความพร้อมของงาน inference"""
     running = inference_task is not None and not inference_task.done()
     return jsonify({"running": running})
 
