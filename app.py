@@ -140,7 +140,7 @@ async def create_source():
     source = form.get("source", "").strip()
     model = files.get("model")
     label = files.get("label")
-    if not name or not source or model is None or label is None:
+    if not name or not source:
         return jsonify({"status": "error", "message": "missing data"}), 400
 
     source_dir = f"sources/{name}"
@@ -150,18 +150,22 @@ async def create_source():
         return jsonify({"status": "error", "message": "name exists"}), 400
 
     try:
-        await model.save(os.path.join(source_dir, "model.onnx"))
-        await label.save(os.path.join(source_dir, "classes.txt"))
-        rois_path = os.path.join(source_dir, "rois.json")
-        with open(rois_path, "w") as f:
-            f.write("[]")
         config = {
             "name": name,
             "source": source,
-            "model": "model.onnx",
-            "label": "classes.txt",
+            "model": "",
+            "label": "",
             "rois": "rois.json",
         }
+        if model:
+            await model.save(os.path.join(source_dir, "model.onnx"))
+            config["model"] = "model.onnx"
+        if label:
+            await label.save(os.path.join(source_dir, "classes.txt"))
+            config["label"] = "classes.txt"
+        rois_path = os.path.join(source_dir, "rois.json")
+        with open(rois_path, "w") as f:
+            f.write("[]")
         with open(os.path.join(source_dir, "config.json"), "w") as f:
             json.dump(config, f)
     except Exception:
