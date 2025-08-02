@@ -25,7 +25,7 @@
         stopButton.onclick = stopInference;
 
         async function loadSources() {
-            const res = await fetch("/sources");
+            const res = await fetch("/data_sources");
             const data = await res.json();
             const select = document.getElementById("sourceSelect");
             data.forEach(name => {
@@ -46,7 +46,7 @@
 
             let roiPath = cfg.rois;
             if (!roiPath.startsWith('/')) {
-                roiPath = `sources/${cfg.name}/${roiPath}`;
+                roiPath = `data_sources/${cfg.name}/${roiPath}`;
             }
 
             const camRes = await fetch("/set_camera", {
