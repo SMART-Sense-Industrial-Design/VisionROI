@@ -40,7 +40,7 @@ sources/
     └─ custom.py
 ```
 
-ไฟล์ `custom.py` ต้องมีฟังก์ชัน `process(frame, roi)` เพื่อประมวลผลเฟรมหรือ ROI ตามต้องการ
+ไฟล์ `custom.py` ต้องมีฟังก์ชัน `process(frame)` เพื่อประมวลผลเฟรมหรือ ROI ตามต้องการ
 
 ## ข้อมูลเพิ่มเติม
 - สร้าง `custom.py` ตามตัวอย่างข้างต้นภายใน `sources/<name>/`
