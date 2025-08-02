@@ -89,9 +89,9 @@ async def create_source():
     if not name or not source or model is None or label is None:
         return jsonify({"status": "error", "message": "missing data"}), 400
 
-    source_dir = os.path.join("sources", name)
+    source_dir = f"sources/{name}"
     try:
-        os.makedirs(source_dir, exist_ok=False)
+        os.makedirs(f"sources/{name}", exist_ok=False)
     except FileExistsError:
         return jsonify({"status": "error", "message": "name exists"}), 400
 
