@@ -268,7 +268,9 @@ async def save_roi():
     rois = data.get("rois", [])
     path = request.args.get("path", "")
     if path:
-        os.makedirs(os.path.dirname(path), exist_ok=True)
+        dir_path = os.path.dirname(path)
+        if dir_path:
+            os.makedirs(dir_path, exist_ok=True)
         with open(path, "w") as f:
             json.dump(rois, f, indent=2)
         return jsonify({"status": "saved", "filename": path})
