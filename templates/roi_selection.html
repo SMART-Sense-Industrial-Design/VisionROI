@@ -42,19 +42,19 @@
         drawAllRois();
     };
 
-    async function loadSources() {
-        const res = await fetch("/data_sources");
-        const data = await res.json();
-        const select = document.getElementById("sourceSelect");
-        select.innerHTML = '';
+      async function loadSources() {
+          const res = await fetch("/source_list");
+          const data = await res.json();
+          const select = document.getElementById("sourceSelect");
+          select.innerHTML = '';
 
-        data.forEach(name => {
-            const opt = document.createElement("option");
-            opt.value = name;
-            opt.textContent = name;
-            select.appendChild(opt);
-        });
-    }
+          data.forEach(item => {
+              const opt = document.createElement("option");
+              opt.value = item.name;
+              opt.textContent = item.name;
+              select.appendChild(opt);
+          });
+      }
 
     loadSources();
 
