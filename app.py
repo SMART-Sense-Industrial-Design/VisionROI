@@ -80,7 +80,7 @@ async def run_inference_loop():
         if camera is None:
             await asyncio.sleep(0.1)
             continue
-        success, frame = camera.read()
+        success, frame = await asyncio.to_thread(camera.read)
         if not success:
             await asyncio.sleep(0.1)
             continue
@@ -127,7 +127,7 @@ async def run_roi_loop():
         if camera is None:
             await asyncio.sleep(0.1)
             continue
-        success, frame = camera.read()
+        success, frame = await asyncio.to_thread(camera.read)
         if not success:
             await asyncio.sleep(0.1)
             continue
