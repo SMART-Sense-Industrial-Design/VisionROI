@@ -24,9 +24,16 @@ header {
     z-index: 1000;
 }
 
+header h1 {
+  margin: 0;
+  font-size: 1.5rem;
+}
+
 .logo {
-    height: 40px;
     margin-left: auto;
+    max-height: 100%;
+    width: auto;
+    object-fit: contain;
 }
 
 .sidenav {
