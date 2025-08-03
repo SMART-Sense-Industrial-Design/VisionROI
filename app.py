@@ -331,20 +331,20 @@ async def list_sources():
 
 @app.route("/source_list", methods=["GET"])
 async def source_list():
+    base_dir = Path(__file__).resolve().parent / "data_sources"
     result = []
     try:
-        for d in os.listdir("data_sources"):
-            path = os.path.join("data_sources", d)
-            if not os.path.isdir(path):
+        for d in base_dir.iterdir():
+            if not d.is_dir():
                 continue
-            cfg_path = os.path.join(path, "config.json")
-            if not os.path.exists(cfg_path):
+            cfg_path = d / "config.json"
+            if not cfg_path.exists():
                 continue
-            with open(cfg_path, "r") as f:
+            with cfg_path.open("r") as f:
                 cfg = json.load(f)
             result.append(
                 {
-                    "name": cfg.get("name", d),
+                    "name": cfg.get("name", d.name),
                     "source": cfg.get("source", ""),
                     "model": cfg.get("model", ""),
                     "label": cfg.get("label", ""),
