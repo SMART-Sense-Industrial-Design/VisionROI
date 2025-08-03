@@ -12,6 +12,14 @@ dependencies = [
     "opencv-python",
 ]
 
+[project.optional-dependencies]
+extras = [
+    "onnxruntime",
+    "requests",
+    "tensorflow",
+    "torch",
+]
+
 [tool.setuptools]
 package-dir = {"" = "src"}
 
