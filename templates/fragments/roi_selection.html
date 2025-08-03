@@ -36,6 +36,7 @@
                     initialized = true;
                 }
                 drawAllRois();
+                URL.revokeObjectURL(video.src);
             };
 
             async function loadSources() {
@@ -66,8 +67,10 @@
                 });
                 await fetch("/start_roi_stream", { method: "POST" });
                 socket = new WebSocket("ws://" + location.host + "/ws_roi");
+                socket.binaryType = "arraybuffer";
                 socket.onmessage = function(event) {
-                    video.src = 'data:image/jpeg;base64,' + event.data;
+                    const blob = new Blob([event.data], { type: "image/jpeg" });
+                    video.src = URL.createObjectURL(blob);
                 };
                 await loadRois();
             }

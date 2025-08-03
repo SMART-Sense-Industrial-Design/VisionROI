@@ -12,6 +12,7 @@
         let socket;
         let rois = [];
         const video = document.getElementById("video");
+        video.onload = () => URL.revokeObjectURL(video.src);
         const startButton = document.getElementById("startButton");
         const stopButton = document.getElementById("stopButton");
         const statusEl = document.getElementById("status");
@@ -86,8 +87,10 @@
 
         function openSocket() {
         socket = new WebSocket("ws://" + location.host + "/ws");
+        socket.binaryType = "arraybuffer";
         socket.onmessage = function(event) {
-            video.src = 'data:image/jpeg;base64,' + event.data;
+            const blob = new Blob([event.data], { type: "image/jpeg" });
+            video.src = URL.createObjectURL(blob);
         };
         }
 

@@ -144,9 +144,9 @@ tg.start_send_text("สวัสดี")
 
 - **DELETE `/delete_source/<name>`** – ลบโฟลเดอร์และไฟล์ที่เกี่ยวกับ source นั้น
 
-- **WebSocket `/ws`** – ส่งภาพ base64 ต่อเนื่องสำหรับหน้า `/inference`
+- **WebSocket `/ws`** – ส่งภาพ JPEG แบบไบนารีต่อเนื่องสำหรับหน้า `/inference`
 
-- **WebSocket `/ws_roi`** – ส่งภาพ base64 ต่อเนื่องสำหรับหน้า `/roi`
+- **WebSocket `/ws_roi`** – ส่งภาพ JPEG แบบไบนารีต่อเนื่องสำหรับหน้า `/roi`
 
 - **GET `/inference_status`** – ตรวจสอบว่างาน inference กำลังทำงานอยู่หรือไม่
   ```json

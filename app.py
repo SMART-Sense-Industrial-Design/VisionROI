@@ -1,7 +1,6 @@
 from quart import Quart, render_template, websocket, request, jsonify, send_file, redirect
 import asyncio
 import cv2
-import base64
 import json
 import shutil
 import importlib.util
@@ -11,9 +10,9 @@ from pathlib import Path
 import contextlib
 from typing import Callable, Awaitable, Any
 
-frame_queue: asyncio.Queue[str] = asyncio.Queue(maxsize=1)
+frame_queue: asyncio.Queue[bytes] = asyncio.Queue(maxsize=1)
 inference_task: asyncio.Task | None = None
-roi_frame_queue: asyncio.Queue[str] = asyncio.Queue(maxsize=1)
+roi_frame_queue: asyncio.Queue[bytes] = asyncio.Queue(maxsize=1)
 roi_task: asyncio.Task | None = None
 inference_rois: list[dict] = []
 active_source: str = ""
@@ -83,7 +82,7 @@ def load_custom_module(name: str) -> ModuleType | None:
 
 
 async def read_and_queue_frame(
-    queue: asyncio.Queue[str], frame_processor=None
+    queue: asyncio.Queue[bytes], frame_processor=None
 ) -> None:
     if camera is None:
         await asyncio.sleep(0.1)
@@ -95,13 +94,13 @@ async def read_and_queue_frame(
     if frame_processor:
         await frame_processor(frame)
     _, buffer = cv2.imencode('.jpg', frame)
-    frame_b64 = base64.b64encode(buffer).decode("utf-8")
+    frame_bytes = buffer.tobytes() if hasattr(buffer, "tobytes") else buffer
     if queue.full():
         try:
             queue.get_nowait()
         except asyncio.QueueEmpty:
             pass
-    await queue.put(frame_b64)
+    await queue.put(frame_bytes)
     await asyncio.sleep(0.05)
 
 async def run_inference_loop():
@@ -186,16 +185,16 @@ async def stop_camera_task(task: asyncio.Task | None):
 @app.websocket('/ws')
 async def ws():
     while True:
-        frame_b64 = await frame_queue.get()
-        await websocket.send(frame_b64)
+        frame_bytes = await frame_queue.get()
+        await websocket.send(frame_bytes)
 
 
 # ✅ WebSocket ROI stream
 @app.websocket('/ws_roi')
 async def ws_roi():
     while True:
-        frame_b64 = await roi_frame_queue.get()
-        await websocket.send(frame_b64)
+        frame_bytes = await roi_frame_queue.get()
+        await websocket.send(frame_bytes)
 
 @app.route("/set_camera", methods=["POST"])
 async def set_camera():
