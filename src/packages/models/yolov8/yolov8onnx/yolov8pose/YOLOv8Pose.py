@@ -4,7 +4,6 @@ import cv2
 import onnxruntime
 from typing import List, Tuple, Dict
 import base64
-from notification.line_notify import LineNotify
 # from utils import file_decode
 
 class YOLOv8Pose:
@@ -82,7 +81,7 @@ class YOLOv8Pose:
         return boxes, scores, kpts
     
     
-    def draw_result(self, img: np.ndarray, result: Dict, with_label=False, line_notify=LineNotify, object_detect_list=[]) -> np.ndarray:
+    def draw_result(self, img: np.ndarray, result: Dict, with_label=False, object_detect_list=[]) -> np.ndarray:
         original_img = img.copy()
         boxes, kpts, scores = result['boxes'], result['kpts'], result['scores']
         for box, kpt, score in zip(boxes, kpts, scores):
