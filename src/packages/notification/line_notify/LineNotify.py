@@ -1,4 +1,3 @@
-
 import time
 import requests
 import cv2
@@ -6,24 +5,28 @@ from datetime import datetime
 import threading
 # from concurrent.futures import ThreadPoolExecutor
 
-from packages.app_config import AppConfig
-
-
-
 class LineNotify:
 
     shared_session = requests.Session()
 
-    def __init__(self, token= None, reciever_id= None):
-        cfg_line = AppConfig().load_toml_config()['line_notify']
+    def __init__(
+        self,
+        token: str | None = None,
+        reciever_id: str | None = None,
+        api: str = "",
+        time_interval_sec: int = 0,
+        class_interest: list | None = None,
+        max_value: int = 0,
+        status_running: bool = False,
+    ) -> None:
         self.START_TIME = None
-        self.LINE_API = cfg_line['api']
-        self.LINE_TOKEN = token or cfg_line['token']
+        self.LINE_API = api
+        self.LINE_TOKEN = token
         self.RECIEVER_ID = reciever_id
-        self.LINE_TIME_INTERVAL = cfg_line['time_interval_sec']
-        self.LINE_CLASS_INTEREST = cfg_line['class_interest']
-        self.LINE_MAX_VALUE = cfg_line['max_value']
-        self.LINE_STATUS_RUNNING = cfg_line['status_running']
+        self.LINE_TIME_INTERVAL = time_interval_sec
+        self.LINE_CLASS_INTEREST = class_interest or []
+        self.LINE_MAX_VALUE = max_value
+        self.LINE_STATUS_RUNNING = status_running
         self.session = LineNotify.shared_session
 
     def send_line_notify_text(self, msg):
