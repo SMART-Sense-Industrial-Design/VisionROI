@@ -35,33 +35,46 @@
       margin-left: 210px;
       padding: 20px;
     }
-
-    h2 {
-      margin-top: 0;
-    }
   </style>
 </head>
 <body>
 
-  <!-- Side Menu -->
   <div class="sidenav">
-    <a href="/home">🏠 Home</a>
-    <a href="/create_source">➕ Create Source</a>
-    <a href="/roi">📐 ROI Selection</a>
-    <a href="/inference">🤖 Inference</a>
+    <a href="#" data-fragment="home">🏠 Home</a>
+    <a href="#" data-fragment="create_source">➕ Create Source</a>
+    <a href="#" data-fragment="roi">📐 ROI Selection</a>
+    <a href="#" data-fragment="inference">🤖 Inference</a>
   </div>
 
-  <!-- Main Content -->
-  <div class="main">
-    <h2>AI Video Stream Dashboard</h2>
-    <p>Welcome! Use the side menu to navigate between features:</p>
-    <ul>
-      <li><strong>➕ Create Source</strong> – configure a new video source and upload the corresponding model and label files.</li>
-      <li><strong>📐 ROI Selection</strong> – draw Regions of Interest on the live camera stream and save them to a JSON file.</li>
-      <li><strong>🤖 Inference</strong> – load saved ROI and run AI model inference on those regions.</li>
-    </ul>
-    <p>This dashboard is designed to help visualize and interact with AI-powered video processing in real time.</p>
-  </div>
+  <div class="main" id="content"></div>
 
+  <script>
+    async function loadFragment(name) {
+      const res = await fetch(`/fragment/${name}`);
+      const html = await res.text();
+      const content = document.getElementById('content');
+      content.innerHTML = html;
+      content.querySelectorAll('script').forEach(oldScript => {
+        const newScript = document.createElement('script');
+        if (oldScript.src) {
+          newScript.src = oldScript.src;
+        } else {
+          newScript.textContent = oldScript.textContent;
+        }
+        document.body.appendChild(newScript);
+        oldScript.remove();
+      });
+    }
+
+    document.querySelectorAll('.sidenav a').forEach(a => {
+      a.addEventListener('click', (e) => {
+        e.preventDefault();
+        const frag = a.dataset.fragment;
+        loadFragment(frag);
+      });
+    });
+
+    loadFragment('home');
+  </script>
 </body>
 </html>
