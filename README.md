@@ -58,6 +58,21 @@ pip install ".[extras]"
 pip install -e "."
 ```
 
+### การตั้งค่า Info.plist บน macOS
+หากคุณแพ็กเกจโปรเจ็กต์นี้เป็นแอปสำหรับ macOS (เช่น ผ่าน PyInstaller หรือ py2app) จำเป็นต้องกำหนดคีย์ `NSCameraUsageDescription` และระบุชนิดกล้องที่จะใช้ในไฟล์ `Info.plist` มิฉะนั้นระบบจะไม่อนุญาตให้เข้าถึงกล้อง
+
+```xml
+<!-- Info.plist -->
+<plist version="1.0">
+  <dict>
+    <key>NSCameraUsageDescription</key>
+    <string>แอปต้องการใช้กล้องเว็บแคมเพื่ออ่านภาพสำหรับ OCR</string>
+  </dict>
+</plist>
+```
+
+ปรับข้อความใน `<string>` ให้สอดคล้องกับชนิดกล้องที่คุณต้องการ เช่น กล้องในตัวของเครื่อง หรือกล้อง USB ภายนอก
+
 ## การตั้งค่าฐานข้อมูล (ทางเลือก)
 ตั้งค่าตัวแปร Environment เพื่อให้โมดูลฐานข้อมูลเชื่อมต่อ PostgreSQL ได้
 
