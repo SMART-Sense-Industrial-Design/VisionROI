@@ -202,7 +202,7 @@ async def ws_roi():
     while True:
         frame_bytes = await roi_frame_queue.get()
         if frame_bytes is None:
-            await websocket.close()
+            await websocket.close(code=1000)
             break
         await websocket.send(frame_bytes)
 
