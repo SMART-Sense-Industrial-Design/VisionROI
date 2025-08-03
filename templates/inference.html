@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% block title %}Inference{% endblock %}
+
 {% block content %}
 <h2>Inference with Saved ROI</h2>
 <select id="sourceSelect"></select>
@@ -32,6 +33,7 @@
             select.appendChild(opt);
         });
     }
+
 
     async function startInference() {
         const name = document.getElementById("sourceSelect").value;
@@ -118,5 +120,6 @@
         await loadSources();
         await checkStatus();
     })();
+
 </script>
 {% endblock %}

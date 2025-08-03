@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Create Source{% endblock %}
 {% block content %}
+
 <style>
     table {
         border-collapse: collapse;
@@ -22,6 +23,7 @@
         cursor: pointer;
     }
 </style>
+
 <h2>Create Source</h2>
 <form method="POST" action="/create_source" enctype="multipart/form-data">
     <div>
@@ -92,5 +94,6 @@
         }
     }
     loadSources();
+
 </script>
 {% endblock %}

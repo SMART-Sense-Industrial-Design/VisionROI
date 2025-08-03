@@ -1,10 +1,12 @@
 {% extends "base.html" %}
 {% block title %}ROI Selection{% endblock %}
 {% block content %}
+
 <style>
     #video { border: 1px solid black; position: relative; }
     #canvas { position: absolute; left: 0; top: 0; }
 </style>
+
 <select id="sourceSelect"></select>
 <button onclick="startStream()">Start</button>
 <button onclick="stopStream()">Stop</button>
@@ -15,6 +17,7 @@
     <img id="video" />
     <canvas id="canvas"></canvas>
 </div>
+
 <script>
     let socket;
     let drawing = false;
@@ -44,6 +47,7 @@
         const data = await res.json();
         const select = document.getElementById("sourceSelect");
         select.innerHTML = '';
+
         data.forEach(name => {
             const opt = document.createElement("option");
             opt.value = name;
