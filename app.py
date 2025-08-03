@@ -66,6 +66,11 @@ def load_custom_module(name: str) -> ModuleType | None:
     if not os.path.exists(path):
         return None
     module_name = f"custom_{name}"
+    # ลบโมดูลเก่าที่ค้างอยู่เพื่อให้โหลดใหม่ได้ถูกต้องและไม่กินหน่วยความจำ
+    if module_name in sys.modules:
+        del sys.modules[module_name]
+        importlib.invalidate_caches()
+
     spec = importlib.util.spec_from_file_location(module_name, path)
     if not spec or not spec.loader:
         return None
