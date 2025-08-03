@@ -14,189 +14,196 @@
     </div>
 
     <script>
-        let socket;
-        let drawing = false;
-        let startX, startY;
-        let rois = [];
-        let currentRoi = null;
-        let currentSource = "";
-        let initialized = false;
+        (function() {
+            let socket;
+            let drawing = false;
+            let startX, startY;
+            let rois = [];
+            let currentRoi = null;
+            let currentSource = "";
+            let initialized = false;
 
-        const video = document.getElementById("video");
-        const canvas = document.getElementById("canvas");
-        const ctx = canvas.getContext("2d");
+            const video = document.getElementById("video");
+            const canvas = document.getElementById("canvas");
+            const ctx = canvas.getContext("2d");
 
-        video.onload = () => {
-            if (!initialized || canvas.width !== video.naturalWidth || canvas.height !== video.naturalHeight) {
-                canvas.width = video.naturalWidth;
-                canvas.height = video.naturalHeight;
-                canvas.style.width = video.naturalWidth + 'px';
-                canvas.style.height = video.naturalHeight + 'px';
-                initialized = true;
-            }
-            drawAllRois();
-        };
-
-        async function loadSources() {
-            const res = await fetch("/source_list");
-            const data = await res.json();
-            const select = document.getElementById("sourceSelect");
-            data.forEach(item => {
-                const opt = document.createElement("option");
-                opt.value = item.name;
-                opt.textContent = item.name;
-                select.appendChild(opt);
-            });
-        }
-
-        loadSources();
-
-        async function startStream() {
-            const name = document.getElementById("sourceSelect").value;
-            if (!name) {
-                alert("Select source first");
-                return;
-            }
-            currentSource = name;
-            const cfg = await fetch(`/source_config?name=${encodeURIComponent(name)}`).then(r => r.json());
-            await fetch("/set_camera", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ name, source: cfg.source })
-            });
-            await fetch("/start_roi_stream", { method: "POST" });
-            socket = new WebSocket("ws://" + location.host + "/ws_roi");
-            socket.onmessage = function(event) {
-                video.src = 'data:image/jpeg;base64,' + event.data;
+            video.onload = () => {
+                if (!initialized || canvas.width !== video.naturalWidth || canvas.height !== video.naturalHeight) {
+                    canvas.width = video.naturalWidth;
+                    canvas.height = video.naturalHeight;
+                    canvas.style.width = video.naturalWidth + 'px';
+                    canvas.style.height = video.naturalHeight + 'px';
+                    initialized = true;
+                }
+                drawAllRois();
             };
-            await loadRois();
-        }
 
-        async function stopStream() {
-
-            if (socket) {
-                socket.close();
-                socket = null;
+            async function loadSources() {
+                const res = await fetch("/source_list");
+                const data = await res.json();
+                const select = document.getElementById("sourceSelect");
+                select.innerHTML = '';
+                data.forEach(item => {
+                    const opt = document.createElement("option");
+                    opt.value = item.name;
+                    opt.textContent = item.name;
+                    select.appendChild(opt);
+                });
             }
 
-            await fetch("/stop_roi_stream", { method: "POST" });
-
-        }
-
-        canvas.onmousedown = (e) => {
-            drawing = true;
-            const rect = canvas.getBoundingClientRect();
-            const scaleX = canvas.width / rect.width;
-            const scaleY = canvas.height / rect.height;
-            startX = (e.clientX - rect.left) * scaleX;
-            startY = (e.clientY - rect.top) * scaleY;
-            currentRoi = null;
-        };
-
-        canvas.onmouseup = (e) => {
-            if (!drawing) return;
-            drawing = false;
-            const rect = canvas.getBoundingClientRect();
-            const scaleX = canvas.width / rect.width;
-            const scaleY = canvas.height / rect.height;
-            const endX = (e.clientX - rect.left) * scaleX;
-            const endY = (e.clientY - rect.top) * scaleY;
-            currentRoi = {
-                x: Math.min(startX, endX),
-                y: Math.min(startY, endY),
-                width: Math.abs(endX - startX),
-                height: Math.abs(endY - startY)
-            };
-            rois.push(currentRoi);
-            currentRoi = null;
-            drawAllRois();
-        };
-
-        canvas.onmousemove = (e) => {
-            if (!drawing) return;
-            const rect = canvas.getBoundingClientRect();
-            const scaleX = canvas.width / rect.width;
-            const scaleY = canvas.height / rect.height;
-            const currX = (e.clientX - rect.left) * scaleX;
-            const currY = (e.clientY - rect.top) * scaleY;
-            currentRoi = {
-                x: Math.min(startX, currX),
-                y: Math.min(startY, currY),
-                width: Math.abs(currX - startX),
-                height: Math.abs(currY - startY)
-            };
-            drawAllRois();
-        };
-
-        function drawAllRois() {
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-            rois.forEach(r => {
-                ctx.beginPath();
-                ctx.rect(r.x, r.y, r.width, r.height);
-                ctx.strokeStyle = 'blue';
-                ctx.lineWidth = 2;
-                ctx.stroke();
-            });
-            if (currentRoi) {
-                ctx.beginPath();
-                ctx.rect(currentRoi.x, currentRoi.y, currentRoi.width, currentRoi.height);
-                ctx.strokeStyle = 'red';
-                ctx.lineWidth = 2;
-                ctx.stroke();
+            async function startStream() {
+                const name = document.getElementById("sourceSelect").value;
+                if (!name) {
+                    alert("Select source first");
+                    return;
+                }
+                currentSource = name;
+                const cfg = await fetch(`/source_config?name=${encodeURIComponent(name)}`).then(r => r.json());
+                await fetch("/set_camera", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ name, source: cfg.source })
+                });
+                await fetch("/start_roi_stream", { method: "POST" });
+                socket = new WebSocket("ws://" + location.host + "/ws_roi");
+                socket.onmessage = function(event) {
+                    video.src = 'data:image/jpeg;base64,' + event.data;
+                };
+                await loadRois();
             }
-        }
 
-        async function loadRois() {
-            if (!currentSource) {
+            async function stopStream() {
+
+                if (socket) {
+                    socket.close();
+                    socket = null;
+                }
+
+                await fetch("/stop_roi_stream", { method: "POST" });
+
+            }
+
+            canvas.onmousedown = (e) => {
+                drawing = true;
+                const rect = canvas.getBoundingClientRect();
+                const scaleX = canvas.width / rect.width;
+                const scaleY = canvas.height / rect.height;
+                startX = (e.clientX - rect.left) * scaleX;
+                startY = (e.clientY - rect.top) * scaleY;
+                currentRoi = null;
+            };
+
+            canvas.onmouseup = (e) => {
+                if (!drawing) return;
+                drawing = false;
+                const rect = canvas.getBoundingClientRect();
+                const scaleX = canvas.width / rect.width;
+                const scaleY = canvas.height / rect.height;
+                const endX = (e.clientX - rect.left) * scaleX;
+                const endY = (e.clientY - rect.top) * scaleY;
+                currentRoi = {
+                    x: Math.min(startX, endX),
+                    y: Math.min(startY, endY),
+                    width: Math.abs(endX - startX),
+                    height: Math.abs(endY - startY)
+                };
+                rois.push(currentRoi);
+                currentRoi = null;
+                drawAllRois();
+            };
+
+            canvas.onmousemove = (e) => {
+                if (!drawing) return;
+                const rect = canvas.getBoundingClientRect();
+                const scaleX = canvas.width / rect.width;
+                const scaleY = canvas.height / rect.height;
+                const currX = (e.clientX - rect.left) * scaleX;
+                const currY = (e.clientY - rect.top) * scaleY;
+                currentRoi = {
+                    x: Math.min(startX, currX),
+                    y: Math.min(startY, currY),
+                    width: Math.abs(currX - startX),
+                    height: Math.abs(currY - startY)
+                };
+                drawAllRois();
+            };
+
+            function drawAllRois() {
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                rois.forEach(r => {
+                    ctx.beginPath();
+                    ctx.rect(r.x, r.y, r.width, r.height);
+                    ctx.strokeStyle = 'blue';
+                    ctx.lineWidth = 2;
+                    ctx.stroke();
+                });
+                if (currentRoi) {
+                    ctx.beginPath();
+                    ctx.rect(currentRoi.x, currentRoi.y, currentRoi.width, currentRoi.height);
+                    ctx.strokeStyle = 'red';
+                    ctx.lineWidth = 2;
+                    ctx.stroke();
+                }
+            }
+
+            async function loadRois() {
+                if (!currentSource) {
+                    rois = [];
+                    drawAllRois();
+                    return;
+                }
+                const res = await fetch(`/load_roi/${encodeURIComponent(currentSource)}`);
+                const data = await res.json();
+                rois = data.rois;
+                drawAllRois();
+            }
+
+            function saveAllRois() {
+                if (rois.length === 0) {
+                    alert("No ROI selected.");
+                    return;
+                }
+                if (!confirm("Save all ROIs?")) return;
+
+                fetch(`/save_roi`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ rois: rois, source: currentSource })
+                })
+                .then(res => res.json())
+                .then(data => {
+                    alert("Saved to: " + data.filename);
+                    loadRois();
+                });
+            }
+
+            function clearAllRois() {
+                if (rois.length === 0) {
+                    alert("No ROI to clear.");
+                    return;
+                }
+                if (!confirm("Clear all ROIs?")) return;
+
                 rois = [];
                 drawAllRois();
-                return;
+
+                fetch(`/save_roi`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ rois: rois, source: currentSource })
+                })
+                .then(res => res.json())
+                .then(data => {
+                    alert("Cleared. Saved to: " + data.filename);
+                    loadRois();
+                });
             }
-            const res = await fetch(`/load_roi/${encodeURIComponent(currentSource)}`);
-            const data = await res.json();
-            rois = data.rois;
-            drawAllRois();
-        }
 
-        function saveAllRois() {
-            if (rois.length === 0) {
-                alert("No ROI selected.");
-                return;
-            }
-            if (!confirm("Save all ROIs?")) return;
+            window.startStream = startStream;
+            window.stopStream = stopStream;
+            window.saveAllRois = saveAllRois;
+            window.clearAllRois = clearAllRois;
 
-            fetch(`/save_roi`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ rois: rois, source: currentSource })
-            })
-            .then(res => res.json())
-            .then(data => {
-                alert("Saved to: " + data.filename);
-                loadRois();
-            });
-        }
-    
-        function clearAllRois() {
-            if (rois.length === 0) {
-                alert("No ROI to clear.");
-                return;
-            }
-            if (!confirm("Clear all ROIs?")) return;
-
-            rois = [];
-            drawAllRois();
-
-            fetch(`/save_roi`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ rois: rois, source: currentSource })
-            })
-            .then(res => res.json())
-            .then(data => {
-                alert("Cleared. Saved to: " + data.filename);
-                loadRois();
-            });
-        }
-
+            loadSources();
+        })();
     </script>
