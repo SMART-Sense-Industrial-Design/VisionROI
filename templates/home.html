@@ -2,42 +2,13 @@
 <html>
 <head>
   <title>AI Stream Dashboard</title>
-  <style>
-    body {
-      margin: 0;
-      font-family: Arial, sans-serif;
-    }
-
-    .sidenav {
-      height: 100vh;
-      width: 200px;
-      position: fixed;
-      left: 0;
-      top: 0;
-      background-color: #111;
-      padding-top: 20px;
-    }
-
-    .sidenav a {
-      padding: 10px 20px;
-      text-decoration: none;
-      font-size: 16px;
-      color: #ddd;
-      display: block;
-    }
-
-    .sidenav a:hover {
-      background-color: #575757;
-      color: white;
-    }
-
-    .main {
-      margin-left: 210px;
-      padding: 20px;
-    }
-  </style>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
+  <header>
+    <img src="{{ url_for('static', filename='images/logo.jpg') }}" alt="Logo">
+    <h1>AI Stream Dashboard</h1>
+  </header>
 
   <div class="sidenav">
     <a href="#" data-fragment="home">🏠 Home</a>
@@ -46,7 +17,7 @@
     <a href="#" data-fragment="inference">🤖 Inference</a>
   </div>
 
-  <div class="main" id="content"></div>
+  <main id="content"></main>
 
   <script>
     async function loadFragment(name) {
