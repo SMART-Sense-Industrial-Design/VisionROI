@@ -2,38 +2,13 @@
 <html>
 <head>
   <title>{% block title %}AI Stream Dashboard{% endblock %}</title>
-  <style>
-    body {
-      margin: 0;
-      font-family: Arial, sans-serif;
-    }
-    .sidenav {
-      height: 100vh;
-      width: 200px;
-      position: fixed;
-      left: 0;
-      top: 0;
-      background-color: #111;
-      padding-top: 20px;
-    }
-    .sidenav a {
-      padding: 10px 20px;
-      text-decoration: none;
-      font-size: 16px;
-      color: #ddd;
-      display: block;
-    }
-    .sidenav a:hover {
-      background-color: #575757;
-      color: white;
-    }
-    .main {
-      margin-left: 210px;
-      padding: 20px;
-    }
-  </style>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
+  <header>
+    <h1>AI Stream Dashboard</h1>
+    <img src="{{ url_for('static', filename='images/logo.jpg') }}" class="logo" alt="logo">
+  </header>
   <div class="sidenav">
 
     <a href="/home">🏠 Home</a>
@@ -41,11 +16,9 @@
     <a href="/roi">📐 ROI Selection</a>
     <a href="/inference">🤖 Inference</a>
   </div>
-  <div class="main">
-    <main id="content">
-      {% block content %}{% endblock %}
-    </main>
-  </div>
+  <main id="content">
+    {% block content %}{% endblock %}
+  </main>
   <script>
     function attachMenuHandlers() {
       document.querySelectorAll('.sidenav a').forEach(link => {
