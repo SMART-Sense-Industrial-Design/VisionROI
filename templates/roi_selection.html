@@ -70,7 +70,7 @@
             await fetch("/set_camera", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ source: cfg.source })
+                body: JSON.stringify({ name, source: cfg.source })
             });
             await fetch("/start_roi_stream", { method: "POST" });
             socket = new WebSocket("ws://" + location.host + "/ws_roi");
