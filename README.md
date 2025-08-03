@@ -93,3 +93,11 @@ data_sources/
 ## ข้อมูลเพิ่มเติม
 - สร้าง `custom.py` ตามตัวอย่างข้างต้นภายใน `data_sources/<name>/`
 - `config.json` เก็บข้อมูล source, โมเดล และไฟล์ ROI
+
+## การทดสอบ
+ติดตั้ง dependencies แล้วสามารถรันทดสอบได้ด้วย:
+
+```bash
+pytest
+```
+
