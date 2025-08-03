@@ -1,44 +1,10 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <title>{% block title %}AI Stream Dashboard{% endblock %}</title>
-  <style>
-    body {
-      margin: 0;
-      font-family: Arial, sans-serif;
-    }
-    header {
-      background: #222;
-      color: #fff;
-      padding: 10px 20px;
-    }
-    .sidenav {
-      height: 100vh;
-      width: 200px;
-      position: fixed;
-      left: 0;
-      top: 50px;
-      background-color: #111;
-      padding-top: 20px;
-    }
-    .sidenav a {
-      padding: 10px 20px;
-      text-decoration: none;
-      font-size: 16px;
-      color: #ddd;
-      display: block;
-    }
-    .sidenav a:hover {
-      background-color: #575757;
-      color: white;
-    }
-    main#content {
-      margin-left: 210px;
-      padding: 20px;
-      margin-top: 50px;
-    }
-  </style>
-  {% block head %}{% endblock %}
+  <meta charset="UTF-8">
+  <title>{% block title %}AI Dashboard{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+
 </head>
 <body>
   <header>
@@ -50,7 +16,8 @@
     <a href="/roi">📐 ROI Selection</a>
     <a href="/inference">🤖 Inference</a>
   </nav>
-  <main id="content">
+  <main>
+
     {% block content %}{% endblock %}
   </main>
 </body>
