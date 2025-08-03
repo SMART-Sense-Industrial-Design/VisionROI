@@ -6,6 +6,7 @@
 body {
   margin: 0;
   font-family: Arial, sans-serif;
+  display: flex;
 }
 
 header {
@@ -37,16 +38,14 @@ header h1 {
 }
 
 .sidenav {
-  position: fixed;
-  top: var(--header-height);
-  left: 0;
   width: var(--sidenav-width);
   height: calc(100vh - var(--header-height));
   background-color: #111;
   padding-top: 20px;
   box-sizing: border-box;
-  overflow-y: auto;
-}
+  margin-top: var(--header-height);
+  transition: width 0.3s ease;
+
 
 .sidenav a {
   padding: 10px 20px;
@@ -68,9 +67,11 @@ header h1 {
 
 main {
   margin-top: var(--header-height);
-  margin-left: calc(var(--sidenav-width) + 10px);
+  flex: 1;
+  margin-left: 0;
   padding: 20px;
   box-sizing: border-box;
+  transition: margin-left 0.3s ease;
 }
 
 @media (max-width: 600px) {
