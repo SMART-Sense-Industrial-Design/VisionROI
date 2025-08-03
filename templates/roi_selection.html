@@ -8,10 +8,10 @@
 </style>
 
 <select id="sourceSelect"></select>
-<button onclick="startStream()">Start</button>
-<button onclick="stopStream()">Stop</button>
-<button onclick="saveAllRois()">Save All</button>
-<button onclick="clearAllRois()">Clear All</button>
+<button id="startBtn">Start</button>
+<button id="stopBtn">Stop</button>
+<button id="saveBtn">Save All</button>
+<button id="clearBtn">Clear All</button>
 <br><br>
 <div style="position: relative; display: inline-block;">
     <img id="video" />
@@ -203,6 +203,11 @@
                 loadRois();
             });
         }
+
+        document.getElementById('startBtn').addEventListener('click', startStream);
+        document.getElementById('stopBtn').addEventListener('click', stopStream);
+        document.getElementById('saveBtn').addEventListener('click', saveAllRois);
+        document.getElementById('clearBtn').addEventListener('click', clearAllRois);
 
         window.startStream = startStream;
         window.stopStream = stopStream;
