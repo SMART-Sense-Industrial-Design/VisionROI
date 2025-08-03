@@ -244,6 +244,10 @@ class BoTSORT(object):
 
         self.gmc = GMC(method=args.cmc_method, verbose=[args.name, args.ablation])
 
+    def __del__(self):
+        if hasattr(self, 'gmc'):
+            self.gmc.cleanup()
+
     def update(self, output_results, img):
         self.frame_id += 1
         activated_starcks = []

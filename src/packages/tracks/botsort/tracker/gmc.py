@@ -11,6 +11,7 @@ class GMC:
 
         self.method = method
         self.downscale = max(1, int(downscale))
+        self.gmcFile = None
 
         if self.method == 'orb':
             self.detector = cv2.FastFeatureDetector_create(20)
@@ -314,3 +315,11 @@ class GMC:
         H[1, 2] = float(tokens[6])
 
         return H
+
+    def cleanup(self):
+        if self.gmcFile is not None and not self.gmcFile.closed:
+            self.gmcFile.close()
+            self.gmcFile = None
+
+    def __del__(self):
+        self.cleanup()
