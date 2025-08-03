@@ -51,6 +51,19 @@ pip install ".[extras]"
 pip install -e "."
 ```
 
+## โครงสร้างโปรเจ็กต์
+โครงสร้างไฟล์หลักของโปรเจ็กต์:
+
+```
+web_ocrroi/
+├─ app.py
+├─ data_sources/
+├─ src/
+├─ static/
+├─ templates/
+└─ tests/
+```
+
 ## การรันโปรเจ็กต์
 1. รัน `python app.py`
 2. เปิดเบราว์เซอร์ไปที่ `http://localhost:5000/home`
