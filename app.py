@@ -12,7 +12,7 @@ from typing import Callable, Awaitable, Any
 
 frame_queue: asyncio.Queue[bytes] = asyncio.Queue(maxsize=1)
 inference_task: asyncio.Task | None = None
-roi_frame_queue: asyncio.Queue[bytes] = asyncio.Queue(maxsize=1)
+roi_frame_queue: asyncio.Queue[bytes | None] = asyncio.Queue(maxsize=1)
 roi_task: asyncio.Task | None = None
 inference_rois: list[dict] = []
 active_source: str = ""
@@ -158,7 +158,9 @@ async def start_camera_task(task: asyncio.Task | None, loop_func: Callable[[], A
     return task, {"status": "started"}, 200
 
 
-async def stop_camera_task(task: asyncio.Task | None):
+async def stop_camera_task(
+    task: asyncio.Task | None, queue: asyncio.Queue[bytes | None] | None = None
+):
     """หยุดงานที่ใช้กล้อง หากไม่มีงานจะคืนสถานะ no_task"""
     global camera, inference_task, roi_task
     if task is not None and not task.done():
@@ -169,6 +171,8 @@ async def stop_camera_task(task: asyncio.Task | None):
         status = "stopped"
     else:
         status = "no_task"
+    if queue is not None:
+        await queue.put(None)
     # ปล่อยกล้องเมื่อไม่มีงานอื่นใช้งานอยู่
     if (
         (inference_task is None or inference_task.done())
@@ -194,6 +198,9 @@ async def ws():
 async def ws_roi():
     while True:
         frame_bytes = await roi_frame_queue.get()
+        if frame_bytes is None:
+            await websocket.close()
+            break
         await websocket.send(frame_bytes)
 
 @app.route("/set_camera", methods=["POST"])
@@ -310,7 +317,7 @@ async def start_roi_stream():
 @app.route('/stop_roi_stream', methods=["POST"])
 async def stop_roi_stream():
     global roi_task
-    roi_task, resp, status = await stop_camera_task(roi_task)
+    roi_task, resp, status = await stop_camera_task(roi_task, roi_frame_queue)
     return jsonify(resp), status
 
 # ✅ สถานะงาน inference
