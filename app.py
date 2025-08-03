@@ -22,6 +22,7 @@ app = Quart(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 100 * 1024 * 1024
 camera: cv2.VideoCapture | None = None
 camera_source: int | str = 0
+camera_lock = asyncio.Lock()
 ALLOWED_ROI_DIR = os.path.realpath("data_sources")
 
 # ✅ Redirect root ไปหน้า home
@@ -87,7 +88,8 @@ async def read_and_queue_frame(
     if camera is None:
         await asyncio.sleep(0.1)
         return
-    success, frame = await asyncio.to_thread(camera.read)
+    async with camera_lock:
+        success, frame = await asyncio.to_thread(camera.read)
     if not success:
         await asyncio.sleep(0.1)
         return
@@ -176,8 +178,9 @@ async def stop_camera_task(task: asyncio.Task | None):
         and camera
         and camera.isOpened()
     ):
-        camera.release()
-        camera = None
+        async with camera_lock:
+            camera.release()
+            camera = None
     return task, {"status": status}, 200
 
 
