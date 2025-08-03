@@ -6,11 +6,23 @@
 - Python ≥3.10
 - dependencies ถูกกำหนดใน `pyproject.toml`
 
+### Dependencies เพิ่มเติม
+- `onnxruntime` – สำหรับรันโมเดล ONNX
+- `requests` – ใช้ส่งการแจ้งเตือนผ่าน Line/Telegram
+- `tensorflow` – สำหรับโมเดลที่ใช้ TFLite
+- `torch` – สำหรับฟังก์ชันที่ใช้ PyTorch
+
 ## การติดตั้ง
-ติดตั้งแพ็กเกจและ dependencies ด้วย `pip` โดยไม่จำเป็นต้องใช้ `requirements.txt`:
+ติดตั้งแพ็กเกจและ dependencies ด้วย `pip`:
 
 ```bash
 pip install .
+```
+
+หากต้องการ dependencies เพิ่มเติม เช่น `onnxruntime`, `requests`, `tensorflow`, `torch` สามารถติดตั้งผ่าน extras ได้:
+
+```bash
+pip install .[extras]
 ```
 
 หรือหากต้องการติดตั้งแบบ editable:
@@ -22,6 +34,27 @@ pip install -e .
 ## การรันโปรเจ็กต์
 1. รัน `python app.py`
 2. เปิดเบราว์เซอร์ไปที่ `http://localhost:5000/home`
+
+## การตั้งค่าการแจ้งเตือน
+### Line Notify
+ตัวอย่างการใช้งาน:
+
+```python
+from src.packages.notification.line_notify import LineNotify
+
+line = LineNotify(token="YOUR_LINE_TOKEN", reciever_id="YOUR_USER_ID")
+line.start_line_notify_text("สวัสดี")
+```
+
+### Telegram Notify
+ตัวอย่างการใช้งาน:
+
+```python
+from src.packages.notification.telegram_notify import TelegramNotify
+
+tg = TelegramNotify(token="YOUR_BOT_TOKEN", chat_id="YOUR_CHAT_ID")
+tg.start_send_text("สวัสดี")
+```
 
 ## หน้าต่างต่าง ๆ
 ### Create Source (`/create_source`)

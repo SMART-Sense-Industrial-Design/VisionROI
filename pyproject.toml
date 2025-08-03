@@ -14,10 +14,13 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-notify = ["requests"]
-onnx = ["onnxruntime"]
-tensorflow = ["tensorflow"]
-torch = ["torch"]
+extras = [
+    "onnxruntime",
+    "requests",
+    "tensorflow",
+    "torch",
+]
+
 
 [tool.setuptools]
 package-dir = {"" = "src"}
