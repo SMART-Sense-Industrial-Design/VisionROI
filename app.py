@@ -79,21 +79,37 @@ def load_custom_module(name: str) -> ModuleType | None:
     spec.loader.exec_module(module)
     return module
 
+
+async def read_and_queue_frame(
+    queue: asyncio.Queue[str], frame_processor=None
+) -> None:
+    if camera is None:
+        await asyncio.sleep(0.1)
+        return
+    success, frame = await asyncio.to_thread(camera.read)
+    if not success:
+        await asyncio.sleep(0.1)
+        return
+    if frame_processor:
+        await frame_processor(frame)
+    _, buffer = cv2.imencode('.jpg', frame)
+    frame_b64 = base64.b64encode(buffer).decode("utf-8")
+    if queue.full():
+        try:
+            queue.get_nowait()
+        except asyncio.QueueEmpty:
+            pass
+    await queue.put(frame_b64)
+    await asyncio.sleep(0.05)
+
 async def run_inference_loop():
     custom_module = load_custom_module(active_source)
-    while True:
-        if camera is None:
-            await asyncio.sleep(0.1)
-            continue
-        success, frame = await asyncio.to_thread(camera.read)
-        if not success:
-            await asyncio.sleep(0.1)
-            continue
+
+    async def process_frame(frame):
         if not inference_rois:
             if custom_module and hasattr(custom_module, "process"):
                 try:
                     await asyncio.to_thread(custom_module.process, frame)
-
                 except Exception:
                     pass
         else:
@@ -116,35 +132,14 @@ async def run_inference_loop():
                     1,
                     cv2.LINE_AA,
                 )
-        _, buffer = cv2.imencode('.jpg', frame)
-        frame_b64 = base64.b64encode(buffer).decode("utf-8")
-        if frame_queue.full():
-            try:
-                frame_queue.get_nowait()
-            except asyncio.QueueEmpty:
-                pass
-        await frame_queue.put(frame_b64)
-        await asyncio.sleep(0.05)
+
+    while True:
+        await read_and_queue_frame(frame_queue, process_frame)
 
 
 async def run_roi_loop():
     while True:
-        if camera is None:
-            await asyncio.sleep(0.1)
-            continue
-        success, frame = await asyncio.to_thread(camera.read)
-        if not success:
-            await asyncio.sleep(0.1)
-            continue
-        _, buffer = cv2.imencode('.jpg', frame)
-        frame_b64 = base64.b64encode(buffer).decode("utf-8")
-        if roi_frame_queue.full():
-            try:
-                roi_frame_queue.get_nowait()
-            except asyncio.QueueEmpty:
-                pass
-        await roi_frame_queue.put(frame_b64)
-        await asyncio.sleep(0.05)
+        await read_and_queue_frame(roi_frame_queue)
 
 
 # ✅ WebSocket video stream
