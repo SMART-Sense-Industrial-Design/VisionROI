@@ -1,5 +1,5 @@
 :root {
-  --header-height: 60px;
+  --header-height: 80px;
   --sidenav-width: 200px;
 }
 
@@ -32,7 +32,7 @@ header h1 {
 
 .logo {
     margin-left: auto;
-    max-height: 100%;
+    max-height: calc(var(--header-height) - 20px);
     width: auto;
     object-fit: contain;
 }
@@ -45,7 +45,7 @@ header h1 {
   box-sizing: border-box;
   margin-top: var(--header-height);
   transition: width 0.3s ease;
-
+}
 
 .sidenav a {
   padding: 10px 20px;
