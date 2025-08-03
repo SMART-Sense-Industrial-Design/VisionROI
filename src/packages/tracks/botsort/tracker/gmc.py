@@ -1,5 +1,4 @@
 import cv2
-# import matplotlib.pyplot as plt
 import numpy as np
 import copy
 import time
@@ -214,9 +213,6 @@ class GMC:
                 matches_img = cv2.circle(matches_img, prev_pt, 2, tuple(color), -1)
                 matches_img = cv2.circle(matches_img, curr_pt, 2, tuple(color), -1)
 
-            # plt.figure()
-            # plt.imshow(matches_img)
-            # plt.show()
 
         # Find rigid matrix
         if (np.size(prevPoints, 0) > 4) and (np.size(prevPoints, 0) == np.size(prevPoints, 0)):
