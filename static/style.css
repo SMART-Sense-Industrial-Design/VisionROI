@@ -25,9 +25,16 @@ header {
     z-index: 1000;
 }
 
+header h1 {
+  margin: 0;
+  font-size: 1.5rem;
+}
+
 .logo {
-    height: 40px;
     margin-left: auto;
+    max-height: 100%;
+    width: auto;
+    object-fit: contain;
 }
 
 .sidenav {
@@ -38,7 +45,7 @@ header {
   box-sizing: border-box;
   margin-top: var(--header-height);
   transition: width 0.3s ease;
-}
+
 
 .sidenav a {
   padding: 10px 20px;
@@ -53,6 +60,11 @@ header {
   color: white;
 }
 
+.sidenav a.active {
+  background-color: #04AA6D;
+  color: white;
+}
+
 main {
   margin-top: var(--header-height);
   flex: 1;
@@ -60,4 +72,10 @@ main {
   padding: 20px;
   box-sizing: border-box;
   transition: margin-left 0.3s ease;
+}
+
+@media (max-width: 600px) {
+  :root {
+    --sidenav-width: 150px;
+  }
 }
