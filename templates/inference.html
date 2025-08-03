@@ -11,6 +11,7 @@
     <img id="video" width="640" height="480" />
 </div>
 <script>
+(function() {
     let socket;
     let rois = [];
     const video = document.getElementById("video");
@@ -21,19 +22,18 @@
     startButton.onclick = startInference;
     stopButton.onclick = stopInference;
 
-      async function loadSources() {
-          const res = await fetch("/source_list");
-          const data = await res.json();
-          const select = document.getElementById("sourceSelect");
-          select.innerHTML = '';
-          data.forEach(item => {
-              const opt = document.createElement("option");
-              opt.value = item.name;
-              opt.textContent = item.name;
-              select.appendChild(opt);
-          });
-      }
-
+    async function loadSources() {
+        const res = await fetch("/source_list");
+        const data = await res.json();
+        const select = document.getElementById("sourceSelect");
+        select.innerHTML = '';
+        data.forEach(item => {
+            const opt = document.createElement("option");
+            opt.value = item.name;
+            opt.textContent = item.name;
+            select.appendChild(opt);
+        });
+    }
 
     async function startInference() {
         const name = document.getElementById("sourceSelect").value;
@@ -120,6 +120,6 @@
         await loadSources();
         await checkStatus();
     })();
-
+})();
 </script>
 {% endblock %}
