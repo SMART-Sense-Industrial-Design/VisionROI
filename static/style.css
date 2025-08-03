@@ -17,10 +17,9 @@ header {
   background-color: #111;
   color: #fff;
     display: flex;
-    align-items: flex-end;
+    align-items: center;
     justify-content: flex-start;
-    padding-left: 10;
-
+    padding-left: 0;
     padding-right: 20px;
     box-sizing: border-box;
     z-index: 1000;
