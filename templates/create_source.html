@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Create Source{% endblock %}
-{% block head %}
+{% block content %}
+
 <style>
     table {
         border-collapse: collapse;
@@ -22,8 +23,7 @@
         cursor: pointer;
     }
 </style>
-{% endblock %}
-{% block content %}
+
 <h2>Create Source</h2>
 <form method="POST" action="/create_source" enctype="multipart/form-data">
     <div>
@@ -93,7 +93,7 @@
             console.error('Failed to load sources', err);
         }
     }
+    loadSources();
 
-    document.addEventListener('DOMContentLoaded', loadSources);
 </script>
 {% endblock %}

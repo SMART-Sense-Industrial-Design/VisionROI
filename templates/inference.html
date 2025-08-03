@@ -1,5 +1,6 @@
 {% extends "base.html" %}
-{% block title %}Inference with ROI{% endblock %}
+{% block title %}Inference{% endblock %}
+
 {% block content %}
 <h2>Inference with Saved ROI</h2>
 <select id="sourceSelect"></select>
@@ -9,7 +10,6 @@
 <div style="position: relative; display: inline-block;">
     <img id="video" width="640" height="480" />
 </div>
-
 <script>
     let socket;
     let rois = [];
@@ -25,6 +25,7 @@
         const res = await fetch("/data_sources");
         const data = await res.json();
         const select = document.getElementById("sourceSelect");
+        select.innerHTML = '';
         data.forEach(name => {
             const opt = document.createElement("option");
             opt.value = name;
@@ -32,6 +33,7 @@
             select.appendChild(opt);
         });
     }
+
 
     async function startInference() {
         const name = document.getElementById("sourceSelect").value;
@@ -114,9 +116,10 @@
         startButton.innerText = "Start";
     }
 
-    window.addEventListener('load', async () => {
+    (async () => {
         await loadSources();
         await checkStatus();
-    });
+    })();
+
 </script>
 {% endblock %}
