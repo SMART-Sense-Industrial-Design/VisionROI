@@ -7,6 +7,7 @@ import shutil
 import importlib.util
 import os, sys
 from types import ModuleType
+from pathlib import Path
 
 frame_queue: asyncio.Queue[str] = asyncio.Queue(maxsize=1)
 inference_task: asyncio.Task | None = None
@@ -320,8 +321,9 @@ async def inference_status():
 
 @app.route("/data_sources")
 async def list_sources():
+    base_dir = Path(__file__).resolve().parent / "data_sources"
     try:
-        names = [d for d in os.listdir("data_sources") if os.path.isdir(os.path.join("data_sources", d))]
+        names = [d.name for d in base_dir.iterdir() if d.is_dir()]
     except FileNotFoundError:
         names = []
     return jsonify(names)

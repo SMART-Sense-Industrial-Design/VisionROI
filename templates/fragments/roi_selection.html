@@ -38,13 +38,13 @@
         };
 
         async function loadSources() {
-            const res = await fetch("/data_sources");
+            const res = await fetch("/source_list");
             const data = await res.json();
             const select = document.getElementById("sourceSelect");
-            data.forEach(name => {
+            data.forEach(item => {
                 const opt = document.createElement("option");
-                opt.value = name;
-                opt.textContent = name;
+                opt.value = item.name;
+                opt.textContent = item.name;
                 select.appendChild(opt);
             });
         }

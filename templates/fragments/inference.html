@@ -18,17 +18,17 @@
     startButton.onclick = startInference;
     stopButton.onclick = stopInference;
 
-    async function loadSources() {
-        const res = await fetch("/data_sources");
-        const data = await res.json();
-        const select = document.getElementById("sourceSelect");
-        data.forEach(name => {
-            const opt = document.createElement("option");
-            opt.value = name;
-            opt.textContent = name;
-            select.appendChild(opt);
-        });
-    }
+      async function loadSources() {
+          const res = await fetch("/source_list");
+          const data = await res.json();
+          const select = document.getElementById("sourceSelect");
+          data.forEach(item => {
+              const opt = document.createElement("option");
+              opt.value = item.name;
+              opt.textContent = item.name;
+              select.appendChild(opt);
+          });
+      }
 
     async function startInference() {
         const name = document.getElementById("sourceSelect").value;
