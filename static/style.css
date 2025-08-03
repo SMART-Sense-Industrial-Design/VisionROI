@@ -17,9 +17,8 @@ header {
   background-color: #111;
   color: #fff;
     display: flex;
-    align-items: center;
+    align-items: flex-end;
     justify-content: flex-start;
-    gap: 20px;
     padding-left: 20px;
     padding-right: 20px;
     box-sizing: border-box;
@@ -35,6 +34,7 @@ header h1 {
     height: calc(var(--header-height) - 20px);
     width: auto;
     object-fit: contain;
+    margin-right: 10px;
 }
 
 .sidenav {
