@@ -16,19 +16,19 @@
 ติดตั้งแพ็กเกจและ dependencies ด้วย `pip`:
 
 ```bash
-pip install .
+pip install "."
 ```
 
 หากต้องการ dependencies เพิ่มเติม เช่น `onnxruntime`, `requests`, `tensorflow`, `torch` สามารถติดตั้งผ่าน extras ได้:
 
 ```bash
-pip install .[extras]
+pip install ".[extras]"
 ```
 
 หรือหากต้องการติดตั้งแบบ editable:
 
 ```bash
-pip install -e .
+pip install -e "."
 ```
 
 ## การรันโปรเจ็กต์
