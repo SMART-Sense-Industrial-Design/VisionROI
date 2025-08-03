@@ -10,7 +10,14 @@ requires-python = ">=3.10"
 dependencies = [
     "Quart",
     "opencv-python",
+    "numpy",
 ]
+
+[project.optional-dependencies]
+notify = ["requests"]
+onnx = ["onnxruntime"]
+tensorflow = ["tensorflow"]
+torch = ["torch"]
 
 [tool.setuptools]
 package-dir = {"" = "src"}
