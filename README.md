@@ -36,16 +36,6 @@ pip install -e .
 2. เปิดเบราว์เซอร์ไปที่ `http://localhost:5000/home`
 
 ## การตั้งค่าการแจ้งเตือน
-### Line Notify
-ตัวอย่างการใช้งาน:
-
-```python
-from src.packages.notification.line_notify import LineNotify
-
-line = LineNotify(token="YOUR_LINE_TOKEN", reciever_id="YOUR_USER_ID")
-line.start_line_notify_text("สวัสดี")
-```
-
 ### Telegram Notify
 ตัวอย่างการใช้งาน:
 
