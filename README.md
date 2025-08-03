@@ -8,7 +8,7 @@
 
 ### Dependencies เพิ่มเติม
 - `onnxruntime` – สำหรับรันโมเดล ONNX
-- `requests` – ใช้ส่งการแจ้งเตือนผ่าน Line/Telegram
+- `requests` – ใช้ส่งการแจ้งเตือนผ่าน Telegram เท่านั้น (หากต้องการรองรับ Line จำเป็นต้องพัฒนาโมดูลเพิ่มเติม)
 - `tensorflow` – สำหรับโมเดลที่ใช้ TFLite
 - `torch` – สำหรับฟังก์ชันที่ใช้ PyTorch
 
