@@ -1,101 +1,99 @@
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Create Source</title>
-    <style>
-        table {
-            border-collapse: collapse;
-            width: 100%;
-            margin-top: 20px;
-        }
-        th, td {
-            border: 1px solid #ccc;
-            padding: 8px;
-        }
-        th {
-            background-color: #f0f0f0;
-        }
-        button.delete {
-            background-color: #e74c3c;
-            color: #fff;
-            border: none;
-            padding: 6px 12px;
-            cursor: pointer;
-        }
-    </style>
-</head>
-<body>
-    <h2>Create Source</h2>
-    <form method="POST" action="/create_source" enctype="multipart/form-data">
-        <div>
-            <label for="name">Name:</label>
-            <input type="text" id="name" name="name" required>
-        </div>
-        <div>
-            <label for="source">Source:</label>
-            <input type="text" id="source" name="source" required>
-        </div>
-        <div>
-            <label for="model">Model:</label>
-            <input type="file" id="model" name="model">
-        </div>
-        <div>
-            <label for="label">Label:</label>
-            <input type="file" id="label" name="label">
-        </div>
-        <button type="submit">Create</button>
-    </form>
+{% extends "base.html" %}
+{% block title %}Create Source{% endblock %}
+{% block head %}
+<style>
+    table {
+        border-collapse: collapse;
+        width: 100%;
+        margin-top: 20px;
+    }
+    th, td {
+        border: 1px solid #ccc;
+        padding: 8px;
+    }
+    th {
+        background-color: #f0f0f0;
+    }
+    button.delete {
+        background-color: #e74c3c;
+        color: #fff;
+        border: none;
+        padding: 6px 12px;
+        cursor: pointer;
+    }
+</style>
+{% endblock %}
+{% block content %}
+<h2>Create Source</h2>
+<form method="POST" action="/create_source" enctype="multipart/form-data">
+    <div>
+        <label for="name">Name:</label>
+        <input type="text" id="name" name="name" required>
+    </div>
+    <div>
+        <label for="source">Source:</label>
+        <input type="text" id="source" name="source" required>
+    </div>
+    <div>
+        <label for="model">Model:</label>
+        <input type="file" id="model" name="model">
+    </div>
+    <div>
+        <label for="label">Label:</label>
+        <input type="file" id="label" name="label">
+    </div>
+    <button type="submit">Create</button>
+</form>
 
-    <h3>Source List</h3>
-    <table>
-        <thead>
-            <tr>
-                <th>Name</th>
-                <th>Source</th>
-                <th>Actions</th>
-            </tr>
-        </thead>
-        <tbody id="source-table-body">
-        </tbody>
-    </table>
+<h3>Source List</h3>
+<table>
+    <thead>
+        <tr>
+            <th>Name</th>
+            <th>Source</th>
+            <th>Actions</th>
+        </tr>
+    </thead>
+    <tbody id="source-table-body">
+    </tbody>
+</table>
 
-    <script>
-        async function loadSources() {
-            try {
-                const resp = await fetch('/source_list');
-                const data = await resp.json();
-                const tbody = document.getElementById('source-table-body');
-                tbody.innerHTML = '';
-                data.forEach(src => {
-                    const tr = document.createElement('tr');
-                    const nameTd = document.createElement('td');
-                    nameTd.textContent = src.name;
-                    const sourceTd = document.createElement('td');
-                    sourceTd.textContent = src.source;
-                    const actionTd = document.createElement('td');
-                    const delBtn = document.createElement('button');
-                    delBtn.textContent = 'Delete';
-                    delBtn.classList.add('delete');
-                    delBtn.addEventListener('click', async () => {
-                        if (confirm(`Delete ${src.name}?`)) {
-                            const res = await fetch(`/delete_source/${encodeURIComponent(src.name)}`, {method: 'DELETE'});
-                            if (res.ok) {
-                                await loadSources();
-                            }
+<script>
+    async function loadSources() {
+        try {
+            const resp = await fetch('/source_list');
+            const data = await resp.json();
+            const tbody = document.getElementById('source-table-body');
+            tbody.innerHTML = '';
+            data.forEach(src => {
+                const tr = document.createElement('tr');
+                const nameTd = document.createElement('td');
+                nameTd.textContent = src.name;
+                const sourceTd = document.createElement('td');
+                sourceTd.textContent = src.source;
+                const actionTd = document.createElement('td');
+                const delBtn = document.createElement('button');
+                delBtn.textContent = 'Delete';
+                delBtn.classList.add('delete');
+                delBtn.addEventListener('click', async () => {
+                    if (confirm(`Delete ${src.name}?`)) {
+                        const res = await fetch(`/delete_source/${encodeURIComponent(src.name)}`, {method: 'DELETE'});
+                        if (res.ok) {
+                            await loadSources();
                         }
-                    });
-                    actionTd.appendChild(delBtn);
-                    tr.appendChild(nameTd);
-                    tr.appendChild(sourceTd);
-                    tr.appendChild(actionTd);
-                    tbody.appendChild(tr);
+                    }
                 });
-            } catch (err) {
-                console.error('Failed to load sources', err);
-            }
+                actionTd.appendChild(delBtn);
+                tr.appendChild(nameTd);
+                tr.appendChild(sourceTd);
+                tr.appendChild(actionTd);
+                tbody.appendChild(tr);
+            });
+        } catch (err) {
+            console.error('Failed to load sources', err);
         }
+    }
 
-        document.addEventListener('DOMContentLoaded', loadSources);
-    </script>
-</body>
-</html>
+    document.addEventListener('DOMContentLoaded', loadSources);
+</script>
+{% endblock %}

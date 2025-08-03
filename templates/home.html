@@ -1,67 +1,12 @@
-<!DOCTYPE html>
-<html>
-<head>
-  <title>AI Stream Dashboard</title>
-  <style>
-    body {
-      margin: 0;
-      font-family: Arial, sans-serif;
-    }
-
-    .sidenav {
-      height: 100vh;
-      width: 200px;
-      position: fixed;
-      left: 0;
-      top: 0;
-      background-color: #111;
-      padding-top: 20px;
-    }
-
-    .sidenav a {
-      padding: 10px 20px;
-      text-decoration: none;
-      font-size: 16px;
-      color: #ddd;
-      display: block;
-    }
-
-    .sidenav a:hover {
-      background-color: #575757;
-      color: white;
-    }
-
-    .main {
-      margin-left: 210px;
-      padding: 20px;
-    }
-
-    h2 {
-      margin-top: 0;
-    }
-  </style>
-</head>
-<body>
-
-  <!-- Side Menu -->
-  <div class="sidenav">
-    <a href="/home">🏠 Home</a>
-    <a href="/create_source">➕ Create Source</a>
-    <a href="/roi">📐 ROI Selection</a>
-    <a href="/inference">🤖 Inference</a>
-  </div>
-
-  <!-- Main Content -->
-  <div class="main">
-    <h2>AI Video Stream Dashboard</h2>
-    <p>Welcome! Use the side menu to navigate between features:</p>
-    <ul>
-      <li><strong>➕ Create Source</strong> – configure a new video source and upload the corresponding model and label files.</li>
-      <li><strong>📐 ROI Selection</strong> – draw Regions of Interest on the live camera stream and save them to a JSON file.</li>
-      <li><strong>🤖 Inference</strong> – load saved ROI and run AI model inference on those regions.</li>
-    </ul>
-    <p>This dashboard is designed to help visualize and interact with AI-powered video processing in real time.</p>
-  </div>
-
-</body>
-</html>
+{% extends "base.html" %}
+{% block title %}AI Stream Dashboard{% endblock %}
+{% block content %}
+<h2>AI Video Stream Dashboard</h2>
+<p>Welcome! Use the side menu to navigate between features:</p>
+<ul>
+  <li><strong>➕ Create Source</strong> – configure a new video source and upload the corresponding model and label files.</li>
+  <li><strong>📐 ROI Selection</strong> – draw Regions of Interest on the live camera stream and save them to a JSON file.</li>
+  <li><strong>🤖 Inference</strong> – load saved ROI and run AI model inference on those regions.</li>
+</ul>
+<p>This dashboard is designed to help visualize and interact with AI-powered video processing in real time.</p>
+{% endblock %}
