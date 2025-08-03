@@ -8,6 +8,8 @@ import importlib.util
 import os, sys
 from types import ModuleType
 from pathlib import Path
+import contextlib
+from typing import Callable, Awaitable, Any
 
 frame_queue: asyncio.Queue[str] = asyncio.Queue(maxsize=1)
 inference_task: asyncio.Task | None = None
@@ -147,6 +149,44 @@ async def run_roi_loop():
         await asyncio.sleep(0.05)
 
 
+# ฟังก์ชัน generic สำหรับเริ่มและหยุดงานที่ใช้กล้อง
+async def start_camera_task(task: asyncio.Task | None, loop_func: Callable[[], Awaitable[Any]]):
+    """เริ่มงานแบบ asynchronous ที่ต้องใช้กล้อง"""
+    global camera
+    if task is not None and not task.done():
+        return task, {"status": "already_running"}, 200
+    if camera is None or not camera.isOpened():
+        camera = cv2.VideoCapture(camera_source)
+        if not camera.isOpened():
+            camera = None
+            return task, {"status": "error", "message": "open_failed"}, 400
+    task = asyncio.create_task(loop_func())
+    return task, {"status": "started"}, 200
+
+
+async def stop_camera_task(task: asyncio.Task | None):
+    """หยุดงานที่ใช้กล้อง หากไม่มีงานจะคืนสถานะ no_task"""
+    global camera, inference_task, roi_task
+    if task is not None and not task.done():
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+        task = None
+        status = "stopped"
+    else:
+        status = "no_task"
+    # ปล่อยกล้องเมื่อไม่มีงานอื่นใช้งานอยู่
+    if (
+        (inference_task is None or inference_task.done())
+        and (roi_task is None or roi_task.done())
+        and camera
+        and camera.isOpened()
+    ):
+        camera.release()
+        camera = None
+    return task, {"status": status}, 200
+
+
 # ✅ WebSocket video stream
 @app.websocket('/ws')
 async def ws():
@@ -243,77 +283,41 @@ async def create_source():
 # ✅ เริ่มงาน inference
 @app.route('/start_inference', methods=["POST"])
 async def start_inference():
-    global inference_task, camera, roi_task, inference_rois
+    global inference_task, roi_task, inference_rois
     if roi_task is not None and not roi_task.done():
         return jsonify({"status": "roi_running"}), 400
     data = await request.get_json() or {}
     inference_rois = data.get("rois", [])
-    if inference_task is None or inference_task.done():
-        camera = cv2.VideoCapture(camera_source)
-        if not camera.isOpened():
-            camera = None
-            return jsonify({"status": "error", "message": "open_failed"}), 400
-        inference_task = asyncio.create_task(run_inference_loop())
-        return jsonify({"status": "started"})
-    return jsonify({"status": "already_running"})
+    inference_task, resp, status = await start_camera_task(
+        inference_task, run_inference_loop
+    )
+    return jsonify(resp), status
 
 
 # ✅ หยุดงาน inference
 @app.route('/stop_inference', methods=["POST"])
 async def stop_inference():
-    global inference_task, camera
-    if inference_task is not None and not inference_task.done():
-        inference_task.cancel()
-        try:
-            await inference_task
-        except asyncio.CancelledError:
-            pass
-        inference_task = None
-        if camera and camera.isOpened():
-            camera.release()
-            camera = None
-        return jsonify({"status": "stopped"})
-    if camera and camera.isOpened():
-        camera.release()
-        camera = None
-    return jsonify({"status": "no_task"})
+    global inference_task
+    inference_task, resp, status = await stop_camera_task(inference_task)
+    return jsonify(resp), status
 
 
 # ✅ เริ่มงาน ROI stream
 @app.route('/start_roi_stream', methods=["POST"])
 async def start_roi_stream():
-    global roi_task, camera, inference_task
+    global roi_task, inference_task
     if inference_task is not None and not inference_task.done():
         return jsonify({"status": "inference_running"}), 400
-    if roi_task is None or roi_task.done():
-        camera = cv2.VideoCapture(camera_source)
-        if not camera.isOpened():
-            camera = None
-            return jsonify({"status": "error", "message": "open_failed"}), 400
-        roi_task = asyncio.create_task(run_roi_loop())
-        return jsonify({"status": "started"})
-    return jsonify({"status": "already_running"})
+    roi_task, resp, status = await start_camera_task(roi_task, run_roi_loop)
+    return jsonify(resp), status
 
 
 # ✅ หยุดงาน ROI stream
 @app.route('/stop_roi_stream', methods=["POST"])
 async def stop_roi_stream():
-    global roi_task, camera
-    if roi_task is not None and not roi_task.done():
-        roi_task.cancel()
-        try:
-            await roi_task
-        except asyncio.CancelledError:
-            pass
-        roi_task = None
-        if camera and camera.isOpened():
-            camera.release()
-            camera = None
-        return jsonify({"status": "stopped"})
-    if camera and camera.isOpened():
-        camera.release()
-        camera = None
-    return jsonify({"status": "no_task"})
+    global roi_task
+    roi_task, resp, status = await stop_camera_task(roi_task)
+    return jsonify(resp), status
 
 # ✅ สถานะงาน inference
 # เพิ่ม endpoint สำหรับตรวจสอบว่างาน inference กำลังทำงานอยู่หรือไม่
