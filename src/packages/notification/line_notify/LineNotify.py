@@ -5,7 +5,8 @@ import cv2
 from datetime import datetime
 import threading
 # from concurrent.futures import ThreadPoolExecutor
-import requests
+
+from packages.app_config import AppConfig
 
 
 
