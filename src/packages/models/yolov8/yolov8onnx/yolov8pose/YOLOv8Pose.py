@@ -4,6 +4,8 @@ import cv2
 import onnxruntime
 from typing import List, Tuple, Dict
 import base64
+
+from models.common.box_ops import compute_iou, xywh2xyxy
 # from utils import file_decode
 
 class YOLOv8Pose:
@@ -174,32 +176,6 @@ KEYPOINT_DICT = {
     'left_ankle': 15,
     'right_ankle': 16
 }
-
-def xywh2xyxy(box: np.ndarray) -> np.ndarray:
-    box_xyxy = box.copy()
-    box_xyxy[..., 0] = box[..., 0] - box[..., 2] / 2
-    box_xyxy[..., 1] = box[..., 1] - box[..., 3] / 2
-    box_xyxy[..., 2] = box[..., 0] + box[..., 2] / 2
-    box_xyxy[..., 3] = box[..., 1] + box[..., 3] / 2
-    return box_xyxy
-
-def compute_iou(box: np.ndarray, boxes: np.ndarray) -> np.ndarray:
-    '''
-    box and boxes are format as [x1, y1, x2, y2]
-    '''
-    # inter area
-    xmin = np.maximum(box[0], boxes[:, 0])
-    ymin = np.maximum(box[1], boxes[:, 1])
-    xmax = np.minimum(box[2], boxes[:, 2])
-    ymax = np.minimum(box[3], boxes[:, 3])
-    inter_area = np.maximum(0, xmax-xmin) * np.maximum(0, ymax-ymin)
-
-    # union area
-    box_area = (box[2] - box[0]) * (box[3] - box[1])
-    boxes_area = (boxes[:, 2] - boxes[:, 0]) * (boxes[:, 3] - boxes[:, 1])
-    union_area = box_area + boxes_area - inter_area
-
-    return inter_area / union_area
 
 def nms_process(boxes: np.ndarray, scores: np.ndarray, iou_thr: float) -> List[int]:
     sorted_idx = np.argsort(scores)[::-1]

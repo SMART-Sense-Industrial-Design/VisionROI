@@ -3,54 +3,15 @@ import cv2
 import numpy as np
 import onnxruntime
 
+from models.common.box_ops import multiclass_nms
+
+
 def xywh_to_xyxy(boxes):
     # Convert [x, y, w, h] to [x1, y1, x2, y2]
     boxes_xyxy = np.copy(boxes)
     boxes_xyxy[:, 2] = boxes[:, 0] + boxes[:, 2]
     boxes_xyxy[:, 3] = boxes[:, 1] + boxes[:, 3]
     return boxes_xyxy
-
-
-def compute_iou(box, boxes):
-    xmin = np.maximum(box[0], boxes[:, 0])
-    ymin = np.maximum(box[1], boxes[:, 1])
-    xmax = np.minimum(box[2], boxes[:, 2])
-    ymax = np.minimum(box[3], boxes[:, 3])
-
-    intersection_area = np.maximum(0, xmax - xmin) * np.maximum(0, ymax - ymin)
-    box_area = (box[2] - box[0]) * (box[3] - box[1])
-    boxes_area = (boxes[:, 2] - boxes[:, 0]) * (boxes[:, 3] - boxes[:, 1])
-    union_area = box_area + boxes_area - intersection_area
-    return intersection_area / union_area
-
-
-def nms(boxes, scores, iou_threshold):
-    sorted_indices = np.argsort(scores)[::-1]
-    keep_boxes = []
-    while sorted_indices.size > 0:
-        box_id = sorted_indices[0]
-        keep_boxes.append(box_id)
-        ious = compute_iou(boxes[box_id, :], boxes[sorted_indices[1:], :])
-        keep_indices = np.where(ious < iou_threshold)[0]
-        sorted_indices = sorted_indices[keep_indices + 1]
-    return keep_boxes
-
-
-
-def multiclass_nms(boxes, scores, class_ids, iou_threshold):
-    unique_class_ids = np.unique(class_ids)
-    keep_boxes = []
-    for class_id in unique_class_ids:
-        class_indices = np.where(class_ids == class_id)[0]
-        class_boxes = boxes[class_indices, :]
-        class_scores = scores[class_indices]
-
-        # 🔁 convert to xyxy for NMS
-        class_boxes_xyxy = xywh_to_xyxy(class_boxes)
-
-        class_keep = nms(class_boxes_xyxy, class_scores, iou_threshold)
-        keep_boxes.extend(class_indices[class_keep])
-    return keep_boxes
 
 
 
@@ -115,7 +76,8 @@ class YOLOv8:
         boxes_xywh = self.extract_boxes(preds[:, :4], original_shape, new_unpad)
         boxes_xywh = np.array(boxes_xywh)
 
-        indices = multiclass_nms(boxes_xywh, scores, class_ids, self.iou_threshold)
+        boxes_xyxy = xywh_to_xyxy(boxes_xywh)
+        indices = multiclass_nms(boxes_xyxy, scores, class_ids, self.iou_threshold)
         if len(indices) == 0:
             return np.empty((0, 4), int), np.array([]), np.array([])
 
