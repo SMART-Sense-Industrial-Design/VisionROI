@@ -8,29 +8,31 @@
 </div>
 
 <script>
-    let socket;
-    let rois = [];
-    const video = document.getElementById("video");
-    const startButton = document.getElementById("startButton");
-    const stopButton = document.getElementById("stopButton");
-    const statusEl = document.getElementById("status");
+    (function() {
+        let socket;
+        let rois = [];
+        const video = document.getElementById("video");
+        const startButton = document.getElementById("startButton");
+        const stopButton = document.getElementById("stopButton");
+        const statusEl = document.getElementById("status");
 
-    startButton.onclick = startInference;
-    stopButton.onclick = stopInference;
+        startButton.onclick = startInference;
+        stopButton.onclick = stopInference;
 
-      async function loadSources() {
-          const res = await fetch("/source_list");
-          const data = await res.json();
-          const select = document.getElementById("sourceSelect");
-          data.forEach(item => {
-              const opt = document.createElement("option");
-              opt.value = item.name;
-              opt.textContent = item.name;
-              select.appendChild(opt);
-          });
-      }
+        async function loadSources() {
+            const res = await fetch("/source_list");
+            const data = await res.json();
+            const select = document.getElementById("sourceSelect");
+            select.innerHTML = '';
+            data.forEach(item => {
+                const opt = document.createElement("option");
+                opt.value = item.name;
+                opt.textContent = item.name;
+                select.appendChild(opt);
+            });
+        }
 
-    async function startInference() {
+        async function startInference() {
         const name = document.getElementById("sourceSelect").value;
         if (!name) {
             statusEl.innerText = "Select source first";
@@ -68,9 +70,9 @@
             openSocket();
             setRunningUI();
         }
-    }
+        }
 
-    async function stopInference() {
+        async function stopInference() {
         await fetch("/stop_inference", { method: "POST" });
         if (socket) {
             socket.close();
@@ -80,16 +82,16 @@
         startButton.innerText = "Resume";
         startButton.disabled = false;
         stopButton.disabled = true;
-    }
+        }
 
-    function openSocket() {
+        function openSocket() {
         socket = new WebSocket("ws://" + location.host + "/ws");
         socket.onmessage = function(event) {
             video.src = 'data:image/jpeg;base64,' + event.data;
         };
-    }
+        }
 
-    async function checkStatus() {
+        async function checkStatus() {
         const name = document.getElementById("sourceSelect").value;
         const res = await fetch("/inference_status");
         const data = await res.json();
@@ -102,19 +104,20 @@
             startButton.disabled = false;
             stopButton.disabled = true;
         }
-    }
+        }
 
-    function setRunningUI() {
+        function setRunningUI() {
         statusEl.innerText = "Running";
         startButton.disabled = true;
         stopButton.disabled = false;
         startButton.innerText = "Start";
-    }
+        }
 
-    (async () => {
-        await loadSources();
-        await checkStatus();
+        (async () => {
+            await loadSources();
+            await checkStatus();
+        })();
+
+        // ไม่มีการวาด ROI ในฝั่งเบราว์เซอร์อีกต่อไป
     })();
-
-    // ไม่มีการวาด ROI ในฝั่งเบราว์เซอร์อีกต่อไป
 </script>
