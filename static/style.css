@@ -7,6 +7,7 @@ body {
   margin: 0;
   font-family: Arial, sans-serif;
   display: flex;
+  background-color: #ffffff;
 }
 
 header {
@@ -14,8 +15,8 @@ header {
   top: 0;
   width: 100%;
   height: var(--header-height);
-  background-color: #111;
-  color: #fff;
+  background-color: #e6f2ff !important;
+  color: #003366 !important;
     display: flex;
     align-items: center;
     justify-content: flex-start;
@@ -40,7 +41,7 @@ header h1 {
 .sidenav {
   width: var(--sidenav-width);
   height: calc(100vh - var(--header-height));
-  background-color: #111;
+  background-color: #e6f2ff !important;
   padding-top: 20px;
   box-sizing: border-box;
   margin-top: var(--header-height);
@@ -51,18 +52,18 @@ header h1 {
   padding: 10px 20px;
   text-decoration: none;
   font-size: 16px;
-  color: #ddd;
+  color: #003366 !important;
   display: block;
 }
 
 .sidenav a:hover {
-  background-color: #575757;
-  color: white;
+  background-color: #d0e7ff !important;
+  color: #003366 !important;
 }
 
 .sidenav a.active {
-  background-color: #04AA6D;
-  color: white;
+  background-color: #b2d4ff !important;
+  color: #003366 !important;
 }
 
 main {
@@ -72,6 +73,7 @@ main {
   padding: 20px;
   box-sizing: border-box;
   transition: margin-left 0.3s ease;
+  background-color: #ffffff;
 }
 
 @media (max-width: 600px) {
