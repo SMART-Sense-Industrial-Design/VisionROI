@@ -17,11 +17,12 @@ header {
   height: var(--header-height);
   background-color: #e6f2ff !important;
   color: #003366 !important;
+
     display: flex;
     align-items: center;
-    justify-content: flex-start;
-    padding-left: 0;
-    padding-right: 20px;
+    justify-content: flex-end;
+    padding-left: 20px;
+    padding-right: 0;
     box-sizing: border-box;
     z-index: 1000;
 }
@@ -35,13 +36,14 @@ header h1 {
     height: calc(var(--header-height) - 20px);
     width: auto;
     object-fit: contain;
-    margin-right: 10px;
+    margin-right: 5px;
 }
 
 .sidenav {
   width: var(--sidenav-width);
   height: calc(100vh - var(--header-height));
   background-color: #e6f2ff !important;
+
   padding-top: 20px;
   box-sizing: border-box;
   margin-top: var(--header-height);
@@ -53,6 +55,7 @@ header h1 {
   text-decoration: none;
   font-size: 16px;
   color: #003366 !important;
+
   display: block;
 }
 
@@ -64,6 +67,7 @@ header h1 {
 .sidenav a.active {
   background-color: #b2d4ff !important;
   color: #003366 !important;
+
 }
 
 main {
