@@ -13,7 +13,27 @@
 - `torch` – สำหรับฟังก์ชันที่ใช้ PyTorch
 
 ## การติดตั้ง
-ติดตั้งแพ็กเกจและ dependencies ด้วย `pip`:
+แนะนำให้สร้าง virtual environment ก่อน:
+
+```bash
+python -m venv .venv
+```
+
+หลังจากสร้างแล้ว ให้ activate environment:
+
+- **Linux/macOS**
+
+  ```bash
+  source .venv/bin/activate
+  ```
+
+- **Windows**
+
+  ```powershell
+  .venv\\Scripts\\activate
+  ```
+
+เมื่อ environment ถูก activate แล้วจึงติดตั้งแพ็กเกจและ dependencies ด้วย `pip`:
 
 ```bash
 pip install "."
