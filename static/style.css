@@ -1,5 +1,5 @@
 :root {
-  --header-height: 170px;
+  --header-height: 120px;
   --sidenav-width: 200px;
 }
 
@@ -17,15 +17,12 @@ header {
   height: var(--header-height);
   background-color: #e6f2ff;
   color: #003366;
+  display: flex;
+  align-items: center;
+  padding: 0 20px;
+  box-sizing: border-box;
+  z-index: 1000;
 
-    display: flex;
-    align-items: center;
-    justify-content: flex-end;
-    padding-left: 20px;
-    padding-right: 20px;
-
-    box-sizing: border-box;
-    z-index: 1000;
 }
 
 header h1 {
