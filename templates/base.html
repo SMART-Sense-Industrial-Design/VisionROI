@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>{% block title %}AI Stream Dashboard{% endblock %}</title>
+  <style>
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+    }
+    .sidenav {
+      height: 100vh;
+      width: 200px;
+      position: fixed;
+      left: 0;
+      top: 0;
+      background-color: #111;
+      padding-top: 20px;
+    }
+    .sidenav a {
+      padding: 10px 20px;
+      text-decoration: none;
+      font-size: 16px;
+      color: #ddd;
+      display: block;
+    }
+    .sidenav a:hover {
+      background-color: #575757;
+      color: white;
+    }
+    .main {
+      margin-left: 210px;
+      padding: 20px;
+    }
+  </style>
+</head>
+<body>
+  <div class="sidenav">
+
+    <a href="/home">🏠 Home</a>
+    <a href="/create_source">➕ Create Source</a>
+    <a href="/roi">📐 ROI Selection</a>
+    <a href="/inference">🤖 Inference</a>
+  </div>
+  <div class="main">
+    <main id="content">
+      {% block content %}{% endblock %}
+    </main>
+  </div>
+  <script>
+    function attachMenuHandlers() {
+      document.querySelectorAll('.sidenav a').forEach(link => {
+        link.addEventListener('click', async (e) => {
+          e.preventDefault();
+          const url = link.getAttribute('href');
+          const res = await fetch(url);
+          const text = await res.text();
+          const parser = new DOMParser();
+          const doc = parser.parseFromString(text, 'text/html');
+          const newContent = doc.querySelector('#content');
+          const contentEl = document.getElementById('content');
+          if (newContent && contentEl) {
+            const scripts = Array.from(newContent.querySelectorAll('script'));
+            scripts.forEach(s => s.parentNode.removeChild(s));
+            contentEl.innerHTML = newContent.innerHTML;
+            scripts.forEach(oldScript => {
+              const script = document.createElement('script');
+              if (oldScript.src) {
+                script.src = oldScript.src;
+              } else {
+                script.textContent = oldScript.textContent;
+              }
+              contentEl.appendChild(script);
+            });
+          }
+          window.history.pushState(null, '', url);
+        });
+      });
+    }
+    attachMenuHandlers();
+    window.addEventListener('popstate', async () => {
+      const url = window.location.pathname;
+      const res = await fetch(url);
+      const text = await res.text();
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(text, 'text/html');
+      const newContent = doc.querySelector('#content');
+      const contentEl = document.getElementById('content');
+      if (newContent && contentEl) {
+        const scripts = Array.from(newContent.querySelectorAll('script'));
+        scripts.forEach(s => s.parentNode.removeChild(s));
+        contentEl.innerHTML = newContent.innerHTML;
+        scripts.forEach(oldScript => {
+          const script = document.createElement('script');
+          if (oldScript.src) {
+            script.src = oldScript.src;
+          } else {
+            script.textContent = oldScript.textContent;
+          }
+          contentEl.appendChild(script);
+        });
+      }
+    });
+  </script>
+
+</body>
+</html>

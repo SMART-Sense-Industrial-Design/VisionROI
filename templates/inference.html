@@ -1,129 +1,125 @@
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Inference with ROI</title>
-</head>
-<body>
-    <h2>Inference with Saved ROI</h2>
-    <select id="sourceSelect"></select>
-    <button id="startButton">Start</button>
-    <button id="stopButton" disabled>Stop</button>
-    <p id="status"></p>
-    <div style="position: relative; display: inline-block;">
-        <img id="video" width="640" height="480" />
-    </div>
+{% extends "base.html" %}
+{% block title %}Inference{% endblock %}
 
-    <script>
-        let socket;
-        let rois = [];
-        const video = document.getElementById("video");
-        const startButton = document.getElementById("startButton");
-        const stopButton = document.getElementById("stopButton");
-        const statusEl = document.getElementById("status");
+{% block content %}
+<h2>Inference with Saved ROI</h2>
+<select id="sourceSelect"></select>
+<button id="startButton">Start</button>
+<button id="stopButton" disabled>Stop</button>
+<p id="status"></p>
+<div style="position: relative; display: inline-block;">
+    <img id="video" width="640" height="480" />
+</div>
+<script>
+    let socket;
+    let rois = [];
+    const video = document.getElementById("video");
+    const startButton = document.getElementById("startButton");
+    const stopButton = document.getElementById("stopButton");
+    const statusEl = document.getElementById("status");
 
-        startButton.onclick = startInference;
-        stopButton.onclick = stopInference;
+    startButton.onclick = startInference;
+    stopButton.onclick = stopInference;
 
-        async function loadSources() {
-            const res = await fetch("/data_sources");
-            const data = await res.json();
-            const select = document.getElementById("sourceSelect");
-            data.forEach(name => {
-                const opt = document.createElement("option");
-                opt.value = name;
-                opt.textContent = name;
-                select.appendChild(opt);
-            });
+    async function loadSources() {
+        const res = await fetch("/data_sources");
+        const data = await res.json();
+        const select = document.getElementById("sourceSelect");
+        select.innerHTML = '';
+        data.forEach(name => {
+            const opt = document.createElement("option");
+            opt.value = name;
+            opt.textContent = name;
+            select.appendChild(opt);
+        });
+    }
+
+
+    async function startInference() {
+        const name = document.getElementById("sourceSelect").value;
+        if (!name) {
+            statusEl.innerText = "Select source first";
+            return;
+        }
+        const cfg = await fetch(`/source_config?name=${encodeURIComponent(name)}`).then(r => r.json());
+
+        let roiPath = cfg.rois;
+        if (!roiPath.startsWith('/')) {
+            roiPath = `data_sources/${cfg.name}/${roiPath}`;
         }
 
-        async function startInference() {
-            const name = document.getElementById("sourceSelect").value;
-            if (!name) {
-                statusEl.innerText = "Select source first";
-                return;
-            }
-            const cfg = await fetch(`/source_config?name=${encodeURIComponent(name)}`).then(r => r.json());
-
-            let roiPath = cfg.rois;
-            if (!roiPath.startsWith('/')) {
-                roiPath = `data_sources/${cfg.name}/${roiPath}`;
-            }
-
-            const camRes = await fetch("/set_camera", {
-                method: "POST",
-                headers: {"Content-Type": "application/json"},
-                body: JSON.stringify(cfg)
-            });
-            if (!camRes.ok) {
-                statusEl.innerText = "Camera error";
-                return;
-            }
-
-            const res = await fetch(`/load_roi_file?path=${encodeURIComponent(roiPath)}`);
-            const data = await res.json();
-            statusEl.innerText = "Loaded: " + data.filename;
-            rois = data.rois;
-
-            const startRes = await fetch("/start_inference", {
-                method: "POST",
-                headers: {"Content-Type": "application/json"},
-                body: JSON.stringify({ rois })
-            });
-            const startData = await startRes.json();
-            if (startData.status === "started" || startData.status === "already_running") {
-                openSocket();
-                setRunningUI();
-            }
+        const camRes = await fetch("/set_camera", {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify(cfg)
+        });
+        if (!camRes.ok) {
+            statusEl.innerText = "Camera error";
+            return;
         }
 
-        async function stopInference() {
-            await fetch("/stop_inference", { method: "POST" });
-            if (socket) {
-                socket.close();
-                socket = null;
-            }
-            statusEl.innerText = "Stopped";
-            startButton.innerText = "Resume";
+        const res = await fetch(`/load_roi_file?path=${encodeURIComponent(roiPath)}`);
+        const data = await res.json();
+        statusEl.innerText = "Loaded: " + data.filename;
+        rois = data.rois;
+
+        const startRes = await fetch("/start_inference", {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({ rois })
+        });
+        const startData = await startRes.json();
+        if (startData.status === "started" || startData.status === "already_running") {
+            openSocket();
+            setRunningUI();
+        }
+    }
+
+    async function stopInference() {
+        await fetch("/stop_inference", { method: "POST" });
+        if (socket) {
+            socket.close();
+            socket = null;
+        }
+        statusEl.innerText = "Stopped";
+        startButton.innerText = "Resume";
+        startButton.disabled = false;
+        stopButton.disabled = true;
+    }
+
+    function openSocket() {
+        socket = new WebSocket("ws://" + location.host + "/ws");
+        socket.onmessage = function(event) {
+            video.src = 'data:image/jpeg;base64,' + event.data;
+        };
+    }
+
+    async function checkStatus() {
+        const name = document.getElementById("sourceSelect").value;
+        const res = await fetch("/inference_status");
+        const data = await res.json();
+        if (data.running && name) {
+            openSocket();
+            setRunningUI();
+        } else {
+            statusEl.innerText = "Idle";
+            startButton.innerText = "Start";
             startButton.disabled = false;
             stopButton.disabled = true;
         }
+    }
 
-        function openSocket() {
-            socket = new WebSocket("ws://" + location.host + "/ws");
-            socket.onmessage = function(event) {
-                video.src = 'data:image/jpeg;base64,' + event.data;
-            };
-        }
+    function setRunningUI() {
+        statusEl.innerText = "Running";
+        startButton.disabled = true;
+        stopButton.disabled = false;
+        startButton.innerText = "Start";
+    }
 
-        async function checkStatus() {
-            const name = document.getElementById("sourceSelect").value;
-            const res = await fetch("/inference_status");
-            const data = await res.json();
-            if (data.running && name) {
-                openSocket();
-                setRunningUI();
-            } else {
-                statusEl.innerText = "Idle";
-                startButton.innerText = "Start";
-                startButton.disabled = false;
-                stopButton.disabled = true;
-            }
-        }
+    (async () => {
+        await loadSources();
+        await checkStatus();
+    })();
 
-        function setRunningUI() {
-            statusEl.innerText = "Running";
-            startButton.disabled = true;
-            stopButton.disabled = false;
-            startButton.innerText = "Start";
-        }
-
-        // โหลดรายชื่อ source และตรวจสอบสถานะเมื่อหน้าเพจโหลด
-        window.addEventListener('load', async () => {
-            await loadSources();
-            await checkStatus();
-        });
-
-        // ไม่มีการวาด ROI ในฝั่งเบราว์เซอร์อีกต่อไป
-    </script>
-</body>
-</html>
+</script>
+{% endblock %}
