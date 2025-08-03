@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <title>{% block title %}AI Dashboard{% endblock %}</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+
 </head>
 <body>
   <header>
@@ -16,6 +17,7 @@
     <a href="/inference">🤖 Inference</a>
   </nav>
   <main>
+
     {% block content %}{% endblock %}
   </main>
 </body>
