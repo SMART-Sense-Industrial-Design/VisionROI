@@ -22,7 +22,8 @@ header {
     align-items: center;
     justify-content: flex-end;
     padding-left: 20px;
-    padding-right: 0;
+    padding-right: 20px;
+
     box-sizing: border-box;
     z-index: 1000;
 }
