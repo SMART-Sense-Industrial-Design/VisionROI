@@ -95,7 +95,7 @@ async def read_and_queue_frame(
         await asyncio.sleep(0.1)
         return
     if frame_processor:
-        await frame_processor(frame)
+        frame = await frame_processor(frame)
     _, buffer = cv2.imencode('.jpg', frame)
     frame_bytes = buffer.tobytes() if hasattr(buffer, "tobytes") else buffer
     if queue.full():
@@ -149,6 +149,7 @@ async def run_inference_loop():
                     1,
                     cv2.LINE_AA,
                 )
+        return cv2.resize(frame, (0, 0), fx=0.5, fy=0.5)
 
     while True:
         await read_and_queue_frame(frame_queue, process_frame)
