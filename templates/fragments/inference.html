@@ -31,8 +31,9 @@
         const statusEl = getEl('status');
         const sourceSelect = getEl('sourceSelect');
 
-        startButton.onclick = startInference;
-        stopButton.onclick = stopInference;
+
+            startButton.onclick = startInference;
+            stopButton.onclick = stopInference;
 
         async function loadSources() {
             const res = await fetch(`/source_list?cam=${cam}`);
@@ -139,4 +140,5 @@
         createCameraController('cam1');
         createCameraController('cam2');
     });
+
 </script>

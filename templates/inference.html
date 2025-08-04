@@ -34,8 +34,9 @@ function createCameraController(cellId) {
     const statusEl = getEl('status');
     const sourceSelect = getEl('sourceSelect');
 
-    startButton.onclick = startInference;
-    stopButton.onclick = stopInference;
+
+        startButton.onclick = startInference;
+        stopButton.onclick = stopInference;
 
     async function loadSources() {
         const res = await fetch(`/source_list?cam=${cam}`);
@@ -54,13 +55,16 @@ function createCameraController(cellId) {
         if (!name) {
             statusEl.innerText = 'Select source first';
             return;
-        }
-        const cfg = await fetch(`/source_config?name=${encodeURIComponent(name)}`).then(r => r.json());
 
-        let roiPath = cfg.rois;
-        if (!roiPath.startsWith('/')) {
-            roiPath = `data_sources/${cfg.name}/${roiPath}`;
         }
+
+        async function startInference() {
+            const name = sourceSelect.value;
+            if (!name) {
+                statusEl.innerText = "Select source first";
+                return;
+            }
+            const cfg = await fetch(`/source_config?name=${encodeURIComponent(name)}`).then(r => r.json());
 
         const camRes = await fetch(`/set_camera?cam=${cam}`, {
             method: 'POST',
@@ -86,8 +90,8 @@ function createCameraController(cellId) {
         if (startData.status === 'started' || startData.status === 'already_running') {
             openSocket();
             setRunningUI();
+
         }
-    }
 
     async function stopInference() {
         await fetch(`/stop_inference?cam=${cam}`, { method: 'POST' });
@@ -122,8 +126,8 @@ function createCameraController(cellId) {
             startButton.innerText = 'Start';
             startButton.disabled = false;
             stopButton.disabled = true;
+
         }
-    }
 
     function setRunningUI() {
         statusEl.innerText = 'Running';
@@ -142,5 +146,6 @@ document.addEventListener('DOMContentLoaded', () => {
     createCameraController('cam1');
     createCameraController('cam2');
 });
+
 </script>
 {% endblock %}
