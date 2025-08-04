@@ -84,12 +84,12 @@ async def ticker(duration: float = 0.5, interval: float = 0.01) -> int:
 
 def test_event_loop_responsive():
     async def main():
-        app.camera = DummyCamera()
-        app.inference_rois = []
-        app.active_source = ""
+        app.cameras[0] = DummyCamera()
+        app.inference_rois[0] = []
+        app.active_sources[0] = ""
         app.cv2.imencode = lambda ext, frame: (True, b"data")
 
-        loop_task = asyncio.create_task(app.run_inference_loop())
+        loop_task = asyncio.create_task(app.run_inference_loop(0))
         tick_task = asyncio.create_task(ticker())
 
         ticks = await tick_task
@@ -97,8 +97,8 @@ def test_event_loop_responsive():
         with contextlib.suppress(asyncio.CancelledError):
             await loop_task
 
-        frames = app.camera.frames_read
-        app.camera = None
+        frames = app.cameras[0].frames_read
+        app.cameras[0] = None
         return ticks, frames
 
     ticks, frames = asyncio.run(main())
