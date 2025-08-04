@@ -76,6 +76,19 @@ main {
   background-color: #ffffff;
 }
 
+.camera-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 20px;
+}
+
+.camera-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 10px;
+}
+
 @media (max-width: 600px) {
   :root {
     --sidenav-width: 150px;
