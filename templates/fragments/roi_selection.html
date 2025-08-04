@@ -108,13 +108,17 @@
                 const scaleY = canvas.height / rect.height;
                 const endX = (e.clientX - rect.left) * scaleX;
                 const endY = (e.clientY - rect.top) * scaleY;
-                currentRoi = {
-                    x: Math.min(startX, endX),
-                    y: Math.min(startY, endY),
-                    width: Math.abs(endX - startX),
-                    height: Math.abs(endY - startY)
-                };
-                rois.push(currentRoi);
+                const roiId = prompt("ROI id?");
+                if (roiId !== null) {
+                    currentRoi = {
+                        id: roiId,
+                        x: Math.min(startX, endX),
+                        y: Math.min(startY, endY),
+                        width: Math.abs(endX - startX),
+                        height: Math.abs(endY - startY)
+                    };
+                    rois.push(currentRoi);
+                }
                 currentRoi = null;
                 drawAllRois();
             };
@@ -143,6 +147,11 @@
                     ctx.strokeStyle = 'blue';
                     ctx.lineWidth = 2;
                     ctx.stroke();
+                    if (r.id !== undefined) {
+                        ctx.font = '16px sans-serif';
+                        ctx.fillStyle = 'blue';
+                        ctx.fillText(r.id, r.x, Math.max(10, r.y - 5));
+                    }
                 });
                 if (currentRoi) {
                     ctx.beginPath();
@@ -161,7 +170,13 @@
                 }
                 const res = await fetch(`/load_roi/${encodeURIComponent(currentSource)}`);
                 const data = await res.json();
-                rois = data.rois;
+                rois = data.rois.map((r, idx) => ({
+                    id: r.id ?? String(idx + 1),
+                    x: r.x,
+                    y: r.y,
+                    width: r.width,
+                    height: r.height
+                }));
                 drawAllRois();
             }
 

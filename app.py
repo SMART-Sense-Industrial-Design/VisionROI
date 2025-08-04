@@ -8,6 +8,7 @@ import os, sys
 from types import ModuleType
 from pathlib import Path
 import contextlib
+import inspect
 from typing import Callable, Awaitable, Any
 
 frame_queue: asyncio.Queue[bytes] = asyncio.Queue(maxsize=1)
@@ -107,27 +108,40 @@ async def read_and_queue_frame(
 
 async def run_inference_loop():
     custom_module = load_custom_module(active_source)
+    process_fn = getattr(custom_module, "process", None) if custom_module else None
+    process_has_id = False
+    if process_fn:
+        try:
+            process_has_id = len(inspect.signature(process_fn).parameters) >= 2
+        except (ValueError, TypeError):
+            process_has_id = False
 
     async def process_frame(frame):
         if not inference_rois:
-            if custom_module and hasattr(custom_module, "process"):
+            if process_fn:
                 try:
-                    await asyncio.to_thread(custom_module.process, frame)
+                    if process_has_id:
+                        await asyncio.to_thread(process_fn, frame, None)
+                    else:
+                        await asyncio.to_thread(process_fn, frame)
                 except Exception:
                     pass
         else:
             for i, r in enumerate(inference_rois):
                 x, y, w, h = int(r["x"]), int(r["y"]), int(r["width"]), int(r["height"])
                 roi = frame[y:y + h, x:x + w]
-                if custom_module and hasattr(custom_module, "process"):
+                if process_fn:
                     try:
-                        await asyncio.to_thread(custom_module.process, roi)
+                        if process_has_id:
+                            await asyncio.to_thread(process_fn, roi, r.get("id", str(i)))
+                        else:
+                            await asyncio.to_thread(process_fn, roi)
                     except Exception:
                         pass
                 cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
                 cv2.putText(
                     frame,
-                    f"ROI {i + 1}",
+                    str(r.get("id", i + 1)),
                     (x, max(0, y - 5)),
                     cv2.FONT_HERSHEY_SIMPLEX,
                     0.5,
@@ -409,6 +423,9 @@ async def delete_source(name: str):
 async def save_roi():
     data = await request.get_json()
     rois = data.get("rois", [])
+    for idx, r in enumerate(rois):
+        if isinstance(r, dict) and "id" not in r:
+            r["id"] = str(idx + 1)
     path = request.args.get("path", "")
     base_dir = ALLOWED_ROI_DIR
     if path:
@@ -456,6 +473,10 @@ async def load_roi(name: str):
         return jsonify({"rois": [], "filename": roi_file})
     with open(roi_path, "r") as f:
         rois = json.load(f)
+    if isinstance(rois, list):
+        for idx, r in enumerate(rois):
+            if isinstance(r, dict) and "id" not in r:
+                r["id"] = str(idx + 1)
     return jsonify({"rois": rois, "filename": roi_file})
 
 # ✅ โหลด ROI ตามพาธที่ระบุใน config
@@ -466,6 +487,10 @@ async def load_roi_file():
         return jsonify({"rois": [], "filename": "None"})
     with open(path, "r") as f:
         rois = json.load(f)
+    if isinstance(rois, list):
+        for idx, r in enumerate(rois):
+            if isinstance(r, dict) and "id" not in r:
+                r["id"] = str(idx + 1)
     return jsonify({"rois": rois, "filename": os.path.basename(path)})
 
 # ✅ ส่ง snapshot 1 เฟรม (ใช้ในหน้า inference)
