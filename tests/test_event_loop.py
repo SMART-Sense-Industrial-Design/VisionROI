@@ -55,6 +55,7 @@ cv2_stub.VideoCapture = DummyVideoCapture
 cv2_stub.imencode = lambda *a, **k: (True, b"data")
 cv2_stub.rectangle = lambda *a, **k: None
 cv2_stub.putText = lambda *a, **k: None
+cv2_stub.resize = lambda img, dsize, fx=0, fy=0, **k: img
 
 sys.modules["cv2"] = cv2_stub
 
