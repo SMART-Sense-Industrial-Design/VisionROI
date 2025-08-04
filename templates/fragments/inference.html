@@ -92,6 +92,8 @@
                 socket.close();
                 socket = null;
             }
+            // clear last frame and update UI
+            video.src = '';
             statusEl.innerText = 'Stopped';
             startButton.innerText = 'Resume';
             startButton.disabled = false;
@@ -135,9 +137,8 @@
         })();
     }
 
-    document.addEventListener('DOMContentLoaded', () => {
-        createCameraController('cam1');
-        createCameraController('cam2');
-    });
+    // initialize controllers immediately (DOMContentLoaded already fired in fragments)
+    createCameraController('cam1');
+    createCameraController('cam2');
 
 </script>
