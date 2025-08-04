@@ -362,6 +362,9 @@ async def stop_inference(cam_id: int):
 async def start_roi_stream(cam_id: int):
     if inference_tasks.get(cam_id) and not inference_tasks[cam_id].done():
         return jsonify({"status": "inference_running", "cam_id": cam_id}), 400
+    queue = get_roi_frame_queue(cam_id)
+    while not queue.empty():
+        queue.get_nowait()
     roi_tasks[cam_id], resp, status = await start_camera_task(
         cam_id, roi_tasks, run_roi_loop
     )
