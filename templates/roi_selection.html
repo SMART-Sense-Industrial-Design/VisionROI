@@ -27,6 +27,7 @@
         let currentRoi = null;
         let currentSource = "";
         let initialized = false;
+        const cam = 1;
 
         const video = document.getElementById("video");
         const canvas = document.getElementById("canvas");
@@ -68,13 +69,13 @@
             }
             currentSource = name;
             const cfg = await fetch(`/source_config?name=${encodeURIComponent(name)}`).then(r => r.json());
-            await fetch("/set_camera", {
+            await fetch(`/set_camera/${cam}`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ name, source: cfg.source })
             });
-            await fetch("/start_roi_stream", { method: "POST" });
-            socket = new WebSocket("ws://" + location.host + "/ws_roi");
+            await fetch(`/start_roi_stream/${cam}`, { method: "POST" });
+            socket = new WebSocket(`ws://${location.host}/ws_roi/${cam}`);
             socket.binaryType = "arraybuffer";
             socket.onmessage = function(event) {
                 const blob = new Blob([event.data], { type: "image/jpeg" });
@@ -92,7 +93,7 @@
                 socket.close();
                 socket = null;
             }
-            await fetch("/stop_roi_stream", { method: "POST" });
+            await fetch(`/stop_roi_stream/${cam}`, { method: "POST" });
         }
 
         canvas.onmousedown = (e) => {

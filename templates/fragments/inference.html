@@ -31,12 +31,11 @@
         const statusEl = getEl('status');
         const sourceSelect = getEl('sourceSelect');
 
-
-            startButton.onclick = startInference;
-            stopButton.onclick = stopInference;
+        startButton.onclick = startInference;
+        stopButton.onclick = stopInference;
 
         async function loadSources() {
-            const res = await fetch(`/source_list?cam=${cam}`);
+            const res = await fetch('/source_list');
             const data = await res.json();
             sourceSelect.innerHTML = '';
             data.forEach(item => {
@@ -60,7 +59,7 @@
                 roiPath = `data_sources/${cfg.name}/${roiPath}`;
             }
 
-            const camRes = await fetch(`/set_camera?cam=${cam}`, {
+            const camRes = await fetch(`/set_camera/${cam}`, {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({ name, source: cfg.source, ...cfg })
@@ -75,7 +74,7 @@
             statusEl.innerText = 'Loaded: ' + data.filename;
             rois = data.rois;
 
-            const startRes = await fetch(`/start_inference?cam=${cam}`, {
+            const startRes = await fetch(`/start_inference/${cam}`, {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({ rois })
@@ -88,7 +87,7 @@
         }
 
         async function stopInference() {
-            await fetch(`/stop_inference?cam=${cam}`, { method: 'POST' });
+            await fetch(`/stop_inference/${cam}`, { method: 'POST' });
             if (socket) {
                 socket.close();
                 socket = null;
@@ -100,7 +99,7 @@
         }
 
         function openSocket() {
-            socket = new WebSocket(`ws://${location.host}/ws?cam=${cam}`);
+            socket = new WebSocket(`ws://${location.host}/ws/${cam}`);
             socket.binaryType = 'arraybuffer';
             socket.onmessage = function(event) {
                 const blob = new Blob([event.data], { type: 'image/jpeg' });
@@ -110,7 +109,7 @@
 
         async function checkStatus() {
             const name = sourceSelect.value;
-            const res = await fetch(`/inference_status?cam=${cam}`);
+            const res = await fetch(`/inference_status/${cam}`);
             const data = await res.json();
             if (data.running && name) {
                 openSocket();
