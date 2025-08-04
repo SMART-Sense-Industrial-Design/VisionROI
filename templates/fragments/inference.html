@@ -1,142 +1,144 @@
 <h2>Inference with Saved ROI</h2>
-<div class="camera-grid">
-  <div class="camera-cell">
-    <select id="sourceSelect1"></select>
-    <button id="startButton1">Start</button>
-    <button id="stopButton1" disabled>Stop</button>
-    <p id="status1"></p>
+<div id="cam1" class="cam-cell">
+    <select id="cam1-sourceSelect"></select>
+    <button id="cam1-startButton">Start</button>
+    <button id="cam1-stopButton" disabled>Stop</button>
+    <p id="cam1-status"></p>
     <div style="position: relative; display: inline-block;">
-      <img id="video1" width="320" height="240" />
+        <img id="cam1-video" width="320" height="240" />
     </div>
-  </div>
-  <div class="camera-cell">
-    <select id="sourceSelect2"></select>
-    <button id="startButton2">Start</button>
-    <button id="stopButton2" disabled>Stop</button>
-    <p id="status2"></p>
+</div>
+<div id="cam2" class="cam-cell">
+    <select id="cam2-sourceSelect"></select>
+    <button id="cam2-startButton">Start</button>
+    <button id="cam2-stopButton" disabled>Stop</button>
+    <p id="cam2-status"></p>
     <div style="position: relative; display: inline-block;">
-      <img id="video2" width="320" height="240" />
+        <img id="cam2-video" width="320" height="240" />
     </div>
-  </div>
 </div>
 
 <script>
-    (function() {
-        function setupCamera(idx) {
-            let socket;
-            let rois = [];
-            const video = document.getElementById(`video${idx}`);
-            video.onload = () => URL.revokeObjectURL(video.src);
-            const startButton = document.getElementById(`startButton${idx}`);
-            const stopButton = document.getElementById(`stopButton${idx}`);
-            const statusEl = document.getElementById(`status${idx}`);
-            const sourceSelect = document.getElementById(`sourceSelect${idx}`);
+    function createCameraController(cellId) {
+        let socket;
+        let rois = [];
+        const cam = cellId.replace(/\D/g, '');
+        const getEl = suffix => document.getElementById(`${cellId}-${suffix}`);
+        const video = getEl('video');
+        video.onload = () => URL.revokeObjectURL(video.src);
+        const startButton = getEl('startButton');
+        const stopButton = getEl('stopButton');
+        const statusEl = getEl('status');
+        const sourceSelect = getEl('sourceSelect');
+
 
             startButton.onclick = startInference;
             stopButton.onclick = stopInference;
 
-            async function loadSources() {
-                const res = await fetch("/source_list");
-                const data = await res.json();
-                sourceSelect.innerHTML = '';
-                data.forEach(item => {
-                    const opt = document.createElement("option");
-                    opt.value = item.name;
-                    opt.textContent = item.name;
-                    sourceSelect.appendChild(opt);
-                });
+        async function loadSources() {
+            const res = await fetch(`/source_list?cam=${cam}`);
+            const data = await res.json();
+            sourceSelect.innerHTML = '';
+            data.forEach(item => {
+                const opt = document.createElement('option');
+                opt.value = item.name;
+                opt.textContent = item.name;
+                sourceSelect.appendChild(opt);
+            });
+        }
+
+        async function startInference() {
+            const name = sourceSelect.value;
+            if (!name) {
+                statusEl.innerText = 'Select source first';
+                return;
+            }
+            const cfg = await fetch(`/source_config?name=${encodeURIComponent(name)}`).then(r => r.json());
+
+            let roiPath = cfg.rois;
+            if (!roiPath.startsWith('/')) {
+                roiPath = `data_sources/${cfg.name}/${roiPath}`;
             }
 
-            async function startInference() {
-                const name = sourceSelect.value;
-                if (!name) {
-                    statusEl.innerText = "Select source first";
-                    return;
-                }
-                const cfg = await fetch(`/source_config?name=${encodeURIComponent(name)}`).then(r => r.json());
-
-                let roiPath = cfg.rois;
-                if (!roiPath.startsWith('/')) {
-                    roiPath = `data_sources/${cfg.name}/${roiPath}`;
-                }
-
-                const camRes = await fetch("/set_camera", {
-                    method: "POST",
-                    headers: {"Content-Type": "application/json"},
-                    body: JSON.stringify({ name, source: cfg.source, ...cfg })
-                });
-                if (!camRes.ok) {
-                    statusEl.innerText = "Camera error";
-                    return;
-                }
-
-                const res = await fetch(`/load_roi_file?path=${encodeURIComponent(roiPath)}`);
-                const data = await res.json();
-                statusEl.innerText = "Loaded: " + data.filename;
-                rois = data.rois;
-
-                const startRes = await fetch("/start_inference", {
-                    method: "POST",
-                    headers: {"Content-Type": "application/json"},
-                    body: JSON.stringify({ rois })
-                });
-                const startData = await startRes.json();
-                if (startData.status === "started" || startData.status === "already_running") {
-                    openSocket();
-                    setRunningUI();
-                }
+            const camRes = await fetch(`/set_camera?cam=${cam}`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ name, source: cfg.source, ...cfg })
+            });
+            if (!camRes.ok) {
+                statusEl.innerText = 'Camera error';
+                return;
             }
 
-            async function stopInference() {
-                await fetch("/stop_inference", { method: "POST" });
-                if (socket) {
-                    socket.close();
-                    socket = null;
-                }
-                statusEl.innerText = "Stopped";
-                startButton.innerText = "Resume";
+            const res = await fetch(`/load_roi_file?path=${encodeURIComponent(roiPath)}`);
+            const data = await res.json();
+            statusEl.innerText = 'Loaded: ' + data.filename;
+            rois = data.rois;
+
+            const startRes = await fetch(`/start_inference?cam=${cam}`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ rois })
+            });
+            const startData = await startRes.json();
+            if (startData.status === 'started' || startData.status === 'already_running') {
+                openSocket();
+                setRunningUI();
+            }
+        }
+
+        async function stopInference() {
+            await fetch(`/stop_inference?cam=${cam}`, { method: 'POST' });
+            if (socket) {
+                socket.close();
+                socket = null;
+            }
+            statusEl.innerText = 'Stopped';
+            startButton.innerText = 'Resume';
+            startButton.disabled = false;
+            stopButton.disabled = true;
+        }
+
+        function openSocket() {
+            socket = new WebSocket(`ws://${location.host}/ws?cam=${cam}`);
+            socket.binaryType = 'arraybuffer';
+            socket.onmessage = function(event) {
+                const blob = new Blob([event.data], { type: 'image/jpeg' });
+                video.src = URL.createObjectURL(blob);
+            };
+        }
+
+        async function checkStatus() {
+            const name = sourceSelect.value;
+            const res = await fetch(`/inference_status?cam=${cam}`);
+            const data = await res.json();
+            if (data.running && name) {
+                openSocket();
+                setRunningUI();
+            } else {
+                statusEl.innerText = 'Idle';
+                startButton.innerText = 'Start';
                 startButton.disabled = false;
                 stopButton.disabled = true;
             }
-
-            function openSocket() {
-                socket = new WebSocket("ws://" + location.host + "/ws");
-                socket.binaryType = "arraybuffer";
-                socket.onmessage = function(event) {
-                    const blob = new Blob([event.data], { type: "image/jpeg" });
-                    video.src = URL.createObjectURL(blob);
-                };
-            }
-
-            async function checkStatus() {
-                const name = sourceSelect.value;
-                const res = await fetch("/inference_status");
-                const data = await res.json();
-                if (data.running && name) {
-                    openSocket();
-                    setRunningUI();
-                } else {
-                    statusEl.innerText = "Idle";
-                    startButton.innerText = "Start";
-                    startButton.disabled = false;
-                    stopButton.disabled = true;
-                }
-            }
-
-            function setRunningUI() {
-                statusEl.innerText = "Running";
-                startButton.disabled = true;
-                stopButton.disabled = false;
-                startButton.innerText = "Start";
-            }
-
-            (async () => {
-                await loadSources();
-                await checkStatus();
-            })();
         }
 
-        setupCamera(1);
-        setupCamera(2);
-    })();
+        function setRunningUI() {
+            statusEl.innerText = 'Running';
+            startButton.disabled = true;
+            stopButton.disabled = false;
+            startButton.innerText = 'Start';
+        }
+
+        (async () => {
+            await loadSources();
+            await checkStatus();
+        })();
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+        createCameraController('cam1');
+        createCameraController('cam2');
+    });
+
 </script>
