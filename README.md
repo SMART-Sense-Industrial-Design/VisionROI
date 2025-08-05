@@ -86,7 +86,7 @@ web_ocrroi/
 
 ## การรันโปรเจ็กต์
 1. รัน `python app.py` (หรือใช้ `quart --app app:app run --reload` เพื่อรีโหลดอัตโนมัติระหว่างพัฒนา)
-2. เปิดเบราว์เซอร์ไปที่ `http://localhost:5000/home`
+2. เปิดเบราว์เซอร์ไปที่ `http://localhost:5000/` (ระบบจะรีไดเรกต์ไปหน้า `/home`)
 
 ## การตั้งค่าการแจ้งเตือน
 ### Telegram Notify
@@ -111,23 +111,28 @@ tg.start_send_text("สวัสดี")
 
 ## API/Endpoints
 
-- **POST `/set_camera`** – ตั้งค่ากล้องและเลือก source ที่จะใช้
+- **POST `/set_camera/<cam_id>`** – ตั้งค่ากล้องและเลือก source ที่จะใช้
   ```json
   {"name": "cam1", "source": "0"}
   ```
 
-- **POST `/start_inference`** – เริ่มอ่านภาพและประมวลผล ROI ที่ส่งมา
+- **POST `/start_inference/<cam_id>`** – เริ่มอ่านภาพและประมวลผล ROI ที่ส่งมา
   ```json
   {"rois": [{"x": 10, "y": 20, "width": 100, "height": 80}]}
   ```
 
-- **POST `/stop_inference`** – หยุดงาน inference
+- **POST `/stop_inference/<cam_id>`** – หยุดงาน inference
 
-- **POST `/start_roi_stream`** – เริ่มส่งภาพสดสำหรับหน้าเลือก ROI
+- **POST `/start_roi_stream/<cam_id>`** – เริ่มส่งภาพสดสำหรับหน้าเลือก ROI
 
-- **POST `/stop_roi_stream`** – หยุดส่งภาพ ROI
+- **POST `/stop_roi_stream/<cam_id>`** – หยุดส่งภาพ ROI
 
 - **GET `/roi_stream_status/<cam_id>`** – ตรวจสอบว่างาน ROI stream กำลังทำงานอยู่หรือไม่
+
+- **GET `/inference_status/<cam_id>`** – ตรวจสอบว่างาน inference กำลังทำงานอยู่หรือไม่
+  ```json
+  {"running": true}
+  ```
 
 - **POST `/save_roi`** – บันทึก ROI ลงไฟล์ของ source หรือพาธที่กำหนด
   ```json
@@ -144,7 +149,11 @@ tg.start_send_text("สวัสดี")
   GET /load_roi_file?path=data_sources/cam1/rois.json
   ```
 
-- **GET `/ws_snapshot`** – คืนรูป JPEG หนึ่งเฟรมจากกล้อง
+- **GET `/ws_snapshot/<cam_id>`** – คืนรูป JPEG หนึ่งเฟรมจากกล้อง
+
+- **GET `/data_sources`** – รายชื่อ source ทั้งหมดในระบบ
+
+- **GET `/source_list`** – รายชื่อ source พร้อมรายละเอียดของแต่ละตัว
 
 - **GET `/source_config`** – คืนค่าคอนฟิกของ source ตามชื่อที่ระบุผ่านพารามิเตอร์ `name`
 
@@ -154,10 +163,6 @@ tg.start_send_text("สวัสดี")
 
 - **WebSocket `/ws_roi`** – ส่งภาพ JPEG แบบไบนารีต่อเนื่องสำหรับหน้า `/roi`
 
-- **GET `/inference_status`** – ตรวจสอบว่างาน inference กำลังทำงานอยู่หรือไม่
-  ```json
-  {"running": true}
-  ```
 
 ## โครงสร้าง `data_sources/`
 ```
