@@ -36,15 +36,34 @@
         stopButton.onclick = stopInference;
 
         async function loadSources() {
-            const res = await fetch('/source_list');
-            const data = await res.json();
-            sourceSelect.innerHTML = '';
-            data.forEach(item => {
+            try {
+                const res = await fetch('/source_list');
+                if (!res.ok) throw new Error('Bad response');
+                const data = await res.json();
+                sourceSelect.innerHTML = '';
+                if (data.length === 0) {
+                    const opt = document.createElement('option');
+                    opt.value = '';
+                    opt.textContent = 'No sources available';
+                    sourceSelect.appendChild(opt);
+                    statusEl.innerText = 'Create a source first';
+                } else {
+                    data.forEach(item => {
+                        const opt = document.createElement('option');
+                        opt.value = item.name;
+                        opt.textContent = item.name;
+                        sourceSelect.appendChild(opt);
+                    });
+                }
+            } catch (err) {
+                console.error('Failed to load sources', err);
+                sourceSelect.innerHTML = '';
                 const opt = document.createElement('option');
-                opt.value = item.name;
-                opt.textContent = item.name;
+                opt.value = '';
+                opt.textContent = 'Error loading sources';
                 sourceSelect.appendChild(opt);
-            });
+                statusEl.innerText = 'Error fetching sources';
+            }
         }
 
         async function startInference() {
