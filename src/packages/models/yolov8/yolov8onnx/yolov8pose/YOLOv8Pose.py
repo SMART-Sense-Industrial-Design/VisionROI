@@ -3,7 +3,6 @@ import numpy as np
 import cv2
 import onnxruntime
 from typing import List, Tuple, Dict
-import base64
 # from utils import file_decode
 
 class YOLOv8Pose:
@@ -90,8 +89,7 @@ class YOLOv8Pose:
 
             crop_img = original_img[y1:y2, x1:x2]
             ret, jpeg = cv2.imencode('.jpg', crop_img)
-            img_b64 = base64.b64encode(jpeg.tobytes()).decode('utf-8')
-            # object_detect_list.append([img_b64, result_fall, score])
+            # object_detect_list.append([base64.b64encode(jpeg.tobytes()).decode('utf-8'), result_fall, score])
 
             label_str = "{:.0f}%".format(score*100)
             label_size, baseline = cv2.getTextSize(label_str, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 2)
@@ -111,7 +109,6 @@ class YOLOv8Pose:
                     fontScale = 0.5
                     color = (0, 255, 255)
                     thickness = 1
-                    name_point = list(KEYPOINT_DICT.keys())[idx]
                     cv2.putText(img, '{}'.format(idx), center_point, font, fontScale, color, thickness, cv2.LINE_AA)
                     cv2.circle(img, (int(x), int(y)), 3, COLOR_LIST[idx], -1)
 
@@ -123,13 +120,6 @@ class YOLOv8Pose:
                     [255, 51, 51], [153, 255, 153], [102, 255, 102],
                     [51, 255, 51], [0, 255, 0], [0, 0, 255], [255, 0, 0],
                     [255, 255, 255]])
-            palette_fall = np.array([[0, 0, 255], [0, 0, 255], [0, 0, 255],
-                    [0, 0, 255], [0, 0, 255], [0, 0, 255],
-                    [0, 0, 255], [0, 0, 255], [0, 0, 255],
-                    [0, 0, 255], [0, 0, 255], [0, 0, 255],
-                    [0, 0, 255], [0, 0, 255], [0, 0, 255],
-                    [0, 0, 255], [0, 0, 255], [0, 0, 255], [0, 0, 255],
-                    [0, 0, 255]])
             skeleton = [[16, 14], [14, 12], [17, 15], [15, 13], [12, 13], [6, 12],
                 [7, 13], [6, 7], [6, 8], [7, 9], [8, 10], [9, 11], [2, 3],
                 [1, 2], [1, 3], [2, 4], [3, 5], [4, 6], [5, 7]]
