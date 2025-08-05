@@ -178,9 +178,5 @@
       createCameraController('cam1'),
       createCameraController('cam2')
   ];
-
-  window.addEventListener('beforeunload', () => {
-      controllers.forEach(c => c.stopInference());
-  });
   })();
   </script>
