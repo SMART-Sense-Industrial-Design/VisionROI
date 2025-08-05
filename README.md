@@ -127,6 +127,8 @@ tg.start_send_text("สวัสดี")
 
 - **POST `/stop_roi_stream`** – หยุดส่งภาพ ROI
 
+- **GET `/roi_stream_status/<cam_id>`** – ตรวจสอบว่างาน ROI stream กำลังทำงานอยู่หรือไม่
+
 - **POST `/save_roi`** – บันทึก ROI ลงไฟล์ของ source หรือพาธที่กำหนด
   ```json
   {"source": "cam1", "rois": [{"x": 10, "y": 20, "width": 100, "height": 80}]}
