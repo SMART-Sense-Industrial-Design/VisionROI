@@ -33,6 +33,7 @@
         let currentSource = "";
         let initialized = false;
         let isStreaming = false;
+        let hasStarted = false;
         const cam = 1;
 
         const video = document.getElementById("video");
@@ -80,8 +81,6 @@
             socket.onclose = function() {
                 socket = null;
                 isStreaming = false;
-                startBtn.disabled = false;
-                startBtn.textContent = "Resume";
                 stopBtn.disabled = true;
                 console.log("ROI stream closed");
             };
@@ -110,7 +109,9 @@
         }
 
         async function startStream() {
+            if (hasStarted) return;
             if (isStreaming) return;
+            hasStarted = true;
             const name = document.getElementById("sourceSelect").value;
             if (!name) {
                 alert("Select source first");
@@ -158,8 +159,6 @@
             }
             video.src = "";
             isStreaming = false;
-            startBtn.disabled = false;
-            startBtn.textContent = "Resume";
             stopBtn.disabled = true;
         }
 

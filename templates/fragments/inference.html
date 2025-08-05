@@ -22,6 +22,7 @@
     function createCameraController(cellId) {
         let socket;
         let rois = [];
+        let running = false;
         const cam = cellId.replace(/\D/g, '');
         const getEl = suffix => document.getElementById(`${cellId}-${suffix}`);
         const video = getEl('video');
@@ -47,9 +48,14 @@
         }
 
         async function startInference() {
+            if (running) return;
+            running = true;
+            startButton.disabled = true;
             const name = sourceSelect.value;
             if (!name) {
                 statusEl.innerText = 'Select source first';
+                running = false;
+                startButton.disabled = false;
                 return;
             }
             const cfg = await fetch(`/source_config?name=${encodeURIComponent(name)}`).then(r => r.json());
@@ -66,6 +72,8 @@
             });
             if (!camRes.ok) {
                 statusEl.innerText = 'Camera error';
+                running = false;
+                startButton.disabled = false;
                 return;
             }
 
@@ -83,10 +91,15 @@
             if (startData.status === 'started' || startData.status === 'already_running') {
                 openSocket();
                 setRunningUI();
+            } else {
+                running = false;
+                startButton.disabled = false;
             }
         }
 
         async function stopInference() {
+            if (!running) return;
+            running = false;
             await fetch(`/stop_inference/${cam}`, { method: 'POST' });
             if (socket) {
                 socket.close();
@@ -116,11 +129,13 @@
             if (data.running && name) {
                 openSocket();
                 setRunningUI();
+                running = true;
             } else {
                 statusEl.innerText = 'Idle';
                 startButton.innerText = 'Start';
                 startButton.disabled = false;
                 stopButton.disabled = true;
+                running = false;
             }
         }
 
