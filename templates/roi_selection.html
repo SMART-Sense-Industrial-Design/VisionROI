@@ -147,13 +147,13 @@
             startBtn.textContent = "Start";
         }
 
-        function stopStream() {
+        async function stopStream() {
             if (socket) {
                 socket.close();
                 socket = null;
             }
             try {
-                fetch(`/stop_roi_stream/${cam}`, { method: 'POST', keepalive: true });
+                await fetch(`/stop_roi_stream/${cam}`, { method: 'POST', keepalive: true });
             } catch (err) {
                 console.error('Failed to stop ROI stream', err);
             }
@@ -332,7 +332,7 @@
         window.clearAllRois = clearAllRois;
 
         window.onPageUnload = async () => {
-            stopStream();
+            await stopStream();
         };
         window.addEventListener('beforeunload', () => {
             stopStream();
