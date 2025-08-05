@@ -16,10 +16,8 @@
     <script>
         (function() {
             let socket;
-            let drawing = false;
-            let startX, startY;
             let rois = [];
-            let currentRoi = null;
+            let currentPoints = [];
             let currentSource = "";
             let initialized = false;
             let isRunning = false;
@@ -112,72 +110,48 @@
                 localStorage.removeItem('roiSource');
             }
 
-            canvas.onmousedown = (e) => {
-                drawing = true;
+            canvas.addEventListener('click', (e) => {
                 const rect = canvas.getBoundingClientRect();
                 const scaleX = canvas.width / rect.width;
                 const scaleY = canvas.height / rect.height;
-                startX = (e.clientX - rect.left) * scaleX;
-                startY = (e.clientY - rect.top) * scaleY;
-                currentRoi = null;
-            };
-
-            canvas.onmouseup = (e) => {
-                if (!drawing) return;
-                drawing = false;
-                const rect = canvas.getBoundingClientRect();
-                const scaleX = canvas.width / rect.width;
-                const scaleY = canvas.height / rect.height;
-                const endX = (e.clientX - rect.left) * scaleX;
-                const endY = (e.clientY - rect.top) * scaleY;
-                const roiId = prompt("ROI id?");
-                if (roiId !== null) {
-                    currentRoi = {
-                        id: roiId,
-                        x: Math.min(startX, endX),
-                        y: Math.min(startY, endY),
-                        width: Math.abs(endX - startX),
-                        height: Math.abs(endY - startY)
-                    };
-                    rois.push(currentRoi);
+                const x = (e.clientX - rect.left) * scaleX;
+                const y = (e.clientY - rect.top) * scaleY;
+                currentPoints.push({ x, y });
+                if (currentPoints.length === 4) {
+                    const roiId = prompt("ROI id?");
+                    if (roiId !== null) {
+                        rois.push({ id: roiId, points: [...currentPoints] });
+                    }
+                    currentPoints = [];
                 }
-                currentRoi = null;
                 drawAllRois();
-            };
-
-            canvas.onmousemove = (e) => {
-                if (!drawing) return;
-                const rect = canvas.getBoundingClientRect();
-                const scaleX = canvas.width / rect.width;
-                const scaleY = canvas.height / rect.height;
-                const currX = (e.clientX - rect.left) * scaleX;
-                const currY = (e.clientY - rect.top) * scaleY;
-                currentRoi = {
-                    x: Math.min(startX, currX),
-                    y: Math.min(startY, currY),
-                    width: Math.abs(currX - startX),
-                    height: Math.abs(currY - startY)
-                };
-                drawAllRois();
-            };
+            });
 
             function drawAllRois() {
                 ctx.clearRect(0, 0, canvas.width, canvas.height);
                 rois.forEach(r => {
+                    if (!r.points || r.points.length === 0) return;
                     ctx.beginPath();
-                    ctx.rect(r.x, r.y, r.width, r.height);
+                    ctx.moveTo(r.points[0].x, r.points[0].y);
+                    for (let i = 1; i < r.points.length; i++) {
+                        ctx.lineTo(r.points[i].x, r.points[i].y);
+                    }
+                    ctx.closePath();
                     ctx.strokeStyle = 'blue';
                     ctx.lineWidth = 2;
                     ctx.stroke();
                     if (r.id !== undefined) {
                         ctx.font = '16px sans-serif';
                         ctx.fillStyle = 'blue';
-                        ctx.fillText(r.id, r.x, Math.max(10, r.y - 5));
+                        ctx.fillText(r.id, r.points[0].x, Math.max(10, r.points[0].y - 5));
                     }
                 });
-                if (currentRoi) {
+                if (currentPoints.length > 0) {
                     ctx.beginPath();
-                    ctx.rect(currentRoi.x, currentRoi.y, currentRoi.width, currentRoi.height);
+                    ctx.moveTo(currentPoints[0].x, currentPoints[0].y);
+                    for (let i = 1; i < currentPoints.length; i++) {
+                        ctx.lineTo(currentPoints[i].x, currentPoints[i].y);
+                    }
                     ctx.strokeStyle = 'red';
                     ctx.lineWidth = 2;
                     ctx.stroke();
@@ -187,18 +161,28 @@
             async function loadRois() {
                 if (!currentSource) {
                     rois = [];
+                    currentPoints = [];
                     drawAllRois();
                     return;
                 }
                 const res = await fetch(`/load_roi/${encodeURIComponent(currentSource)}`);
                 const data = await res.json();
-                rois = data.rois.map((r, idx) => ({
-                    id: r.id ?? String(idx + 1),
-                    x: r.x,
-                    y: r.y,
-                    width: r.width,
-                    height: r.height
-                }));
+                rois = data.rois.map((r, idx) => {
+                    let pts = r.points;
+                    if (!pts && "x" in r && "y" in r && "width" in r && "height" in r) {
+                        pts = [
+                            { x: r.x, y: r.y },
+                            { x: r.x + r.width, y: r.y },
+                            { x: r.x + r.width, y: r.y + r.height },
+                            { x: r.x, y: r.y + r.height }
+                        ];
+                    }
+                    return {
+                        id: r.id ?? String(idx + 1),
+                        points: pts || []
+                    };
+                });
+                currentPoints = [];
                 drawAllRois();
             }
 
@@ -229,6 +213,7 @@
                 if (!confirm("Clear all ROIs?")) return;
 
                 rois = [];
+                currentPoints = [];
                 drawAllRois();
 
                 fetch(`/save_roi`, {
