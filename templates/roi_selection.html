@@ -60,12 +60,6 @@
                 opt.textContent = item.name;
                 select.appendChild(opt);
             });
-
-            const savedSource = localStorage.getItem('roiSource');
-            if (localStorage.getItem('roiStreaming') === 'true' && savedSource) {
-                select.value = savedSource;
-                await startStream();
-            }
         }
 
         loadSources();
@@ -99,8 +93,6 @@
             isStreaming = true;
             startBtn.disabled = true;
             stopBtn.disabled = false;
-            localStorage.setItem('roiStreaming', 'true');
-            localStorage.setItem('roiSource', currentSource);
         }
 
         async function stopStream() {
@@ -113,8 +105,6 @@
             startBtn.disabled = false;
             startBtn.textContent = "Resume";
             stopBtn.disabled = true;
-            localStorage.removeItem('roiStreaming');
-            localStorage.removeItem('roiSource');
         }
 
         canvas.onmousedown = (e) => {
@@ -253,6 +243,20 @@
         document.getElementById('saveBtn').addEventListener('click', saveAllRois);
         document.getElementById('clearBtn').addEventListener('click', clearAllRois);
 
+        function cleanup() {
+            if (isStreaming) {
+                stopStream();
+            }
+            rois = [];
+            currentSource = "";
+            const select = document.getElementById("sourceSelect");
+            if (select) {
+                select.value = "";
+            }
+            drawAllRois();
+        }
+
+        window.onPageUnload = cleanup;
         window.startStream = startStream;
         window.stopStream = stopStream;
         window.saveAllRois = saveAllRois;
