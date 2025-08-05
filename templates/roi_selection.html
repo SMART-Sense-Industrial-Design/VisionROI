@@ -70,7 +70,44 @@
             });
         }
 
-        loadSources();
+        function openSocket() {
+            socket = new WebSocket(`ws://${location.host}/ws_roi/${cam}`);
+            socket.binaryType = "arraybuffer";
+            socket.onmessage = function(event) {
+                const blob = new Blob([event.data], { type: "image/jpeg" });
+                video.src = URL.createObjectURL(blob);
+            };
+            socket.onclose = function() {
+                socket = null;
+                isStreaming = false;
+                startBtn.disabled = false;
+                startBtn.textContent = "Resume";
+                stopBtn.disabled = true;
+                console.log("ROI stream closed");
+            };
+        }
+
+        async function checkStatus() {
+            const res = await fetch(`/roi_stream_status/${cam}`);
+            const data = await res.json();
+            if (data.running) {
+                const select = document.getElementById("sourceSelect");
+                if (data.source) {
+                    select.value = data.source;
+                    currentSource = data.source;
+                    await loadRois();
+                }
+                openSocket();
+                isStreaming = true;
+                startBtn.disabled = true;
+                startBtn.textContent = "Start";
+                stopBtn.disabled = false;
+            } else {
+                startBtn.disabled = false;
+                startBtn.textContent = "Start";
+                stopBtn.disabled = true;
+            }
+        }
 
         async function startStream() {
             if (isStreaming) return;
@@ -102,23 +139,11 @@
                 stopBtn.disabled = true;
                 return;
             }
-            socket = new WebSocket(`ws://${location.host}/ws_roi/${cam}`);
-            socket.binaryType = "arraybuffer";
-            socket.onmessage = function(event) {
-                const blob = new Blob([event.data], { type: "image/jpeg" });
-                video.src = URL.createObjectURL(blob);
-            };
-            socket.onclose = function() {
-                socket = null;
-                isStreaming = false;
-                startBtn.disabled = false;
-                startBtn.textContent = "Start";
-                stopBtn.disabled = true;
-                console.log("ROI stream closed");
-            };
+            openSocket();
             await loadRois();
             isStreaming = true;
             stopBtn.disabled = false;
+            startBtn.textContent = "Start";
         }
 
         function stopStream() {
@@ -302,27 +327,15 @@
         document.getElementById('saveBtn').addEventListener('click', saveAllRois);
         document.getElementById('clearBtn').addEventListener('click', clearAllRois);
 
-        function cleanup() {
-            try {
-                stopStream();
-            } catch (err) {
-                console.error('Cleanup error', err);
-            }
-            rois = [];
-            currentPoints = [];
-            currentSource = "";
-            const select = document.getElementById("sourceSelect");
-            if (select) {
-                select.value = "";
-            }
-            drawAllRois();
-        }
-
-        window.onPageUnload = cleanup;
         window.startStream = startStream;
         window.stopStream = stopStream;
         window.saveAllRois = saveAllRois;
         window.clearAllRois = clearAllRois;
+
+        (async () => {
+            await loadSources();
+            await checkStatus();
+        })();
     })();
 </script>
 {% endblock %}

@@ -410,6 +410,15 @@ async def inference_status(cam_id: int):
     return jsonify({"running": running, "cam_id": cam_id})
 
 
+# ✅ สถานะงาน ROI stream
+@app.route('/roi_stream_status/<int:cam_id>', methods=["GET"])
+async def roi_stream_status(cam_id: int):
+    """เช็คว่างาน ROI stream กำลังทำงานอยู่หรือไม่"""
+    running = roi_tasks.get(cam_id) is not None and not roi_tasks[cam_id].done()
+    source = active_sources.get(cam_id, "")
+    return jsonify({"running": running, "cam_id": cam_id, "source": source})
+
+
 @app.route("/data_sources")
 async def list_sources():
     base_dir = Path(__file__).resolve().parent / "data_sources"

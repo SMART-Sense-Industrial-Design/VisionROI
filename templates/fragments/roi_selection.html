@@ -55,10 +55,44 @@
                     opt.textContent = item.name;
                     select.appendChild(opt);
                 });
-                const savedSource = localStorage.getItem('roiSource');
-                if (localStorage.getItem('roiStreaming') === 'true' && savedSource) {
-                    select.value = savedSource;
-                    await startStream();
+            }
+
+            function openSocket() {
+                socket = new WebSocket(`ws://${location.host}/ws_roi/${cam}`);
+                socket.binaryType = "arraybuffer";
+                socket.onmessage = function(event) {
+                    const blob = new Blob([event.data], { type: "image/jpeg" });
+                    video.src = URL.createObjectURL(blob);
+                };
+                socket.onclose = function() {
+                    socket = null;
+                    isRunning = false;
+                    startBtn.disabled = false;
+                    startBtn.innerText = 'Resume';
+                    stopBtn.disabled = true;
+                    console.log("ROI stream closed");
+                };
+            }
+
+            async function checkStatus() {
+                const res = await fetch(`/roi_stream_status/${cam}`);
+                const data = await res.json();
+                if (data.running) {
+                    const select = document.getElementById('sourceSelect');
+                    if (data.source) {
+                        select.value = data.source;
+                        currentSource = data.source;
+                        await loadRois();
+                    }
+                    openSocket();
+                    isRunning = true;
+                    startBtn.disabled = true;
+                    startBtn.innerText = 'Start';
+                    stopBtn.disabled = false;
+                } else {
+                    startBtn.disabled = false;
+                    startBtn.innerText = 'Start';
+                    stopBtn.disabled = true;
                 }
             }
 
@@ -92,29 +126,12 @@
                     stopBtn.disabled = true;
                     return;
                 }
-                socket = new WebSocket(`ws://${location.host}/ws_roi/${cam}`);
-                socket.binaryType = "arraybuffer";
-                socket.onmessage = function(event) {
-                    const blob = new Blob([event.data], { type: "image/jpeg" });
-                    video.src = URL.createObjectURL(blob);
-                };
-                socket.onclose = function() {
-                    socket = null;
-                    isRunning = false;
-                    startBtn.disabled = false;
-                    startBtn.innerText = 'Start';
-                    stopBtn.disabled = true;
-                    localStorage.removeItem('roiStreaming');
-                    localStorage.removeItem('roiSource');
-                    console.log("ROI stream closed");
-                };
+                openSocket();
                 await loadRois();
                 isRunning = true;
                 startBtn.disabled = true;
                 stopBtn.disabled = false;
                 startBtn.innerText = 'Start';
-                localStorage.setItem('roiStreaming', 'true');
-                localStorage.setItem('roiSource', currentSource);
             }
 
             function stopStream() {
@@ -132,8 +149,6 @@
                 startBtn.disabled = false;
                 stopBtn.disabled = true;
                 isRunning = false;
-                localStorage.removeItem('roiStreaming');
-                localStorage.removeItem('roiSource');
             }
 
             canvas.addEventListener('click', (e) => {
@@ -298,20 +313,14 @@
             saveBtn.addEventListener('click', saveAllRois);
             clearBtn.addEventListener('click', clearAllRois);
 
-            function cleanup() {
-                try {
-                    stopStream();
-                } catch (err) {
-                    console.error('Cleanup error', err);
-                }
-            }
-
             window.startStream = startStream;
             window.stopStream = stopStream;
             window.saveAllRois = saveAllRois;
             window.clearAllRois = clearAllRois;
-            window.onFragmentUnload = cleanup;
 
-            loadSources();
+            (async () => {
+                await loadSources();
+                await checkStatus();
+            })();
         })();
     </script>
