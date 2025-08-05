@@ -179,6 +179,13 @@
         createCameraController('cam1'),
         createCameraController('cam2')
     ];
+
+    window.onPageUnload = async () => {
+        await Promise.all(controllers.map(c => c.stopInference()));
+    };
+    window.addEventListener('beforeunload', () => {
+        controllers.forEach(c => c.stopInference());
+    });
     })();
 
 </script>
