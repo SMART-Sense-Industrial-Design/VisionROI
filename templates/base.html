@@ -36,6 +36,7 @@
           e.preventDefault();
           if (window.onPageUnload) {
             await window.onPageUnload();
+            window.onPageUnload = null;
           }
           const url = link.getAttribute('href');
           const res = await fetch(url);
@@ -68,6 +69,7 @@
       window.addEventListener('popstate', async () => {
         if (window.onPageUnload) {
           await window.onPageUnload();
+          window.onPageUnload = null;
         }
         const url = window.location.pathname;
       const res = await fetch(url);
