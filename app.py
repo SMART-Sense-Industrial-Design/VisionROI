@@ -1,6 +1,10 @@
 from quart import Quart, render_template, websocket, request, jsonify, send_file, redirect
 import asyncio
 import cv2
+try:
+    import numpy as np
+except Exception:  # pragma: no cover - fallback when numpy is missing
+    np = None
 import json
 import shutil
 import importlib.util
@@ -141,8 +145,24 @@ async def run_inference_loop(cam_id: int):
                     pass
         else:
             for i, r in enumerate(rois):
-                x, y, w, h = int(r["x"]), int(r["y"]), int(r["width"]), int(r["height"])
-                roi = frame[y:y + h, x:x + w]
+                if np is None:
+                    continue
+                pts = r.get("points", [])
+                if len(pts) != 4:
+                    continue
+                src = np.array([[p["x"], p["y"]] for p in pts], dtype=np.float32)
+                width_a = np.linalg.norm(src[0] - src[1])
+                width_b = np.linalg.norm(src[2] - src[3])
+                max_w = int(max(width_a, width_b))
+                height_a = np.linalg.norm(src[0] - src[3])
+                height_b = np.linalg.norm(src[1] - src[2])
+                max_h = int(max(height_a, height_b))
+                dst = np.array(
+                    [[0, 0], [max_w - 1, 0], [max_w - 1, max_h - 1], [0, max_h - 1]],
+                    dtype=np.float32,
+                )
+                matrix = cv2.getPerspectiveTransform(src, dst)
+                roi = cv2.warpPerspective(frame, matrix, (max_w, max_h))
                 if process_fn:
                     try:
                         if process_has_id:
@@ -151,11 +171,12 @@ async def run_inference_loop(cam_id: int):
                             await asyncio.to_thread(process_fn, roi)
                     except Exception:
                         pass
-                cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
+                cv2.polylines(frame, [src.astype(int)], True, (0, 255, 0), 2)
+                label_pt = src[0].astype(int)
                 cv2.putText(
                     frame,
                     str(r.get("id", i + 1)),
-                    (x, max(0, y - 5)),
+                    (int(label_pt[0]), max(0, int(label_pt[1]) - 5)),
                     cv2.FONT_HERSHEY_SIMPLEX,
                     0.5,
                     (0, 255, 0),
