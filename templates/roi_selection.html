@@ -79,14 +79,29 @@
                 alert("Select source first");
                 return;
             }
+            startBtn.disabled = true;
             currentSource = name;
             const cfg = await fetch(`/source_config?name=${encodeURIComponent(name)}`).then(r => r.json());
-            await fetch(`/set_camera/${cam}`, {
+            const setRes = await fetch(`/set_camera/${cam}`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ name, source: cfg.source })
             });
-            await fetch(`/start_roi_stream/${cam}`, { method: "POST" });
+            if (!setRes.ok) {
+                alert("Failed to set camera");
+                isStreaming = false;
+                startBtn.disabled = false;
+                stopBtn.disabled = true;
+                return;
+            }
+            const startRes = await fetch(`/start_roi_stream/${cam}`, { method: "POST" });
+            if (!startRes.ok) {
+                alert("Failed to start ROI stream");
+                isStreaming = false;
+                startBtn.disabled = false;
+                stopBtn.disabled = true;
+                return;
+            }
             socket = new WebSocket(`ws://${location.host}/ws_roi/${cam}`);
             socket.binaryType = "arraybuffer";
             socket.onmessage = function(event) {
@@ -99,7 +114,6 @@
             };
             await loadRois();
             isStreaming = true;
-            startBtn.disabled = true;
             stopBtn.disabled = false;
         }
 
