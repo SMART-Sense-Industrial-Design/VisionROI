@@ -107,6 +107,7 @@
                 } catch (err) {
                     console.error('Failed to stop ROI stream', err);
                 }
+                video.src = "";
                 startBtn.innerText = 'Resume';
                 startBtn.disabled = false;
                 stopBtn.disabled = true;
