@@ -19,7 +19,8 @@
 </div>
 
 <script>
-    function createCameraController(cellId) {
+    (function() {
+        function createCameraController(cellId) {
         let socket;
         let rois = [];
         let running = false;
@@ -174,13 +175,14 @@
     }
 
     // initialize controllers immediately (DOMContentLoaded already fired in fragments)
-    const controllers = [
-        createCameraController('cam1'),
-        createCameraController('cam2')
-    ];
+        const controllers = [
+            createCameraController('cam1'),
+            createCameraController('cam2')
+        ];
 
-    window.onFragmentUnload = async () => {
-        await Promise.all(controllers.map(c => c.stopInference()));
-    };
+        window.onFragmentUnload = async () => {
+            await Promise.all(controllers.map(c => c.stopInference()));
+        };
+    })();
 
 </script>

@@ -21,8 +21,9 @@
         <img id="cam2-video" width="320" height="240" />
     </div>
 </div>
-<script>
-    function createCameraController(cellId) {
+  <script>
+      (function() {
+      function createCameraController(cellId) {
         let socket;
         let rois = [];
         let running = false;
@@ -176,18 +177,19 @@
         return { stopInference };
     }
 
-    // initialize controllers immediately (DOMContentLoaded already fired in fragments)
-    const controllers = [
-        createCameraController('cam1'),
-        createCameraController('cam2')
-    ];
+  // initialize controllers immediately (DOMContentLoaded already fired in fragments)
+  const controllers = [
+      createCameraController('cam1'),
+      createCameraController('cam2')
+  ];
 
-    window.onPageUnload = async () => {
-        await Promise.all(controllers.map(c => c.stopInference()));
-    };
-    window.addEventListener('beforeunload', () => {
-        controllers.forEach(c => c.stopInference());
-    });
-</script>
+  window.onPageUnload = async () => {
+      await Promise.all(controllers.map(c => c.stopInference()));
+  };
+  window.addEventListener('beforeunload', () => {
+      controllers.forEach(c => c.stopInference());
+  });
+  })();
+  </script>
 {% endblock %}
 
