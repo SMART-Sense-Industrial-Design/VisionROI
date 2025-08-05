@@ -15,6 +15,10 @@ from pathlib import Path
 import contextlib
 import inspect
 from typing import Callable, Awaitable, Any
+try:  # pragma: no cover
+    from websockets.exceptions import ConnectionClosed
+except Exception:  # websockets not installed
+    ConnectionClosed = Exception
 
 # เก็บสถานะของกล้องแต่ละตัวในรูปแบบ dict
 cameras: dict[int, cv2.VideoCapture | None] = {}
@@ -271,12 +275,15 @@ async def ws(cam_id: int):
 @app.websocket('/ws_roi/<int:cam_id>')
 async def ws_roi(cam_id: int):
     queue = get_roi_frame_queue(cam_id)
-    while True:
-        frame_bytes = await queue.get()
-        if frame_bytes is None:
-            await websocket.close(code=1000)
-            break
-        await websocket.send(frame_bytes)
+    try:
+        while True:
+            frame_bytes = await queue.get()
+            if frame_bytes is None:
+                await websocket.close(code=1000)
+                break
+            await websocket.send(frame_bytes)
+    except (ConnectionClosed, asyncio.CancelledError):
+        pass
 
 
 @app.route("/set_camera/<int:cam_id>", methods=["POST"])
