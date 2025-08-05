@@ -22,77 +22,11 @@
   <script>
     function setActiveLink(path) {
       document.querySelectorAll('.sidenav a').forEach(link => {
-        if (link.getAttribute('href') === path) {
-          link.classList.add('active');
-        } else {
-          link.classList.remove('active');
-        }
+        link.classList.toggle('active', link.getAttribute('href') === path);
       });
     }
-
-    function attachMenuHandlers() {
-        document.querySelectorAll('.sidenav a').forEach(link => {
-        link.addEventListener('click', async (e) => {
-          e.preventDefault();
-          if (window.onPageUnload) {
-            await window.onPageUnload();
-            window.onPageUnload = null;
-          }
-          const url = link.getAttribute('href');
-          const res = await fetch(url);
-          const text = await res.text();
-          const parser = new DOMParser();
-          const doc = parser.parseFromString(text, 'text/html');
-          const newContent = doc.querySelector('#content');
-          const contentEl = document.getElementById('content');
-          if (newContent && contentEl) {
-            const scripts = Array.from(newContent.querySelectorAll('script'));
-            scripts.forEach(s => s.parentNode.removeChild(s));
-            contentEl.innerHTML = newContent.innerHTML;
-            scripts.forEach(oldScript => {
-              const script = document.createElement('script');
-              if (oldScript.src) {
-                script.src = oldScript.src;
-              } else {
-                script.textContent = oldScript.textContent;
-              }
-              contentEl.appendChild(script);
-            });
-          }
-          window.history.pushState(null, '', url);
-          setActiveLink(url);
-        });
-      });
-    }
-    attachMenuHandlers();
-    setActiveLink(window.location.pathname);
-      window.addEventListener('popstate', async () => {
-        if (window.onPageUnload) {
-          await window.onPageUnload();
-          window.onPageUnload = null;
-        }
-        const url = window.location.pathname;
-      const res = await fetch(url);
-      const text = await res.text();
-      const parser = new DOMParser();
-      const doc = parser.parseFromString(text, 'text/html');
-      const newContent = doc.querySelector('#content');
-      const contentEl = document.getElementById('content');
-      if (newContent && contentEl) {
-        const scripts = Array.from(newContent.querySelectorAll('script'));
-        scripts.forEach(s => s.parentNode.removeChild(s));
-        contentEl.innerHTML = newContent.innerHTML;
-        scripts.forEach(oldScript => {
-          const script = document.createElement('script');
-          if (oldScript.src) {
-            script.src = oldScript.src;
-          } else {
-            script.textContent = oldScript.textContent;
-          }
-          contentEl.appendChild(script);
-        });
-      }
-      setActiveLink(url);
+    window.addEventListener('DOMContentLoaded', () => {
+      setActiveLink(window.location.pathname);
     });
   </script>
 

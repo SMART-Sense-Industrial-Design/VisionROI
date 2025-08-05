@@ -56,23 +56,6 @@ async def roi_page():
 async def inference():
     return await render_template("inference.html")
 
-# ✅ Fragment endpoints สำหรับโหลดคอนเทนต์แบบไม่ใช้ layout
-@app.route("/fragment/home")
-async def fragment_home():
-    return await render_template("fragments/home.html")
-
-@app.route("/fragment/create_source")
-async def fragment_create_source():
-    return await render_template("fragments/create_source.html")
-
-@app.route("/fragment/roi")
-async def fragment_roi():
-    return await render_template("fragments/roi_selection.html")
-
-@app.route("/fragment/inference")
-async def fragment_inference():
-    return await render_template("fragments/inference.html")
-
 
 def load_custom_module(name: str) -> ModuleType | None:
     path = os.path.join("data_sources", name, "custom.py")
