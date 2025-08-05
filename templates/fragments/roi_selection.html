@@ -3,10 +3,10 @@
         #canvas { position: absolute; left: 0; top: 0; }
     </style>
     <select id="sourceSelect"></select>
-    <button onclick="startStream()">Start</button>
-    <button onclick="stopStream()">Stop</button>
-    <button onclick="saveAllRois()">Save All</button>
-    <button onclick="clearAllRois()">Clear All</button>
+    <button id="startBtn">Start</button>
+    <button id="stopBtn" disabled>Stop</button>
+    <button id="saveBtn">Save All</button>
+    <button id="clearBtn">Clear All</button>
     <br><br>
     <div style="position: relative; display: inline-block;">
         <img id="video" />
@@ -22,11 +22,16 @@
             let currentRoi = null;
             let currentSource = "";
             let initialized = false;
+            let isRunning = false;
             const cam = 1;
 
             const video = document.getElementById("video");
             const canvas = document.getElementById("canvas");
             const ctx = canvas.getContext("2d");
+            const startBtn = document.getElementById('startBtn');
+            const stopBtn = document.getElementById('stopBtn');
+            const saveBtn = document.getElementById('saveBtn');
+            const clearBtn = document.getElementById('clearBtn');
 
             video.onload = () => {
                 if (!initialized || canvas.width !== video.naturalWidth || canvas.height !== video.naturalHeight) {
@@ -54,6 +59,7 @@
             }
 
             async function startStream() {
+                if (isRunning) return;
                 const name = document.getElementById("sourceSelect").value;
                 if (!name) {
                     alert("Select source first");
@@ -78,17 +84,23 @@
                     console.log("ROI stream closed");
                 };
                 await loadRois();
+                startBtn.disabled = true;
+                stopBtn.disabled = false;
+                startBtn.innerText = 'Start';
+                isRunning = true;
             }
 
             async function stopStream() {
-
+                if (!isRunning) return;
                 if (socket) {
                     socket.close();
                     socket = null;
                 }
-
                 await fetch(`/stop_roi_stream/${cam}`, { method: "POST" });
-
+                startBtn.innerText = 'Resume';
+                startBtn.disabled = false;
+                stopBtn.disabled = true;
+                isRunning = false;
             }
 
             canvas.onmousedown = (e) => {
@@ -221,6 +233,11 @@
                     loadRois();
                 });
             }
+
+            startBtn.addEventListener('click', startStream);
+            stopBtn.addEventListener('click', stopStream);
+            saveBtn.addEventListener('click', saveAllRois);
+            clearBtn.addEventListener('click', clearAllRois);
 
             window.startStream = startStream;
             window.stopStream = stopStream;
