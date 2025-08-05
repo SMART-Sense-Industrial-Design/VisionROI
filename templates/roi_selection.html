@@ -135,6 +135,12 @@
                 ctx.strokeStyle = 'blue';
                 ctx.lineWidth = 2;
                 ctx.stroke();
+                r.points.forEach(p => {
+                    ctx.beginPath();
+                    ctx.arc(p.x, p.y, 3, 0, 2 * Math.PI);
+                    ctx.fillStyle = 'blue';
+                    ctx.fill();
+                });
                 if (r.id !== undefined) {
                     ctx.font = '16px sans-serif';
                     ctx.fillStyle = 'blue';
@@ -150,6 +156,12 @@
                 ctx.strokeStyle = 'red';
                 ctx.lineWidth = 2;
                 ctx.stroke();
+                currentPoints.forEach(p => {
+                    ctx.beginPath();
+                    ctx.arc(p.x, p.y, 3, 0, 2 * Math.PI);
+                    ctx.fillStyle = 'red';
+                    ctx.fill();
+                });
             }
         }
 
