@@ -317,7 +317,7 @@
             window.saveAllRois = saveAllRois;
             window.clearAllRois = clearAllRois;
 
-            window.onPageUnload = async () => {
+            window.onFragmentUnload = async () => {
                 stopStream();
             };
             window.addEventListener('beforeunload', () => {
