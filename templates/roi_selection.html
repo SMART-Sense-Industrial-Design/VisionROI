@@ -332,6 +332,13 @@
         window.saveAllRois = saveAllRois;
         window.clearAllRois = clearAllRois;
 
+        window.onPageUnload = async () => {
+            stopStream();
+        };
+        window.addEventListener('beforeunload', () => {
+            stopStream();
+        });
+
         (async () => {
             await loadSources();
             await checkStatus();
