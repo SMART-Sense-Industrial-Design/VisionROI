@@ -8,7 +8,8 @@ except Exception:  # pragma: no cover - fallback when numpy is missing
 import json
 import shutil
 import importlib.util
-import os, sys
+import os
+import sys
 from types import ModuleType
 from pathlib import Path
 import contextlib

@@ -1,4 +1,3 @@
-import time
 import cv2
 import numpy as np
 import onnxruntime
@@ -131,7 +130,8 @@ class YOLOv8:
         for cx, cy, w, h in xywh:
             x = (cx - w / 2 - dw) / r
             y = (cy - h / 2 - dh) / r
-            w /= r; h /= r
+            w /= r
+            h /= r
             x, y = max(0, x), max(0, y)
             w, h = min(w0 - x, w), min(h0 - y, h)
             out.append([x, y, w, h])

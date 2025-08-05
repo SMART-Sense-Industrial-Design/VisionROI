@@ -3,7 +3,6 @@ import requests
 import cv2
 from datetime import datetime
 import threading
-from io import BytesIO
 import queue
 import os
 from requests.adapters import HTTPAdapter, Retry
@@ -83,13 +82,6 @@ class TelegramNotify:
         except Exception as e:
             print(f"❌ Failed to send image: {e}")
 
-    def tg_byte_send_file(self, msg, bytes_data):
-        filename = f"frame_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jpg"
-        url = f"https://api.telegram.org/bot{self.TG_TOKEN}/sendDocument"
-        files = {'document': (filename, bytes_data, 'image/jpeg')}
-        data = {'chat_id': self.CHAT_ID, 'caption': msg}
-        self._safe_telegram_post(url, files=files, data=data)
-
     def tg_frame_send_file(self, msg, frame):
         try:
             ret, buffer = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
@@ -146,13 +138,6 @@ class TelegramNotify:
             except queue.Full:
                 print("⚠️ Send queue is full. Skipping image.")
 
-    def start_bytes_send_file(self, msg, bytes_data, time_interval=None):
-        if self._should_send('file', time_interval):
-            try:
-                self.send_queue.put((self.tg_byte_send_file, (msg, bytes_data)), timeout=1)
-            except queue.Full:
-                print("⚠️ Send queue is full. Skipping byte file.")
-
     def start_frame_send_file(self, msg, frame, time_interval=None):
         if self._should_send('frame', time_interval):
             try:
@@ -173,3 +158,7 @@ class TelegramNotify:
                 self.send_queue.put((self.tg_send_video, (msg, path_file)), timeout=1)
             except queue.Full:
                 print("⚠️ Send queue is full. Skipping video.")
+
+    def close(self):
+        """ปิด session เพื่อป้องกัน resource leak"""
+        self.session.close()
