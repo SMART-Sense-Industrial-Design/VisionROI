@@ -97,12 +97,16 @@
                 localStorage.setItem('roiSource', currentSource);
             }
 
-            async function stopStream() {
+            function stopStream() {
                 if (socket) {
                     socket.close();
                     socket = null;
                 }
-                await fetch(`/stop_roi_stream/${cam}`, { method: "POST" });
+                try {
+                    fetch(`/stop_roi_stream/${cam}`, { method: 'POST', keepalive: true });
+                } catch (err) {
+                    console.error('Failed to stop ROI stream', err);
+                }
                 startBtn.innerText = 'Resume';
                 startBtn.disabled = false;
                 stopBtn.disabled = true;
@@ -273,8 +277,12 @@
             saveBtn.addEventListener('click', saveAllRois);
             clearBtn.addEventListener('click', clearAllRois);
 
-            async function cleanup() {
-                await stopStream();
+            function cleanup() {
+                try {
+                    stopStream();
+                } catch (err) {
+                    console.error('Cleanup error', err);
+                }
             }
 
             window.startStream = startStream;
