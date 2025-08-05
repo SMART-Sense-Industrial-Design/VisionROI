@@ -147,6 +147,7 @@
                 r.points.forEach(p => {
                     ctx.beginPath();
                     ctx.arc(p.x, p.y, 5, 0, 2 * Math.PI);
+
                     ctx.fillStyle = 'blue';
                     ctx.fill();
                 });
@@ -168,6 +169,7 @@
                 currentPoints.forEach(p => {
                     ctx.beginPath();
                     ctx.arc(p.x, p.y, 5, 0, 2 * Math.PI);
+
                     ctx.fillStyle = 'red';
                     ctx.fill();
                 });
