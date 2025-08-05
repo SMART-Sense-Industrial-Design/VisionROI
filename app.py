@@ -95,14 +95,14 @@ def get_roi_frame_queue(cam_id: int) -> asyncio.Queue[bytes | None]:
 async def read_and_queue_frame(
     cam_id: int, queue: asyncio.Queue[bytes], frame_processor=None
 ) -> None:
-    camera = cameras.get(cam_id)
-    if camera is None:
-        await asyncio.sleep(0.1)
-        return
     lock = camera_locks.setdefault(cam_id, asyncio.Lock())
     async with lock:
-        success, frame = await asyncio.to_thread(camera.read)
-    if not success:
+        camera = cameras.get(cam_id)
+        if camera is None or not getattr(camera, "isOpened", lambda: True)():
+            success = False
+        else:
+            success, frame = await asyncio.to_thread(camera.read)
+    if camera is None or not success:
         await asyncio.sleep(0.1)
         return
     if frame_processor:
