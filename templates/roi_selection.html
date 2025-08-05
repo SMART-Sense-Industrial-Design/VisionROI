@@ -4,7 +4,13 @@
 
 <style>
     #video { border: 1px solid black; position: relative; }
-    #canvas { position: absolute; left: 0; top: 0; }
+    #canvas {
+        position: absolute;
+        left: 0;
+        top: 0;
+        z-index: 1;
+        pointer-events: none;
+    }
 </style>
 
 <select id="sourceSelect"></select>
@@ -13,7 +19,7 @@
 <button id="saveBtn">Save All</button>
 <button id="clearBtn">Clear All</button>
 <br><br>
-<div style="position: relative; display: inline-block;">
+<div id="frameContainer" style="position: relative; display: inline-block;">
     <img id="video" />
     <canvas id="canvas"></canvas>
 </div>
@@ -30,6 +36,7 @@
 
         const video = document.getElementById("video");
         const canvas = document.getElementById("canvas");
+        const frameContainer = document.getElementById("frameContainer");
         const ctx = canvas.getContext("2d");
         const startBtn = document.getElementById("startBtn");
         const stopBtn = document.getElementById("stopBtn");
@@ -40,6 +47,8 @@
                 canvas.height = video.naturalHeight;
                 canvas.style.width = video.naturalWidth + 'px';
                 canvas.style.height = video.naturalHeight + 'px';
+                frameContainer.style.width = video.naturalWidth + 'px';
+                frameContainer.style.height = video.naturalHeight + 'px';
                 initialized = true;
             }
             drawAllRois();
@@ -105,8 +114,8 @@
             stopBtn.disabled = true;
         }
 
-        canvas.addEventListener('click', (e) => {
-            const rect = canvas.getBoundingClientRect();
+        frameContainer.addEventListener('click', (e) => {
+            const rect = frameContainer.getBoundingClientRect();
             const scaleX = canvas.width / rect.width;
             const scaleY = canvas.height / rect.height;
             const x = (e.clientX - rect.left) * scaleX;
@@ -135,6 +144,12 @@
                 ctx.strokeStyle = 'blue';
                 ctx.lineWidth = 2;
                 ctx.stroke();
+                r.points.forEach(p => {
+                    ctx.beginPath();
+                    ctx.arc(p.x, p.y, 5, 0, 2 * Math.PI);
+                    ctx.fillStyle = 'blue';
+                    ctx.fill();
+                });
                 if (r.id !== undefined) {
                     ctx.font = '16px sans-serif';
                     ctx.fillStyle = 'blue';
@@ -150,6 +165,12 @@
                 ctx.strokeStyle = 'red';
                 ctx.lineWidth = 2;
                 ctx.stroke();
+                currentPoints.forEach(p => {
+                    ctx.beginPath();
+                    ctx.arc(p.x, p.y, 5, 0, 2 * Math.PI);
+                    ctx.fillStyle = 'red';
+                    ctx.fill();
+                });
             }
         }
 
