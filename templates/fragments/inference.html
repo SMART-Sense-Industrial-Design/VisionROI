@@ -150,10 +150,18 @@
             await loadSources();
             await checkStatus();
         })();
+
+        return { stopInference };
     }
 
     // initialize controllers immediately (DOMContentLoaded already fired in fragments)
-    createCameraController('cam1');
-    createCameraController('cam2');
+    const controllers = [
+        createCameraController('cam1'),
+        createCameraController('cam2')
+    ];
+
+    window.onFragmentUnload = async () => {
+        await Promise.all(controllers.map(c => c.stopInference()));
+    };
 
 </script>
