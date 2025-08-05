@@ -64,9 +64,11 @@
 
             async function startStream() {
                 if (isRunning) return;
+                isRunning = true;
                 const name = document.getElementById("sourceSelect").value;
                 if (!name) {
                     alert("Select source first");
+                    isRunning = false;
                     return;
                 }
                 currentSource = name;
@@ -91,13 +93,11 @@
                 startBtn.disabled = true;
                 stopBtn.disabled = false;
                 startBtn.innerText = 'Start';
-                isRunning = true;
                 localStorage.setItem('roiStreaming', 'true');
                 localStorage.setItem('roiSource', currentSource);
             }
 
             async function stopStream() {
-                if (!isRunning) return;
                 if (socket) {
                     socket.close();
                     socket = null;
@@ -273,10 +273,15 @@
             saveBtn.addEventListener('click', saveAllRois);
             clearBtn.addEventListener('click', clearAllRois);
 
+            async function cleanup() {
+                await stopStream();
+            }
+
             window.startStream = startStream;
             window.stopStream = stopStream;
             window.saveAllRois = saveAllRois;
             window.clearAllRois = clearAllRois;
+            window.onFragmentUnload = cleanup;
 
             loadSources();
         })();

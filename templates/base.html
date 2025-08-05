@@ -31,11 +31,11 @@
     }
 
     function attachMenuHandlers() {
-      document.querySelectorAll('.sidenav a').forEach(link => {
+        document.querySelectorAll('.sidenav a').forEach(link => {
         link.addEventListener('click', async (e) => {
           e.preventDefault();
           if (window.onPageUnload) {
-            window.onPageUnload();
+            await window.onPageUnload();
           }
           const url = link.getAttribute('href');
           const res = await fetch(url);
@@ -65,11 +65,11 @@
     }
     attachMenuHandlers();
     setActiveLink(window.location.pathname);
-    window.addEventListener('popstate', async () => {
-      if (window.onPageUnload) {
-        window.onPageUnload();
-      }
-      const url = window.location.pathname;
+      window.addEventListener('popstate', async () => {
+        if (window.onPageUnload) {
+          await window.onPageUnload();
+        }
+        const url = window.location.pathname;
       const res = await fetch(url);
       const text = await res.text();
       const parser = new DOMParser();

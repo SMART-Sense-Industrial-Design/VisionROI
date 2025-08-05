@@ -21,6 +21,10 @@
 
   <script>
     async function loadFragment(name) {
+      if (window.onFragmentUnload) {
+        await window.onFragmentUnload();
+        window.onFragmentUnload = null;
+      }
       const res = await fetch(`/fragment/${name}`);
       const html = await res.text();
       const content = document.getElementById('content');
@@ -38,10 +42,10 @@
     }
 
     document.querySelectorAll('.sidenav a').forEach(a => {
-      a.addEventListener('click', (e) => {
+      a.addEventListener('click', async (e) => {
         e.preventDefault();
         const frag = a.dataset.fragment;
-        loadFragment(frag);
+        await loadFragment(frag);
       });
     });
 
