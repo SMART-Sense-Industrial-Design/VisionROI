@@ -279,10 +279,8 @@
         document.getElementById('saveBtn').addEventListener('click', saveAllRois);
         document.getElementById('clearBtn').addEventListener('click', clearAllRois);
 
-        function cleanup() {
-            if (isStreaming) {
-                stopStream();
-            }
+        async function cleanup() {
+            await stopStream();
             rois = [];
             currentPoints = [];
             currentSource = "";
