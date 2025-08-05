@@ -60,6 +60,12 @@
                 opt.textContent = item.name;
                 select.appendChild(opt);
             });
+
+            const savedSource = localStorage.getItem('roiSource');
+            if (localStorage.getItem('roiStreaming') === 'true' && savedSource) {
+                select.value = savedSource;
+                await startStream();
+            }
         }
 
         loadSources();
@@ -93,6 +99,8 @@
             isStreaming = true;
             startBtn.disabled = true;
             stopBtn.disabled = false;
+            localStorage.setItem('roiStreaming', 'true');
+            localStorage.setItem('roiSource', currentSource);
         }
 
         async function stopStream() {
@@ -105,6 +113,8 @@
             startBtn.disabled = false;
             startBtn.textContent = "Resume";
             stopBtn.disabled = true;
+            localStorage.removeItem('roiStreaming');
+            localStorage.removeItem('roiSource');
         }
 
         canvas.onmousedown = (e) => {
