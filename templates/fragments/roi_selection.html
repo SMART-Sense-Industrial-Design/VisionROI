@@ -87,6 +87,12 @@
                 };
                 socket.onclose = function() {
                     socket = null;
+                    isRunning = false;
+                    startBtn.disabled = false;
+                    startBtn.innerText = 'Start';
+                    stopBtn.disabled = true;
+                    localStorage.removeItem('roiStreaming');
+                    localStorage.removeItem('roiSource');
                     console.log("ROI stream closed");
                 };
                 await loadRois();

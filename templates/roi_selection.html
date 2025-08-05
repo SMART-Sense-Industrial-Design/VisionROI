@@ -95,6 +95,10 @@
             };
             socket.onclose = function() {
                 socket = null;
+                isStreaming = false;
+                startBtn.disabled = false;
+                startBtn.textContent = "Start";
+                stopBtn.disabled = true;
                 console.log("ROI stream closed");
             };
             await loadRois();
