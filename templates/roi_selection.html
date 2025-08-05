@@ -103,12 +103,16 @@
             stopBtn.disabled = false;
         }
 
-        async function stopStream() {
+        function stopStream() {
             if (socket) {
                 socket.close();
                 socket = null;
             }
-            await fetch(`/stop_roi_stream/${cam}`, { method: "POST" });
+            try {
+                fetch(`/stop_roi_stream/${cam}`, { method: 'POST', keepalive: true });
+            } catch (err) {
+                console.error('Failed to stop ROI stream', err);
+            }
             isStreaming = false;
             startBtn.disabled = false;
             startBtn.textContent = "Resume";
@@ -279,8 +283,12 @@
         document.getElementById('saveBtn').addEventListener('click', saveAllRois);
         document.getElementById('clearBtn').addEventListener('click', clearAllRois);
 
-        async function cleanup() {
-            await stopStream();
+        function cleanup() {
+            try {
+                stopStream();
+            } catch (err) {
+                console.error('Cleanup error', err);
+            }
             rois = [];
             currentPoints = [];
             currentSource = "";
