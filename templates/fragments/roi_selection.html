@@ -18,6 +18,7 @@
             let socket;
             let rois = [];
             let currentPoints = [];
+            let hoverPoint = null;
             let currentSource = "";
             let initialized = false;
             let isRunning = false;
@@ -123,7 +124,23 @@
                         rois.push({ id: roiId, points: [...currentPoints] });
                     }
                     currentPoints = [];
+                    hoverPoint = null;
                 }
+                drawAllRois();
+            });
+
+            canvas.addEventListener('mousemove', (e) => {
+                const rect = canvas.getBoundingClientRect();
+                const scaleX = canvas.width / rect.width;
+                const scaleY = canvas.height / rect.height;
+                const x = (e.clientX - rect.left) * scaleX;
+                const y = (e.clientY - rect.top) * scaleY;
+                hoverPoint = { x, y };
+                drawAllRois();
+            });
+
+            canvas.addEventListener('mouseleave', () => {
+                hoverPoint = null;
                 drawAllRois();
             });
 
@@ -140,6 +157,12 @@
                     ctx.strokeStyle = 'blue';
                     ctx.lineWidth = 2;
                     ctx.stroke();
+                    r.points.forEach(p => {
+                        ctx.beginPath();
+                        ctx.arc(p.x, p.y, 5, 0, 2 * Math.PI);
+                        ctx.fillStyle = 'blue';
+                        ctx.fill();
+                    });
                     if (r.id !== undefined) {
                         ctx.font = '16px sans-serif';
                         ctx.fillStyle = 'blue';
@@ -155,6 +178,23 @@
                     ctx.strokeStyle = 'red';
                     ctx.lineWidth = 2;
                     ctx.stroke();
+                    currentPoints.forEach(p => {
+                        ctx.beginPath();
+                        ctx.arc(p.x, p.y, 5, 0, 2 * Math.PI);
+                        ctx.fillStyle = 'red';
+                        ctx.fill();
+                    });
+                    if (hoverPoint) {
+                        const last = currentPoints[currentPoints.length - 1];
+                        ctx.beginPath();
+                        ctx.moveTo(last.x, last.y);
+                        ctx.lineTo(hoverPoint.x, hoverPoint.y);
+                        ctx.strokeStyle = 'red';
+                        ctx.lineWidth = 1;
+                        ctx.setLineDash([5, 5]);
+                        ctx.stroke();
+                        ctx.setLineDash([]);
+                    }
                 }
             }
 
