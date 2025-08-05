@@ -99,7 +99,12 @@ async def read_and_queue_frame(
         return
     if frame_processor:
         frame = await frame_processor(frame)
-    _, buffer = cv2.imencode('.jpg', frame)
+    if frame is None:
+        return
+    encoded, buffer = cv2.imencode('.jpg', frame)
+    if not encoded:
+        await asyncio.sleep(0.1)
+        return
     frame_bytes = buffer.tobytes() if hasattr(buffer, "tobytes") else buffer
     if queue.full():
         try:
