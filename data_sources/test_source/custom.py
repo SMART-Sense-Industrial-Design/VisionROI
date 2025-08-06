@@ -8,6 +8,7 @@ from logging.handlers import TimedRotatingFileHandler
 import logging
 import os
 from datetime import datetime
+import threading
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -25,15 +26,21 @@ logger.addHandler(_handler)
 # ตัวแปรควบคุมเวลาเรียก OCR แยกตาม roi
 last_ocr_times = {}
 
+def _save_image_async(path, image):
+    """บันทึกรูปภาพแบบแยกเธรด"""
+    cv2.imwrite(path, image)
+
+
 def process(frame, roi_id=None, save=False):
     """ประมวลผล ROI และเรียก OCR เมื่อเวลาห่างจากครั้งก่อน >= 2 วินาที
-    บันทึกรูปภาพเมื่อระบุให้บันทึก"""
+    บันทึกรูปภาพเมื่อระบุให้บันทึกแบบไม่บล็อกการทำงาน"""
     if save:
         save_dir = os.path.join(os.path.dirname(__file__), "images", "roi1")
         os.makedirs(save_dir, exist_ok=True)
         filename = datetime.now().strftime("%Y%m%d%H%M%S%f") + ".jpg"
-
-        cv2.imwrite(os.path.join(save_dir, filename), frame)
+        save_path = os.path.join(save_dir, filename)
+        image_copy = frame.copy()
+        threading.Thread(target=_save_image_async, args=(save_path, image_copy), daemon=True).start()
 
     current_time = time.monotonic()
     last_time = last_ocr_times.get(roi_id)
