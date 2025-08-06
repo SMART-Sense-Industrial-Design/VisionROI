@@ -33,7 +33,7 @@ def _save_image_async(path, image):
 
 def process(frame, roi_id=None, save=False):
     """ประมวลผล ROI และเรียก OCR เมื่อเวลาห่างจากครั้งก่อน >= 2 วินาที
-    บันทึกรูปภาพเมื่อระบุให้บันทึก"""
+    บันทึกรูปภาพแบบไม่บล็อกเมื่อระบุให้บันทึก"""
     
     current_time = time.monotonic()
     last_time = last_ocr_times.get(roi_id)
@@ -56,8 +56,11 @@ def process(frame, roi_id=None, save=False):
             save_dir = os.path.join(os.path.dirname(__file__), "images", "roi1")
             os.makedirs(save_dir, exist_ok=True)
             filename = datetime.now().strftime("%Y%m%d%H%M%S%f") + ".jpg"
+            path = os.path.join(save_dir, filename)
 
-            cv2.imwrite(os.path.join(save_dir, filename), frame)
+            threading.Thread(
+                target=_save_image_async, args=(path, frame.copy()), daemon=True
+            ).start()
 
     else:
         logger.info(f"OCR skipped for ROI {roi_id} (throttled)")
