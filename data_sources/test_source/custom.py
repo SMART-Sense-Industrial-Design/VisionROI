@@ -34,11 +34,14 @@ def process(frame, roi_id=None):
     logger.info(f"roi_id={roi_id} diff_time={diff_time}")
 
     if last_time is None or diff_time >= 2:
-        _, buffer = cv2.imencode('.jpg', frame)
-        base64_string = base64.b64encode(buffer).decode('utf-8')
-        markdown = ocr_document(base64_string)
-        logger.info(f"roi_id={roi_id} OCR result: {markdown}")
         last_ocr_times[roi_id] = current_time
+        try:
+            _, buffer = cv2.imencode('.jpg', frame)
+            base64_string = base64.b64encode(buffer).decode('utf-8')
+            markdown = ocr_document(base64_string)
+            logger.info(f"roi_id={roi_id} OCR result: {markdown}")
+        except Exception as e:
+            logger.exception(f"roi_id={roi_id} OCR error: {e}")
     else:
         logger.info(f"OCR skipped for ROI {roi_id} (throttled)")
 
