@@ -9,6 +9,10 @@ import logging
 import os
 from datetime import datetime
 import threading
+try:
+    import numpy as np
+except Exception:  # pragma: no cover - fallback when numpy missing
+    np = None
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -51,6 +55,9 @@ def process(frame, roi_id=None, save=False):
     """ประมวลผล ROI และเรียก OCR เมื่อเวลาห่างจากครั้งก่อน >= 2 วินาที
     บันทึกรูปภาพแบบไม่บล็อกเมื่อระบุให้บันทึก"""
 
+    if isinstance(frame, Image.Image) and np is not None:
+        frame = cv2.cvtColor(np.array(frame), cv2.COLOR_RGB2BGR)
+
     current_time = time.monotonic()
 
     with _last_ocr_lock:
@@ -73,17 +80,16 @@ def process(frame, roi_id=None, save=False):
             ).start()
         except Exception as e:
             logger.exception(f"roi_id={roi_id} OCR error: {e}")
-
-        if save:
-            save_dir = os.path.join(os.path.dirname(__file__), "images", "roi1")
-            os.makedirs(save_dir, exist_ok=True)
-            filename = datetime.now().strftime("%Y%m%d%H%M%S%f") + ".jpg"
-            path = os.path.join(save_dir, filename)
-
-            threading.Thread(
-                target=_save_image_async, args=(path, frame.copy()), daemon=True
-            ).start()
     else:
         logger.info(f"OCR skipped for ROI {roi_id} (throttled)")
+
+    if save:
+        save_dir = os.path.join(os.path.dirname(__file__), "images", "roi1")
+        os.makedirs(save_dir, exist_ok=True)
+        filename = datetime.now().strftime("%Y%m%d%H%M%S%f") + ".jpg"
+        path = os.path.join(save_dir, filename)
+        threading.Thread(
+            target=_save_image_async, args=(path, frame.copy()), daemon=True
+        ).start()
 
     return frame
