@@ -23,8 +23,24 @@ logger.addHandler(_handler)
 # โหลดโมเดล (ถ้ามี)
 # model = YOLOv8("data_sources/<your_source>/model.onnx")
 
-# ตัวแปรควบคุมเวลาเรียก OCR แยกตาม roi
+# ตัวแปรควบคุมเวลาเรียก OCR แยกตาม roi พร้อมตัวล็อกป้องกันการเข้าถึงพร้อมกัน
 last_ocr_times = {}
+_last_ocr_lock = threading.Lock()
+
+
+def _run_ocr(base64_string, roi_id=None):
+    """เรียก OCR ในเธรดพื้นหลังและบันทึกผล"""
+    try:
+        markdown = ocr_document(base64_string)
+        if roi_id is not None:
+            logger.info(f"roi_id={roi_id} OCR result: {markdown}")
+        else:
+            logger.info(f"OCR result: {markdown}")
+    except Exception as e:
+        if roi_id is not None:
+            logger.exception(f"roi_id={roi_id} OCR error: {e}")
+        else:
+            logger.exception(f"OCR error: {e}")
 
 def _save_image_async(path, image):
     """บันทึกรูปภาพแบบแยกเธรด"""
@@ -34,24 +50,30 @@ def _save_image_async(path, image):
 def process(frame, roi_id=None, save=False):
     """ประมวลผล ROI และเรียก OCR เมื่อเวลาห่างจากครั้งก่อน >= 2 วินาที
     บันทึกรูปภาพแบบไม่บล็อกเมื่อระบุให้บันทึก"""
-    
-    current_time = time.monotonic()
-    last_time = last_ocr_times.get(roi_id)
 
-    # คำนวณเวลาที่ห่างจากการเรียกครั้งก่อน (เป็นวินาที)
-    diff_time = 0 if last_time is None else current_time - last_time
+    current_time = time.monotonic()
+
+    with _last_ocr_lock:
+        last_time = last_ocr_times.get(roi_id)
+        diff_time = 0 if last_time is None else current_time - last_time
+        if last_time is None or diff_time >= 2:
+            last_ocr_times[roi_id] = current_time
+            should_ocr = True
+        else:
+            should_ocr = False
+
     logger.info(f"roi_id={roi_id} diff_time={diff_time}")
 
-    if last_time is None or diff_time >= 2:
-        last_ocr_times[roi_id] = current_time
+    if should_ocr:
         try:
             _, buffer = cv2.imencode('.jpg', frame)
             base64_string = base64.b64encode(buffer).decode('utf-8')
-            markdown = ocr_document(base64_string)
-            logger.info(f"roi_id={roi_id} OCR result: {markdown}")
+            threading.Thread(
+                target=_run_ocr, args=(base64_string, roi_id), daemon=True
+            ).start()
         except Exception as e:
             logger.exception(f"roi_id={roi_id} OCR error: {e}")
-        
+
         if save:
             save_dir = os.path.join(os.path.dirname(__file__), "images", "roi1")
             os.makedirs(save_dir, exist_ok=True)
@@ -61,7 +83,6 @@ def process(frame, roi_id=None, save=False):
             threading.Thread(
                 target=_save_image_async, args=(path, frame.copy()), daemon=True
             ).start()
-
     else:
         logger.info(f"OCR skipped for ROI {roi_id} (throttled)")
 
