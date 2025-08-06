@@ -32,6 +32,7 @@ def process(frame, roi_id=None, save=False):
         save_dir = os.path.join(os.path.dirname(__file__), "images", "roi1")
         os.makedirs(save_dir, exist_ok=True)
         filename = datetime.now().strftime("%Y%m%d%H%M%S%f") + ".jpg"
+
         cv2.imwrite(os.path.join(save_dir, filename), frame)
 
     current_time = time.monotonic()

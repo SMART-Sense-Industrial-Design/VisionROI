@@ -180,6 +180,8 @@ async def run_inference_loop(cam_id: int):
                             await result
                     except Exception:
                         pass
+                if save_flag:
+                    save_roi_flags[cam_id] = False
                 cv2.polylines(frame, [src.astype(int)], True, (0, 255, 0), 2)
                 label_pt = src[0].astype(int)
                 cv2.putText(
