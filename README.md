@@ -88,6 +88,13 @@ web_ocrroi/
 1. รัน `python app.py` (หรือใช้ `quart --app app:app run --reload` เพื่อรีโหลดอัตโนมัติระหว่างพัฒนา)
 2. เปิดเบราว์เซอร์ไปที่ `http://localhost:5000/` (ระบบจะรีไดเรกต์ไปหน้า `/home`)
 
+## โฟลว์การทำงานจากการสร้าง Source ถึงการรัน Inference
+1. ไปที่หน้า `/create_source` เพื่อสร้าง source ใหม่ โดยอัปโหลดไฟล์โมเดล (`model.onnx` หรือรูปแบบอื่น), `classes.txt` และ `config.json`
+2. ตั้งค่ากล้องและเลือก source ด้วย `POST /set_camera/<cam_id>` หรือผ่านหน้า UI
+3. เปิดหน้า `/roi` แล้วเลือกตำแหน่ง ROI ที่ต้องการ จากนั้นกดบันทึก (เรียก `POST /save_roi`)
+4. เริ่มรันโมเดลด้วยการเข้า `/inference` หรือเรียก `POST /start_inference/<cam_id>` เพื่อประมวลผลเฉพาะ ROI ที่บันทึกไว้
+5. เมื่อเสร็จสิ้นสามารถหยุดงานได้ที่ `POST /stop_inference/<cam_id>`
+
 ## การตั้งค่าการแจ้งเตือน
 ### Telegram Notify
 ตัวอย่างการใช้งาน:
