@@ -131,9 +131,11 @@ async def run_inference_loop(cam_id: int):
             if process_fn:
                 try:
                     if process_has_id:
-                        await asyncio.to_thread(process_fn, frame, None)
+                        result = process_fn(frame, None)
                     else:
-                        await asyncio.to_thread(process_fn, frame)
+                        result = process_fn(frame)
+                    if inspect.isawaitable(result):
+                        await result
                 except Exception:
                     pass
         else:
@@ -159,9 +161,11 @@ async def run_inference_loop(cam_id: int):
                 if process_fn:
                     try:
                         if process_has_id:
-                            await asyncio.to_thread(process_fn, roi, r.get("id", str(i)))
+                            result = process_fn(roi, r.get("id", str(i)))
                         else:
-                            await asyncio.to_thread(process_fn, roi)
+                            result = process_fn(roi)
+                        if inspect.isawaitable(result):
+                            await result
                     except Exception:
                         pass
                 cv2.polylines(frame, [src.astype(int)], True, (0, 255, 0), 2)
