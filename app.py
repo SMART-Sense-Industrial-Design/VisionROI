@@ -15,6 +15,7 @@ from pathlib import Path
 import contextlib
 import inspect
 from typing import Callable, Awaitable, Any
+from datetime import datetime
 try:  # pragma: no cover
     from websockets.exceptions import ConnectionClosed
 except Exception:  # websockets not installed
@@ -30,6 +31,7 @@ roi_frame_queues: dict[int, asyncio.Queue[bytes | None]] = {}
 roi_tasks: dict[int, asyncio.Task | None] = {}
 inference_rois: dict[int, list[dict]] = {}
 active_sources: dict[int, str] = {}
+save_roi_flags: dict[int, bool] = {}
 
 app = Quart(__name__)
 # กำหนดเพดานขนาดไฟล์ที่เซิร์ฟเวอร์ยอมรับ (100 MB)
@@ -158,6 +160,17 @@ async def run_inference_loop(cam_id: int):
                 )
                 matrix = cv2.getPerspectiveTransform(src, dst)
                 roi = cv2.warpPerspective(frame, matrix, (max_w, max_h))
+                if save_roi_flags.get(cam_id) and i == 0:
+                    source_name = active_sources.get(cam_id, "")
+                    save_dir = os.path.join("data_sources", source_name, "images", "roi1")
+                    os.makedirs(save_dir, exist_ok=True)
+                    filename = datetime.now().strftime("%Y%m%d%H%M%S") + ".jpg"
+                    file_path = os.path.join(save_dir, filename)
+                    try:
+                        await asyncio.to_thread(cv2.imwrite, file_path, roi)
+                    except Exception:
+                        pass
+                    save_roi_flags[cam_id] = False
                 if process_fn:
                     try:
                         if process_has_id:
@@ -378,6 +391,7 @@ async def start_inference(cam_id: int):
         except FileNotFoundError:
             rois = []
     inference_rois[cam_id] = rois
+    save_roi_flags[cam_id] = True
     inference_tasks[cam_id], resp, status = await start_camera_task(
         cam_id, inference_tasks, run_inference_loop
     )
