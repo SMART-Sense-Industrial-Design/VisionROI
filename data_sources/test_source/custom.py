@@ -25,12 +25,15 @@ logger.addHandler(_handler)
 last_ocr_times = {}
 
 def process(frame, roi_id=None):
-    current_time = time.time()
-    last_time = last_ocr_times.get(roi_id, 0)
+    """ประมวลผล ROI และเรียก OCR เมื่อเวลาห่างจากครั้งก่อน >= 2 วินาที"""
+    current_time = time.monotonic()
+    last_time = last_ocr_times.get(roi_id)
 
-    # เช็คว่าเวลาห่างจากการเรียกครั้งก่อนครบ 2 วินาทีหรือยัง
-    logger.info(f"roi_id={roi_id} diff_time={current_time - last_time}")
-    if current_time - last_time >= 2:
+    # คำนวณเวลาที่ห่างจากการเรียกครั้งก่อน (เป็นวินาที)
+    diff_time = 0 if last_time is None else current_time - last_time
+    logger.info(f"roi_id={roi_id} diff_time={diff_time}")
+
+    if last_time is None or diff_time >= 2:
         _, buffer = cv2.imencode('.jpg', frame)
         base64_string = base64.b64encode(buffer).decode('utf-8')
         markdown = ocr_document(base64_string)
