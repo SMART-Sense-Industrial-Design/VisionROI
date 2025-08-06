@@ -7,6 +7,7 @@ import base64
 from logging.handlers import TimedRotatingFileHandler
 import logging
 import os
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -24,8 +25,15 @@ logger.addHandler(_handler)
 # ตัวแปรควบคุมเวลาเรียก OCR แยกตาม roi
 last_ocr_times = {}
 
-def process(frame, roi_id=None):
-    """ประมวลผล ROI และเรียก OCR เมื่อเวลาห่างจากครั้งก่อน >= 2 วินาที"""
+def process(frame, roi_id=None, save=False):
+    """ประมวลผล ROI และเรียก OCR เมื่อเวลาห่างจากครั้งก่อน >= 2 วินาที
+    บันทึกรูปภาพเมื่อระบุให้บันทึก"""
+    if save:
+        save_dir = os.path.join(os.path.dirname(__file__), "images", "roi1")
+        os.makedirs(save_dir, exist_ok=True)
+        filename = datetime.now().strftime("%Y%m%d%H%M%S") + ".jpg"
+        cv2.imwrite(os.path.join(save_dir, filename), frame)
+
     current_time = time.monotonic()
     last_time = last_ocr_times.get(roi_id)
 

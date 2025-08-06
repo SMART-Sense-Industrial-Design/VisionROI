@@ -15,7 +15,6 @@ from pathlib import Path
 import contextlib
 import inspect
 from typing import Callable, Awaitable, Any
-from datetime import datetime
 try:  # pragma: no cover
     from websockets.exceptions import ConnectionClosed
 except Exception:  # websockets not installed
@@ -114,18 +113,22 @@ async def read_and_queue_frame(
         except asyncio.QueueEmpty:
             pass
     await queue.put(frame_bytes)
-    await asyncio.sleep(0.05)
+    await asyncio.sleep(0.04)
 
 
 async def run_inference_loop(cam_id: int):
     custom_module = load_custom_module(active_sources.get(cam_id, ""))
     process_fn = getattr(custom_module, "process", None) if custom_module else None
     process_has_id = False
+    process_has_save = False
     if process_fn:
         try:
-            process_has_id = len(inspect.signature(process_fn).parameters) >= 2
+            params = inspect.signature(process_fn).parameters
+            process_has_id = len(params) >= 2
+            process_has_save = len(params) >= 3
         except (ValueError, TypeError):
             process_has_id = False
+            process_has_save = False
 
     async def process_frame(frame):
         rois = inference_rois.get(cam_id, [])
@@ -160,27 +163,25 @@ async def run_inference_loop(cam_id: int):
                 )
                 matrix = cv2.getPerspectiveTransform(src, dst)
                 roi = cv2.warpPerspective(frame, matrix, (max_w, max_h))
-                if save_roi_flags.get(cam_id) and i == 0:
-                    source_name = active_sources.get(cam_id, "")
-                    save_dir = os.path.join("data_sources", source_name, "images", "roi1")
-                    os.makedirs(save_dir, exist_ok=True)
-                    filename = datetime.now().strftime("%Y%m%d%H%M%S") + ".jpg"
-                    file_path = os.path.join(save_dir, filename)
-                    try:
-                        await asyncio.to_thread(cv2.imwrite, file_path, roi)
-                    except Exception:
-                        pass
-                    save_roi_flags[cam_id] = False
+                save_flag = bool(save_roi_flags.get(cam_id) and i == 0)
                 if process_fn:
                     try:
                         if process_has_id:
-                            result = process_fn(roi, r.get("id", str(i)))
+                            if process_has_save:
+                                result = process_fn(roi, r.get("id", str(i)), save_flag)
+                            else:
+                                result = process_fn(roi, r.get("id", str(i)))
                         else:
-                            result = process_fn(roi)
+                            if process_has_save:
+                                result = process_fn(roi, save_flag)
+                            else:
+                                result = process_fn(roi)
                         if inspect.isawaitable(result):
                             await result
                     except Exception:
                         pass
+                if save_flag:
+                    save_roi_flags[cam_id] = False
                 cv2.polylines(frame, [src.astype(int)], True, (0, 255, 0), 2)
                 label_pt = src[0].astype(int)
                 cv2.putText(
