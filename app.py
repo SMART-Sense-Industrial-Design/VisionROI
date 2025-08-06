@@ -243,8 +243,13 @@ async def stop_camera_task(
     ):
         lock = camera_locks.setdefault(cam_id, asyncio.Lock())
         async with lock:
-            camera.release()
-        cameras[cam_id] = None
+            # การปล่อยกล้องบางครั้งอาจทำให้เกิด segmentation fault
+            # จึงย้ายไปทำใน thread แยกพร้อมครอบด้วย try/except
+            try:
+                await asyncio.to_thread(camera.release)
+            except Exception:
+                pass
+            cameras[cam_id] = None
     return task_dict.get(cam_id), {"status": status, "cam_id": cam_id}, 200
 
 
