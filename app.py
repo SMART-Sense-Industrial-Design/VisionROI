@@ -367,7 +367,17 @@ async def start_inference(cam_id: int):
     if roi_tasks.get(cam_id) and not roi_tasks[cam_id].done():
         return jsonify({"status": "roi_running", "cam_id": cam_id}), 400
     data = await request.get_json() or {}
-    inference_rois[cam_id] = data.get("rois", [])
+    rois = data.get("rois")
+    if not rois:
+        source = active_sources.get(cam_id, "")
+        source_dir = os.path.join("data_sources", source)
+        rois_path = os.path.join(source_dir, "rois.json")
+        try:
+            with open(rois_path) as f:
+                rois = json.load(f)
+        except FileNotFoundError:
+            rois = []
+    inference_rois[cam_id] = rois
     inference_tasks[cam_id], resp, status = await start_camera_task(
         cam_id, inference_tasks, run_inference_loop
     )
