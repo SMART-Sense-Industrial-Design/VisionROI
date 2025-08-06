@@ -28,12 +28,6 @@ last_ocr_times = {}
 def process(frame, roi_id=None, save=False):
     """ประมวลผล ROI และเรียก OCR เมื่อเวลาห่างจากครั้งก่อน >= 2 วินาที
     บันทึกรูปภาพเมื่อระบุให้บันทึก"""
-    if save:
-        save_dir = os.path.join(os.path.dirname(__file__), "images", "roi1")
-        os.makedirs(save_dir, exist_ok=True)
-        filename = datetime.now().strftime("%Y%m%d%H%M%S%f") + ".jpg"
-
-        cv2.imwrite(os.path.join(save_dir, filename), frame)
 
     current_time = time.monotonic()
     last_time = last_ocr_times.get(roi_id)
@@ -51,6 +45,14 @@ def process(frame, roi_id=None, save=False):
             logger.info(f"roi_id={roi_id} OCR result: {markdown}")
         except Exception as e:
             logger.exception(f"roi_id={roi_id} OCR error: {e}")
+        
+        if save:
+            save_dir = os.path.join(os.path.dirname(__file__), "images", "roi1")
+            os.makedirs(save_dir, exist_ok=True)
+            filename = datetime.now().strftime("%Y%m%d%H%M%S%f") + ".jpg"
+
+            cv2.imwrite(os.path.join(save_dir, filename), frame)
+
     else:
         logger.info(f"OCR skipped for ROI {roi_id} (throttled)")
 
