@@ -84,7 +84,7 @@ def process(frame, roi_id=None, save=False):
         logger.info(f"OCR skipped for ROI {roi_id} (throttled)")
 
     if save:
-        save_dir = os.path.join(os.path.dirname(__file__), "images", "roi1")
+        save_dir = os.path.join(os.path.dirname(__file__), "images", str(roi_id))
         os.makedirs(save_dir, exist_ok=True)
         filename = datetime.now().strftime("%Y%m%d%H%M%S%f") + ".jpg"
         path = os.path.join(save_dir, filename)
