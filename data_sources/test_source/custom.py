@@ -80,16 +80,18 @@ def process(frame, roi_id=None, save=False):
             ).start()
         except Exception as e:
             logger.exception(f"roi_id={roi_id} OCR error: {e}")
+
+        if save:
+            save_dir = os.path.join(os.path.dirname(__file__), "images", str(roi_id))
+            os.makedirs(save_dir, exist_ok=True)
+            filename = datetime.now().strftime("%Y%m%d%H%M%S%f") + ".jpg"
+            path = os.path.join(save_dir, filename)
+            threading.Thread(
+                target=_save_image_async, args=(path, frame.copy()), daemon=True
+            ).start()
+            
     else:
         logger.info(f"OCR skipped for ROI {roi_id} (throttled)")
 
-    if save:
-        save_dir = os.path.join(os.path.dirname(__file__), "images", str(roi_id))
-        os.makedirs(save_dir, exist_ok=True)
-        filename = datetime.now().strftime("%Y%m%d%H%M%S%f") + ".jpg"
-        path = os.path.join(save_dir, filename)
-        threading.Thread(
-            target=_save_image_async, args=(path, frame.copy()), daemon=True
-        ).start()
 
     return frame
