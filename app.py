@@ -263,10 +263,10 @@ async def stop_camera_task(
             # ดึงกล้องออกจาก dict ก่อนปล่อยเพื่อป้องกันการใช้พร้อมกัน
             cam = cameras.pop(cam_id, None)
             if cam and cam.isOpened():
-                # การปล่อยกล้องบางครั้งอาจทำให้เกิด segmentation fault
-                # จึงย้ายไปทำใน thread แยกพร้อมครอบด้วย try/except
+                # การปล่อยกล้องผ่าน thread แยกพบว่าทำให้เกิด segmentation fault
+                # จึงเรียกปล่อยกล้องโดยตรงใน main thread พร้อมครอบด้วย try/except
                 try:
-                    await asyncio.to_thread(cam.release)
+                    cam.release()
                 except Exception:
                     pass
     return task_dict.get(cam_id), {"status": status, "cam_id": cam_id}, 200
