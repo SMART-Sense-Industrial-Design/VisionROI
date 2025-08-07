@@ -297,7 +297,10 @@
                 const w = Math.max(...xs) - x;
                 const h = Math.max(...ys) - y;
                 const tr = document.createElement('tr');
-                [r.id, x, y, w, h].forEach(val => {
+                const idTd = document.createElement('td');
+                idTd.textContent = r.id;
+                tr.appendChild(idTd);
+                [x, y, w, h].forEach(val => {
                     const td = document.createElement('td');
                     td.textContent = Math.round(val);
                     tr.appendChild(td);
