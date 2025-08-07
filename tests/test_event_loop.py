@@ -87,6 +87,7 @@ def test_event_loop_responsive():
         app.cameras[0] = DummyCamera()
         app.inference_rois[0] = []
         app.active_sources[0] = ""
+        app.active_engines[0] = ""
         app.cv2.imencode = lambda ext, frame: (True, b"data")
 
         loop_task = asyncio.create_task(app.run_inference_loop(0))

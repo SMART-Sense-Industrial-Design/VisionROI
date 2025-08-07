@@ -30,6 +30,7 @@ roi_frame_queues: dict[int, asyncio.Queue[bytes | None]] = {}
 roi_tasks: dict[int, asyncio.Task | None] = {}
 inference_rois: dict[int, list[dict]] = {}
 active_sources: dict[int, str] = {}
+active_engines: dict[int, str] = {}
 save_roi_flags: dict[int, bool] = {}
 
 app = Quart(__name__)
@@ -58,11 +59,13 @@ async def inference():
     return await render_template("inference.html")
 
 
-def load_custom_module(name: str) -> ModuleType | None:
-    path = os.path.join("data_sources", name, "custom.py")
+def load_custom_module(engine: str) -> ModuleType | None:
+    if not engine:
+        return None
+    path = os.path.join("engines", engine, "custom.py")
     if not os.path.exists(path):
         return None
-    module_name = f"custom_{name}"
+    module_name = f"custom_{engine}"
     # ลบโมดูลเก่าที่ค้างอยู่เพื่อให้โหลดใหม่ได้ถูกต้องและไม่กินหน่วยความจำ
     if module_name in sys.modules:
         del sys.modules[module_name]
@@ -117,7 +120,7 @@ async def read_and_queue_frame(
 
 
 async def run_inference_loop(cam_id: int):
-    custom_module = load_custom_module(active_sources.get(cam_id, ""))
+    custom_module = load_custom_module(active_engines.get(cam_id, ""))
     process_fn = getattr(custom_module, "process", None) if custom_module else None
     process_has_id = False
     process_has_save = False
@@ -299,6 +302,7 @@ async def ws_roi(cam_id: int):
 async def set_camera(cam_id: int):
     data = await request.get_json()
     active_sources[cam_id] = data.get("name", "")
+    active_engines[cam_id] = data.get("engine", "")
     source_val = data.get("source", "")
     camera = cameras.get(cam_id)
     if camera and camera.isOpened():
@@ -356,14 +360,6 @@ async def create_source():
         rois_path = os.path.join(source_dir, "rois.json")
         with open(rois_path, "w") as f:
             f.write("[]")
-        custom_path = os.path.join(source_dir, "custom.py")
-        with open(custom_path, "w") as f:
-            f.write(
-                "def process(frame):\n"
-                "    \"\"\"รับเฟรมเต็มและภาพ ROI ที่ตัดแล้ว\"\"\"\n"
-                "    # เขียนโค้ดประมวลผลตามต้องการ เช่น OCR\n"
-                "    return frame\n"
-            )
         with open(os.path.join(source_dir, "config.json"), "w") as f:
             json.dump(config, f)
     except Exception:
@@ -449,6 +445,16 @@ async def roi_stream_status(cam_id: int):
 @app.route("/data_sources")
 async def list_sources():
     base_dir = Path(__file__).resolve().parent / "data_sources"
+    try:
+        names = [d.name for d in base_dir.iterdir() if d.is_dir()]
+    except FileNotFoundError:
+        names = []
+    return jsonify(names)
+
+
+@app.route("/engine_list", methods=["GET"])
+async def engine_list():
+    base_dir = Path(__file__).resolve().parent / "engines"
     try:
         names = [d.name for d in base_dir.iterdir() if d.is_dir()]
     except FileNotFoundError:

@@ -114,13 +114,13 @@ tg.start_send_text("สวัสดี")
 เลือกและบันทึกตำแหน่ง ROI ตาม source ที่เลือก
 
 ### Inference (`/inference`)
-แสดงผลวิดีโอพร้อม ROI และเรียกฟังก์ชัน `custom.py` ถ้ามี
+แสดงผลวิดีโอพร้อม ROI และเรียกฟังก์ชัน `custom.py` จาก engine ที่เลือก
 
 ## API/Endpoints
 
-- **POST `/set_camera/<cam_id>`** – ตั้งค่ากล้องและเลือก source ที่จะใช้
+- **POST `/set_camera/<cam_id>`** – ตั้งค่ากล้อง เลือก source และ engine ที่จะใช้
   ```json
-  {"name": "cam1", "source": "0"}
+  {"name": "cam1", "source": "0", "engine": "typhoon_ocr"}
   ```
 
 - **POST `/start_inference/<cam_id>`** – เริ่มอ่านภาพและประมวลผล ROI ที่ส่งมา
@@ -161,6 +161,7 @@ tg.start_send_text("สวัสดี")
 - **GET `/data_sources`** – รายชื่อ source ทั้งหมดในระบบ
 
 - **GET `/source_list`** – รายชื่อ source พร้อมรายละเอียดของแต่ละตัว
+- **GET `/engine_list`** – รายชื่อ engine ที่พร้อมใช้งาน
 
 - **GET `/source_config`** – คืนค่าคอนฟิกของ source ตามชื่อที่ระบุผ่านพารามิเตอร์ `name`
 
@@ -178,14 +179,19 @@ data_sources/
     ├─ model.onnx
     ├─ classes.txt
     ├─ config.json
-    ├─ rois.json
-    └─ custom.py
+    └─ rois.json
 ```
 
+## โครงสร้าง `engines/`
+```
+engines/
+└── <engine>/
+    └─ custom.py
+```
 ไฟล์ `custom.py` ต้องมีฟังก์ชัน `process(frame)` เพื่อประมวลผลเฟรมหรือ ROI ตามต้องการ
 
 ## ข้อมูลเพิ่มเติม
-- สร้าง `custom.py` ตามตัวอย่างข้างต้นภายใน `data_sources/<name>/`
+- สร้าง `custom.py` ภายใน `engines/<engine>/`
 - `config.json` เก็บข้อมูล source, โมเดล และไฟล์ ROI
 
 ## การทดสอบ

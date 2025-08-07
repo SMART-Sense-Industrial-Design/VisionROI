@@ -1,6 +1,7 @@
 <h2>Inference with Saved ROI</h2>
 <div id="cam1" class="cam-cell">
-    <select id="cam1-sourceSelect"></select>
+    source: <select id="cam1-sourceSelect"></select>
+    engine: <select id="cam1-engineSelect"></select>
     <button id="cam1-startButton">Start</button>
     <button id="cam1-stopButton" disabled>Stop</button>
     <p id="cam1-status"></p>
@@ -9,7 +10,8 @@
     </div>
 </div>
 <div id="cam2" class="cam-cell">
-    <select id="cam2-sourceSelect"></select>
+    source: <select id="cam2-sourceSelect"></select>
+    engine: <select id="cam2-engineSelect"></select>
     <button id="cam2-startButton">Start</button>
     <button id="cam2-stopButton" disabled>Stop</button>
     <p id="cam2-status"></p>
@@ -31,6 +33,7 @@
         const stopButton = getEl('stopButton');
         const statusEl = getEl('status');
         const sourceSelect = getEl('sourceSelect');
+        const engineSelect = getEl('engineSelect');
 
         startButton.onclick = startInference;
         stopButton.onclick = stopInference;
@@ -66,13 +69,51 @@
             }
         }
 
+        async function loadEngines() {
+            try {
+                const res = await fetch('/engine_list');
+                if (!res.ok) throw new Error('Bad response');
+                const data = await res.json();
+                engineSelect.innerHTML = '';
+                if (data.length === 0) {
+                    const opt = document.createElement('option');
+                    opt.value = '';
+                    opt.textContent = 'No engines available';
+                    engineSelect.appendChild(opt);
+                    statusEl.innerText = 'No engines found';
+                } else {
+                    data.forEach(name => {
+                        const opt = document.createElement('option');
+                        opt.value = name;
+                        opt.textContent = name;
+                        engineSelect.appendChild(opt);
+                    });
+                }
+            } catch (err) {
+                console.error('Failed to load engines', err);
+                engineSelect.innerHTML = '';
+                const opt = document.createElement('option');
+                opt.value = '';
+                opt.textContent = 'Error loading engines';
+                engineSelect.appendChild(opt);
+                statusEl.innerText = 'Error fetching engines';
+            }
+        }
+
         async function startInference() {
             if (running) return;
             running = true;
             startButton.disabled = true;
             const name = sourceSelect.value;
+            const engine = engineSelect.value;
             if (!name) {
                 statusEl.innerText = 'Select source first';
+                running = false;
+                startButton.disabled = false;
+                return;
+            }
+            if (!engine) {
+                statusEl.innerText = 'Select engine first';
                 running = false;
                 startButton.disabled = false;
                 return;
@@ -87,7 +128,7 @@
             const camRes = await fetch(`/set_camera/${cam}`, {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ name, source: cfg.source, ...cfg })
+                body: JSON.stringify({ name, source: cfg.source, engine, ...cfg })
             });
             if (!camRes.ok) {
                 statusEl.innerText = 'Camera error';
@@ -167,6 +208,7 @@
 
         (async () => {
             await loadSources();
+            await loadEngines();
             await checkStatus();
         })();
 
