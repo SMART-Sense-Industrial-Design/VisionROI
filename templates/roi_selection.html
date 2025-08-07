@@ -24,6 +24,8 @@
     <canvas id="canvas"></canvas>
 </div>
 
+<div id="roiList"></div>
+
 <script>
     (function() {
         let socket;
@@ -265,6 +267,62 @@
                     ctx.setLineDash([]);
                 }
             }
+            renderRoiList();
+        }
+
+        function renderRoiList() {
+            const container = document.getElementById('roiList');
+            if (!container) return;
+            container.innerHTML = '';
+
+            if (rois.length === 0) return;
+
+            const table = document.createElement('table');
+            const thead = document.createElement('thead');
+            const headerRow = document.createElement('tr');
+            ['ID', 'x', 'y', 'w', 'h', 'Module'].forEach(col => {
+                const th = document.createElement('th');
+                th.textContent = col;
+                headerRow.appendChild(th);
+            });
+            thead.appendChild(headerRow);
+            table.appendChild(thead);
+
+            const tbody = document.createElement('tbody');
+            rois.forEach((r, idx) => {
+                const xs = r.points.map(p => p.x);
+                const ys = r.points.map(p => p.y);
+                const x = Math.min(...xs);
+                const y = Math.min(...ys);
+                const w = Math.max(...xs) - x;
+                const h = Math.max(...ys) - y;
+                const tr = document.createElement('tr');
+                [r.id, x, y, w, h].forEach(val => {
+                    const td = document.createElement('td');
+                    td.textContent = Math.round(val);
+                    tr.appendChild(td);
+                });
+                const tdModule = document.createElement('td');
+                const select = document.createElement('select');
+                const empty = document.createElement('option');
+                empty.value = '';
+                empty.textContent = '';
+                select.appendChild(empty);
+                modules.forEach(m => {
+                    const opt = document.createElement('option');
+                    opt.value = m;
+                    opt.textContent = m;
+                    select.appendChild(opt);
+                });
+                select.value = r.module || '';
+                select.addEventListener('change', e => updateRoiModule(idx, e.target.value));
+                tdModule.appendChild(select);
+                tr.appendChild(tdModule);
+                tbody.appendChild(tr);
+            });
+
+            table.appendChild(tbody);
+            container.appendChild(table);
         }
 
         async function loadRois() {
@@ -336,6 +394,11 @@
                 alert("Cleared. Saved to: " + data.filename);
                 loadRois();
             });
+        }
+
+        function updateRoiModule(i, module) {
+            rois[i].module = module;
+            saveAllRois();
         }
 
         startBtn.addEventListener('click', startStream);
