@@ -1,6 +1,7 @@
 from quart import Quart, render_template, websocket, request, jsonify, send_file, redirect
 import asyncio
 import cv2
+from camera_worker import CameraWorker
 try:
     import numpy as np
 except Exception:  # pragma: no cover - fallback when numpy is missing
@@ -21,10 +22,9 @@ try:  # pragma: no cover
 except Exception:  # websockets not installed
     ConnectionClosed = Exception        
 
-# เก็บสถานะของกล้องแต่ละตัวในรูปแบบ dict
-cameras: dict[int, cv2.VideoCapture | None] = {}
+# เก็บ worker ของกล้องแต่ละตัวในรูปแบบ dict
+camera_workers: dict[int, CameraWorker | None] = {}
 camera_sources: dict[int, int | str] = {}
-camera_locks: dict[int, asyncio.Lock] = {}
 frame_queues: dict[int, asyncio.Queue[bytes]] = {}
 inference_tasks: dict[int, asyncio.Task | None] = {}
 roi_frame_queues: dict[int, asyncio.Queue[bytes | None]] = {}
@@ -90,14 +90,12 @@ def get_roi_frame_queue(cam_id: int) -> asyncio.Queue[bytes | None]:
 async def read_and_queue_frame(
     cam_id: int, queue: asyncio.Queue[bytes], frame_processor=None
 ) -> None:
-    lock = camera_locks.setdefault(cam_id, asyncio.Lock())
-    async with lock:
-        camera = cameras.get(cam_id)
-        if camera is None or not getattr(camera, "isOpened", lambda: True)():
-            success = False
-        else:
-            success, frame = await asyncio.to_thread(camera.read)
-    if camera is None or not success or frame is None:
+    worker = camera_workers.get(cam_id)
+    if worker is None:
+        await asyncio.sleep(0.1)
+        return
+    frame = await worker.read()
+    if frame is None:
         await asyncio.sleep(0.1)
         return
     if np is not None and hasattr(frame, "size") and frame.size == 0:
@@ -233,14 +231,18 @@ async def start_camera_task(
     task = task_dict.get(cam_id)
     if task is not None and not task.done():
         return task, {"status": "already_running", "cam_id": cam_id}, 200
-    camera = cameras.get(cam_id)
-    if camera is None or not camera.isOpened():
+    worker = camera_workers.get(cam_id)
+    if worker is None:
         src = camera_sources.get(cam_id, 0)
-        camera = cv2.VideoCapture(src)
-        if not camera.isOpened():
-            cameras[cam_id] = None
-            return task, {"status": "error", "message": "open_failed", "cam_id": cam_id}, 400
-        cameras[cam_id] = camera
+        worker = CameraWorker(src, asyncio.get_running_loop())
+        if not worker.start():
+            camera_workers[cam_id] = None
+            return (
+                task,
+                {"status": "error", "message": "open_failed", "cam_id": cam_id},
+                400,
+            )
+        camera_workers[cam_id] = worker
     task = asyncio.create_task(loop_func(cam_id))
     task_dict[cam_id] = task
     return task, {"status": "started", "cam_id": cam_id}, 200
@@ -276,12 +278,11 @@ async def stop_camera_task(
     # ปล่อยกล้องเมื่อไม่มีงานอื่นใช้งานอยู่
     inf_task = inference_tasks.get(cam_id)
     roi_task = roi_tasks.get(cam_id)
-    camera = cameras.get(cam_id)
+    worker = camera_workers.get(cam_id)
     if (
         (inf_task is None or inf_task.done())
         and (roi_task is None or roi_task.done())
-        and camera
-        and camera.isOpened()
+        and worker
     ):
         lock = camera_locks.setdefault(cam_id, asyncio.Lock())
         async with lock:
@@ -298,6 +299,7 @@ async def stop_camera_task(
             roi_frame_queues.pop(cam_id, None)
             del cam
             gc.collect()
+
     return task_dict.get(cam_id), {"status": status, "cam_id": cam_id}, 200
 
 
@@ -337,16 +339,9 @@ async def set_camera(cam_id: int):
     else:
         active_modules.pop(cam_id, None)
     source_val = data.get("source", "")
-    camera = cameras.get(cam_id)
-    if camera and camera.isOpened():
-        lock = camera_locks.setdefault(cam_id, asyncio.Lock())
-        async with lock:
-            cam = cameras.pop(cam_id, None)
-            if cam and cam.isOpened():
-                try:
-                    await asyncio.to_thread(cam.release)
-                except Exception:
-                    pass
+    worker = camera_workers.pop(cam_id, None)
+    if worker:
+        await worker.stop()
     try:
         camera_sources[cam_id] = int(source_val)
     except ValueError:
@@ -355,10 +350,10 @@ async def set_camera(cam_id: int):
         (inference_tasks.get(cam_id) and not inference_tasks[cam_id].done())
         or (roi_tasks.get(cam_id) and not roi_tasks[cam_id].done())
     ):
-        cam = cv2.VideoCapture(camera_sources[cam_id])
-        if not cam.isOpened():
+        worker = CameraWorker(camera_sources[cam_id], asyncio.get_running_loop())
+        if not worker.start():
             return jsonify({"status": "error", "cam_id": cam_id}), 400
-        cameras[cam_id] = cam
+        camera_workers[cam_id] = worker
     return jsonify({"status": "ok", "cam_id": cam_id})
 
 
@@ -635,13 +630,11 @@ async def load_roi_file():
 # ✅ ส่ง snapshot 1 เฟรม (ใช้ในหน้า inference)
 @app.route("/ws_snapshot/<int:cam_id>")
 async def ws_snapshot(cam_id: int):
-    lock = camera_locks.setdefault(cam_id, asyncio.Lock())
-    async with lock:
-        camera = cameras.get(cam_id)
-        if camera is None or not camera.isOpened():
-            return "Camera not initialized", 400
-        success, frame = await asyncio.to_thread(camera.read)
-    if not success:
+    worker = camera_workers.get(cam_id)
+    if worker is None:
+        return "Camera not initialized", 400
+    frame = await worker.read()
+    if frame is None:
         return "Camera error", 500
     _, buffer = cv2.imencode('.jpg', frame)
     return await send_file(

@@ -37,40 +37,33 @@ sys.modules["quart"] = quart_stub
 cv2_stub = types.ModuleType("cv2")
 
 
-class DummyVideoCapture:
+class DummyCamera:
     def __init__(self, *a, **k):
-        pass
+        self.frames_read = 0
 
     def isOpened(self):
         return True
-
-    def read(self):
-        return True, b"frame"
-
-    def release(self):
-        pass
-
-
-cv2_stub.VideoCapture = DummyVideoCapture
-cv2_stub.imencode = lambda *a, **k: (True, b"data")
-cv2_stub.rectangle = lambda *a, **k: None
-cv2_stub.putText = lambda *a, **k: None
-cv2_stub.resize = lambda img, dsize, fx=0, fy=0, **k: img
-
-sys.modules["cv2"] = cv2_stub
-
-import app
-
-
-class DummyCamera:
-    def __init__(self):
-        self.frames_read = 0
 
     def read(self):
         self.frames_read += 1
         # จำลองการบล็อก IO หรือการคำนวณที่ใช้เวลานาน
         time.sleep(0.005)
         return True, b"frame"
+
+    def release(self):
+        pass
+
+
+cv2_stub.VideoCapture = DummyCamera
+cv2_stub.imencode = lambda *a, **k: (True, b"data")
+cv2_stub.rectangle = lambda *a, **k: None
+cv2_stub.putText = lambda *a, **k: None
+cv2_stub.resize = lambda img, dsize, fx=0, fy=0, **k: img
+cv2_stub.destroyAllWindows = lambda: None
+
+sys.modules["cv2"] = cv2_stub
+
+import app
 
 
 async def ticker(duration: float = 0.5, interval: float = 0.01) -> int:
@@ -84,7 +77,9 @@ async def ticker(duration: float = 0.5, interval: float = 0.01) -> int:
 
 def test_event_loop_responsive():
     async def main():
-        app.cameras[0] = DummyCamera()
+        worker = app.CameraWorker(0, asyncio.get_running_loop())
+        assert worker.start()
+        app.camera_workers[0] = worker
         app.inference_rois[0] = []
         app.active_sources[0] = ""
         app.cv2.imencode = lambda ext, frame: (True, b"data")
@@ -97,8 +92,9 @@ def test_event_loop_responsive():
         with contextlib.suppress(asyncio.CancelledError):
             await loop_task
 
-        frames = app.cameras[0].frames_read
-        app.cameras[0] = None
+        frames = worker.cap.frames_read
+        await worker.stop()
+        app.camera_workers[0] = None
         return ticks, frames
 
     ticks, frames = asyncio.run(main())
