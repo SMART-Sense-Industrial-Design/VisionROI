@@ -109,7 +109,7 @@ def process(frame, roi_id=None, save=False, source=""):
                 if source
                 else Path(__file__).resolve().parent
             )
-            roi_folder = f"roi{roi_id}" if roi_id is not None else "roi"
+            roi_folder = f"{roi_id}" if roi_id is not None else "roi"
             save_dir = base_dir / "images" / roi_folder
             os.makedirs(save_dir, exist_ok=True)
             filename = datetime.now().strftime("%Y%m%d%H%M%S%f") + ".jpg"
