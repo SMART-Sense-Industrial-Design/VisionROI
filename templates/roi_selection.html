@@ -31,6 +31,7 @@
         let currentPoints = [];
         let hoverPoint = null;
         let currentSource = "";
+        let modules = [];
         let initialized = false;
         let isStreaming = false;
         let hasStarted = false;
@@ -69,6 +70,17 @@
                 opt.textContent = item.name;
                 select.appendChild(opt);
             });
+        }
+
+        async function loadModules() {
+            try {
+                const res = await fetch('/inference_modules');
+                if (!res.ok) throw new Error('Bad response');
+                modules = await res.json();
+            } catch (err) {
+                console.error('Failed to load modules', err);
+                modules = [];
+            }
         }
 
         function openSocket() {
@@ -172,7 +184,11 @@
             if (currentPoints.length === 4) {
                 const roiId = prompt("ROI id?");
                 if (roiId !== null) {
-                    rois.push({ id: roiId, points: [...currentPoints] });
+                    let selectedModule = null;
+                    if (modules.length > 0) {
+                        selectedModule = prompt("Module? (" + modules.join(", ") + ")");
+                    }
+                    rois.push({ id: roiId, module: selectedModule, points: [...currentPoints] });
                 }
                 currentPoints = [];
                 hoverPoint = null;
@@ -272,6 +288,7 @@
                 }
                 return {
                     id: r.id ?? String(idx + 1),
+                    module: r.module ?? null,
                     points: pts || []
                 };
             });
@@ -337,6 +354,7 @@
 
         (async () => {
             await loadSources();
+            await loadModules();
             await checkStatus();
         })();
     })();
