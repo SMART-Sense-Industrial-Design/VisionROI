@@ -31,6 +31,7 @@ roi_tasks: dict[int, asyncio.Task | None] = {}
 inference_rois: dict[int, list[dict]] = {}
 active_sources: dict[int, str] = {}
 save_roi_flags: dict[int, bool] = {}
+active_modules: dict[int, str] = {}
 
 app = Quart(__name__)
 # กำหนดเพดานขนาดไฟล์ที่เซิร์ฟเวอร์ยอมรับ (100 MB)
@@ -59,7 +60,7 @@ async def inference():
 
 
 def load_custom_module(name: str) -> ModuleType | None:
-    path = os.path.join("data_sources", name, "custom.py")
+    path = os.path.join("inference_modules", name, "custom.py")
     if not os.path.exists(path):
         return None
     module_name = f"custom_{name}"
@@ -117,7 +118,7 @@ async def read_and_queue_frame(
 
 
 async def run_inference_loop(cam_id: int):
-    custom_module = load_custom_module(active_sources.get(cam_id, ""))
+    custom_module = load_custom_module(active_modules.get(cam_id, ""))
     process_fn = getattr(custom_module, "process", None) if custom_module else None
     process_has_id = False
     process_has_save = False
@@ -299,6 +300,7 @@ async def ws_roi(cam_id: int):
 async def set_camera(cam_id: int):
     data = await request.get_json()
     active_sources[cam_id] = data.get("name", "")
+    active_modules[cam_id] = data.get("module", "")
     source_val = data.get("source", "")
     camera = cameras.get(cam_id)
     if camera and camera.isOpened():
@@ -325,11 +327,8 @@ async def create_source():
         return await render_template("create_source.html")
 
     form = await request.form
-    files = await request.files
     name = form.get("name", "").strip()
     source = form.get("source", "").strip()
-    model = files.get("model")
-    label = files.get("label")
     if not name or not source:
         return jsonify({"status": "error", "message": "missing data"}), 400
 
@@ -343,27 +342,11 @@ async def create_source():
         config = {
             "name": name,
             "source": source,
-            "model": "",
-            "label": "",
             "rois": "rois.json",
         }
-        if model:
-            await model.save(os.path.join(source_dir, "model.onnx"))
-            config["model"] = "model.onnx"
-        if label:
-            await label.save(os.path.join(source_dir, "classes.txt"))
-            config["label"] = "classes.txt"
         rois_path = os.path.join(source_dir, "rois.json")
         with open(rois_path, "w") as f:
             f.write("[]")
-        custom_path = os.path.join(source_dir, "custom.py")
-        with open(custom_path, "w") as f:
-            f.write(
-                "def process(frame):\n"
-                "    \"\"\"รับเฟรมเต็มและภาพ ROI ที่ตัดแล้ว\"\"\"\n"
-                "    # เขียนโค้ดประมวลผลตามต้องการ เช่น OCR\n"
-                "    return frame\n"
-            )
         with open(os.path.join(source_dir, "config.json"), "w") as f:
             json.dump(config, f)
     except Exception:
@@ -456,6 +439,16 @@ async def list_sources():
     return jsonify(names)
 
 
+@app.route("/inference_modules")
+async def list_inference_modules():
+    base_dir = Path(__file__).resolve().parent / "inference_modules"
+    try:
+        names = [d.name for d in base_dir.iterdir() if d.is_dir()]
+    except FileNotFoundError:
+        names = []
+    return jsonify(names)
+
+
 @app.route("/source_list", methods=["GET"])
 async def source_list():
     base_dir = Path(__file__).resolve().parent / "data_sources"
@@ -473,8 +466,6 @@ async def source_list():
                 {
                     "name": cfg.get("name", d.name),
                     "source": cfg.get("source", ""),
-                    "model": cfg.get("model", ""),
-                    "label": cfg.get("label", ""),
                 }
             )
     except FileNotFoundError:

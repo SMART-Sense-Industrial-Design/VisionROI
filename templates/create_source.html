@@ -25,7 +25,7 @@
 </style>
 
 <h2>Create Source</h2>
-<form method="POST" action="/create_source" enctype="multipart/form-data">
+<form method="POST" action="/create_source">
     <div>
         <label for="name">Name:</label>
         <input type="text" id="name" name="name" required>
@@ -33,14 +33,6 @@
     <div>
         <label for="source">Source:</label>
         <input type="text" id="source" name="source" required>
-    </div>
-    <div>
-        <label for="model">Model:</label>
-        <input type="file" id="model" name="model">
-    </div>
-    <div>
-        <label for="label">Label:</label>
-        <input type="file" id="label" name="label">
     </div>
     <button type="submit">Create</button>
 </form>

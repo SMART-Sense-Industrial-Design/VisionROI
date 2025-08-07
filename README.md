@@ -89,10 +89,10 @@ web_ocrroi/
 2. เปิดเบราว์เซอร์ไปที่ `http://localhost:5000/` (ระบบจะรีไดเรกต์ไปหน้า `/home`)
 
 ## โฟลว์การทำงานจากการสร้าง Source ถึงการรัน Inference
-1. ไปที่หน้า `/create_source` เพื่อสร้าง source ใหม่ โดยอัปโหลดไฟล์โมเดล (`model.onnx` หรือรูปแบบอื่น), `classes.txt` และ `config.json`
+1. ไปที่หน้า `/create_source` เพื่อสร้าง source ใหม่ โดยกรอกชื่อและแหล่งกล้อง
 2. ตั้งค่ากล้องและเลือก source ด้วย `POST /set_camera/<cam_id>` หรือผ่านหน้า UI
 3. เปิดหน้า `/roi` แล้วเลือกตำแหน่ง ROI ที่ต้องการ จากนั้นกดบันทึก (เรียก `POST /save_roi`)
-4. เริ่มรันโมเดลด้วยการเข้า `/inference` หรือเรียก `POST /start_inference/<cam_id>` เพื่อประมวลผลเฉพาะ ROI ที่บันทึกไว้
+4. เข้า `/inference` แล้วเลือก source กล้องและโมดูลจากโฟลเดอร์ `inference_modules` เพื่อเริ่มประมวลผล
 5. เมื่อเสร็จสิ้นสามารถหยุดงานได้ที่ `POST /stop_inference/<cam_id>`
 
 ## การตั้งค่าการแจ้งเตือน
@@ -108,13 +108,13 @@ tg.start_send_text("สวัสดี")
 
 ## หน้าต่างต่าง ๆ
 ### Create Source (`/create_source`)
-สร้าง source ใหม่และอัปโหลดโมเดล/label เพื่อเตรียมไฟล์ใน `data_sources/<name>`
+สร้าง source ใหม่โดยระบุชื่อและแหล่งกล้อง เก็บข้อมูลไว้ใน `data_sources/<name>`
 
 ### ROI Selection (`/roi`)
 เลือกและบันทึกตำแหน่ง ROI ตาม source ที่เลือก
 
 ### Inference (`/inference`)
-แสดงผลวิดีโอพร้อม ROI และเรียกฟังก์ชัน `custom.py` ถ้ามี
+แสดงผลวิดีโอพร้อม ROI และเรียกใช้ `custom.py` จากโมดูลที่เลือก
 
 ## API/Endpoints
 
@@ -175,18 +175,14 @@ tg.start_send_text("สวัสดี")
 ```
 data_sources/
 └── <name>/
-    ├─ model.onnx
-    ├─ classes.txt
     ├─ config.json
-    ├─ rois.json
-    └─ custom.py
+    └─ rois.json
 ```
 
-ไฟล์ `custom.py` ต้องมีฟังก์ชัน `process(frame)` เพื่อประมวลผลเฟรมหรือ ROI ตามต้องการ
+โมดูลสำหรับประมวลผลจะเก็บไว้ในโฟลเดอร์ `inference_modules/<module_name>/custom.py`
 
 ## ข้อมูลเพิ่มเติม
-- สร้าง `custom.py` ตามตัวอย่างข้างต้นภายใน `data_sources/<name>/`
-- `config.json` เก็บข้อมูล source, โมเดล และไฟล์ ROI
+- `config.json` เก็บข้อมูล source และไฟล์ ROI
 
 ## การทดสอบ
 โปรเจ็กต์มีเทสต์ตัวอย่างใช้ `pytest`
