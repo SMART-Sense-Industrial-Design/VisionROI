@@ -96,15 +96,22 @@ async def read_and_queue_frame(
             success = False
         else:
             success, frame = await asyncio.to_thread(camera.read)
-    if camera is None or not success:
+    if camera is None or not success or frame is None:
+        await asyncio.sleep(0.1)
+        return
+    if np is not None and hasattr(frame, "size") and frame.size == 0:
         await asyncio.sleep(0.1)
         return
     if frame_processor:
         frame = await frame_processor(frame)
     if frame is None:
         return
-    encoded, buffer = cv2.imencode('.jpg', frame)
-    if not encoded:
+    try:
+        encoded, buffer = cv2.imencode('.jpg', frame)
+    except Exception:
+        await asyncio.sleep(0.1)
+        return
+    if not encoded or buffer is None:
         await asyncio.sleep(0.1)
         return
     frame_bytes = buffer.tobytes() if hasattr(buffer, "tobytes") else buffer
@@ -263,12 +270,13 @@ async def stop_camera_task(
             # ดึงกล้องออกจาก dict ก่อนปล่อยเพื่อป้องกันการใช้พร้อมกัน
             cam = cameras.pop(cam_id, None)
             if cam and cam.isOpened():
-                # การปล่อยกล้องผ่าน thread แยกพบว่าทำให้เกิด segmentation fault
-                # จึงเรียกปล่อยกล้องโดยตรงใน main thread พร้อมครอบด้วย try/except
+                # ปล่อยกล้องใน thread แยกเพื่อลดโอกาสเกิด segmentation fault จาก OpenCV
                 try:
-                    cam.release()
+                    await asyncio.to_thread(cam.release)
                 except Exception:
                     pass
+                finally:
+                    del cam
     return task_dict.get(cam_id), {"status": status, "cam_id": cam_id}, 200
 
 
