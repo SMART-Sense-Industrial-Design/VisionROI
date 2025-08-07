@@ -25,6 +25,7 @@ except Exception:  # websockets not installed
 # เก็บ worker ของกล้องแต่ละตัวในรูปแบบ dict
 camera_workers: dict[int, CameraWorker | None] = {}
 camera_sources: dict[int, int | str] = {}
+camera_locks: dict[int, asyncio.Lock] = {}
 frame_queues: dict[int, asyncio.Queue[bytes]] = {}
 inference_tasks: dict[int, asyncio.Task | None] = {}
 roi_frame_queues: dict[int, asyncio.Queue[bytes | None]] = {}
@@ -286,18 +287,11 @@ async def stop_camera_task(
     ):
         lock = camera_locks.setdefault(cam_id, asyncio.Lock())
         async with lock:
-            cam = cameras.get(cam_id)
-            if cam and cam.isOpened():
-                try:
-                    await asyncio.to_thread(cam.release)
-                except Exception:
-                    pass
-                finally:
-                    await asyncio.to_thread(cv2.destroyAllWindows)
-            cameras.pop(cam_id, None)
+            await worker.stop()
+            camera_workers.pop(cam_id, None)
             frame_queues.pop(cam_id, None)
             roi_frame_queues.pop(cam_id, None)
-            del cam
+            del worker
             gc.collect()
 
     return task_dict.get(cam_id), {"status": status, "cam_id": cam_id}, 200
