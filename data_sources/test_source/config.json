@@ -1,7 +1,5 @@
 {
   "name": "test_source",
   "source": "0",
-  "model": "",
-  "label": "",
   "rois": "rois.json"
 }
