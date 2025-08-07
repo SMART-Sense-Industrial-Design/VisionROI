@@ -78,6 +78,7 @@ pip install -e "."
 web_ocrroi/
 ├─ app.py
 ├─ data_sources/
+├─ inference_modules/
 ├─ src/
 ├─ static/
 ├─ templates/
@@ -159,6 +160,8 @@ tg.start_send_text("สวัสดี")
 - **GET `/ws_snapshot/<cam_id>`** – คืนรูป JPEG หนึ่งเฟรมจากกล้อง
 
 - **GET `/data_sources`** – รายชื่อ source ทั้งหมดในระบบ
+
+- **GET `/inference_modules`** – รายชื่อโมดูล inference ที่มีในระบบ
 
 - **GET `/source_list`** – รายชื่อ source พร้อมรายละเอียดของแต่ละตัว
 
