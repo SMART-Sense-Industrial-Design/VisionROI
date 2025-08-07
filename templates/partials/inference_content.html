@@ -1,7 +1,7 @@
 <h2>Inference with Saved ROI</h2>
+<p>Modules are defined in the ROI file.</p>
 <div id="cam1" class="cam-cell">
     <select id="cam1-sourceSelect"></select>
-    <select id="cam1-moduleSelect"></select>
     <button id="cam1-startButton">Start</button>
     <button id="cam1-stopButton" disabled>Stop</button>
     <p id="cam1-status"></p>
@@ -11,7 +11,6 @@
 </div>
 <div id="cam2" class="cam-cell">
     <select id="cam2-sourceSelect"></select>
-    <select id="cam2-moduleSelect"></select>
     <button id="cam2-startButton">Start</button>
     <button id="cam2-stopButton" disabled>Stop</button>
     <p id="cam2-status"></p>
@@ -33,7 +32,6 @@
         const stopButton = getEl('stopButton');
         const statusEl = getEl('status');
         const sourceSelect = getEl('sourceSelect');
-        const moduleSelect = getEl('moduleSelect');
 
         startButton.onclick = startInference;
         stopButton.onclick = stopInference;
@@ -69,49 +67,13 @@
             }
         }
 
-        async function loadModules() {
-            try {
-                const res = await fetch('/inference_modules');
-                if (!res.ok) throw new Error('Bad response');
-                const data = await res.json();
-                moduleSelect.innerHTML = '';
-                if (data.length === 0) {
-                    const opt = document.createElement('option');
-                    opt.value = '';
-                    opt.textContent = 'No modules';
-                    moduleSelect.appendChild(opt);
-                } else {
-                    data.forEach(item => {
-                        const opt = document.createElement('option');
-                        opt.value = item;
-                        opt.textContent = item;
-                        moduleSelect.appendChild(opt);
-                    });
-                }
-            } catch (err) {
-                console.error('Failed to load modules', err);
-                moduleSelect.innerHTML = '';
-                const opt = document.createElement('option');
-                opt.value = '';
-                opt.textContent = 'Error loading modules';
-                moduleSelect.appendChild(opt);
-            }
-        }
-
         async function startInference() {
             if (running) return;
             running = true;
             startButton.disabled = true;
             const name = sourceSelect.value;
-            const moduleName = moduleSelect.value;
             if (!name) {
                 statusEl.innerText = 'Select source first';
-                running = false;
-                startButton.disabled = false;
-                return;
-            }
-            if (!moduleName) {
-                statusEl.innerText = 'Select module first';
                 running = false;
                 startButton.disabled = false;
                 return;
@@ -123,10 +85,11 @@
                 roiPath = `data_sources/${cfg.name}/${roiPath}`;
             }
 
+            const { module, ...cfgNoModule } = cfg;
             const camRes = await fetch(`/set_camera/${cam}`, {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ name, source: cfg.source, module: moduleName, ...cfg })
+                body: JSON.stringify({ name, source: cfg.source, ...cfgNoModule })
             });
             if (!camRes.ok) {
                 statusEl.innerText = 'Camera error';
@@ -206,7 +169,6 @@
 
         (async () => {
             await loadSources();
-            await loadModules();
             await checkStatus();
         })();
 
