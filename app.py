@@ -267,6 +267,12 @@ async def stop_camera_task(
         queue = queue_dict.get(cam_id)
         if queue is not None:
             await queue.put(None)
+            while queue.qsize() > 1:
+                try:
+                    queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    break
+            queue_dict.pop(cam_id, None)
     # ปล่อยกล้องเมื่อไม่มีงานอื่นใช้งานอยู่
     inf_task = inference_tasks.get(cam_id)
     roi_task = roi_tasks.get(cam_id)
@@ -279,18 +285,19 @@ async def stop_camera_task(
     ):
         lock = camera_locks.setdefault(cam_id, asyncio.Lock())
         async with lock:
-            # ดึงกล้องออกจาก dict ก่อนปล่อยเพื่อป้องกันการใช้พร้อมกัน
-            cam = cameras.pop(cam_id, None)
+            cam = cameras.get(cam_id)
             if cam and cam.isOpened():
-                # ปล่อยกล้องใน thread แยกเพื่อลดโอกาสเกิด segmentation fault จาก OpenCV
                 try:
                     await asyncio.to_thread(cam.release)
                 except Exception:
                     pass
                 finally:
-                    # เก็บกวาดหน่วยความจำเพื่อไม่ให้ตัว object ค้างอยู่
-                    del cam
-                    gc.collect()
+                    await asyncio.to_thread(cv2.destroyAllWindows)
+            cameras.pop(cam_id, None)
+            frame_queues.pop(cam_id, None)
+            roi_frame_queues.pop(cam_id, None)
+            del cam
+            gc.collect()
     return task_dict.get(cam_id), {"status": status, "cam_id": cam_id}, 200
 
 
@@ -425,7 +432,7 @@ async def start_inference(cam_id: int):
 @app.route('/stop_inference/<int:cam_id>', methods=["POST"])
 async def stop_inference(cam_id: int):
     inference_tasks[cam_id], resp, status = await stop_camera_task(
-        cam_id, inference_tasks
+        cam_id, inference_tasks, frame_queues
     )
     return jsonify(resp), status
 
