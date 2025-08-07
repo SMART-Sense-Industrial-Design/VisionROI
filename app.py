@@ -14,6 +14,7 @@ from types import ModuleType
 from pathlib import Path
 import contextlib
 import inspect
+import gc
 from typing import Callable, Awaitable, Any
 try:  # pragma: no cover
     from websockets.exceptions import ConnectionClosed
@@ -203,14 +204,22 @@ async def run_inference_loop(cam_id: int):
         return cv2.resize(frame, (0, 0), fx=0.5, fy=0.5)
 
     queue = get_frame_queue(cam_id)
-    while True:
-        await read_and_queue_frame(cam_id, queue, process_frame)
+    try:
+        while True:
+            await read_and_queue_frame(cam_id, queue, process_frame)
+    except asyncio.CancelledError:
+        # ยอมให้ยกเลิกงานได้อย่างปลอดภัยเพื่อป้องกันการค้างของ thread
+        pass
 
 
 async def run_roi_loop(cam_id: int):
     queue = get_roi_frame_queue(cam_id)
-    while True:
-        await read_and_queue_frame(cam_id, queue)
+    try:
+        while True:
+            await read_and_queue_frame(cam_id, queue)
+    except asyncio.CancelledError:
+        # ปิดงานเมื่อถูกยกเลิกเพื่อไม่ให้ไปอ่านกล้องต่อหลังจากถูกสั่งหยุด
+        pass
 
 
 # ฟังก์ชัน generic สำหรับเริ่มและหยุดงานที่ใช้กล้อง
@@ -247,6 +256,8 @@ async def stop_camera_task(
         task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await task
+        # ให้เวลาสั้นๆ เพื่อให้ thread ที่อ่านภาพจบก่อนปล่อยกล้องจริงๆ
+        await asyncio.sleep(0)
         task_dict[cam_id] = None
         status = "stopped"
     else:
@@ -276,7 +287,9 @@ async def stop_camera_task(
                 except Exception:
                     pass
                 finally:
+                    # เก็บกวาดหน่วยความจำเพื่อไม่ให้ตัว object ค้างอยู่
                     del cam
+                    gc.collect()
     return task_dict.get(cam_id), {"status": status, "cam_id": cam_id}, 200
 
 
