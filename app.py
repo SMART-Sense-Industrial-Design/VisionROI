@@ -126,81 +126,82 @@ async def read_and_queue_frame(
 
 
 async def run_inference_loop(cam_id: int):
-    custom_module = load_custom_module(active_modules.get(cam_id, ""))
-    process_fn = getattr(custom_module, "process", None) if custom_module else None
-    process_has_id = False
-    process_has_save = False
-    if process_fn:
-        try:
-            params = inspect.signature(process_fn).parameters
-            process_has_id = len(params) >= 2
-            process_has_save = len(params) >= 3
-        except (ValueError, TypeError):
-            process_has_id = False
-            process_has_save = False
+    default_module = active_modules.get(cam_id, "")
+    module_cache: dict[str, ModuleType | None] = {}
 
     async def process_frame(frame):
         rois = inference_rois.get(cam_id, [])
         if not rois:
-            if process_fn:
-                try:
-                    if process_has_id:
-                        result = process_fn(frame, None)
-                    else:
-                        result = process_fn(frame)
-                    if inspect.isawaitable(result):
-                        await result
-                except Exception:
-                    pass
-        else:
-            for i, r in enumerate(rois):
-                if np is None:
-                    continue
-                pts = r.get("points", [])
-                if len(pts) != 4:
-                    continue
-                src = np.array([[p["x"], p["y"]] for p in pts], dtype=np.float32)
-                width_a = np.linalg.norm(src[0] - src[1])
-                width_b = np.linalg.norm(src[2] - src[3])
-                max_w = int(max(width_a, width_b))
-                height_a = np.linalg.norm(src[0] - src[3])
-                height_b = np.linalg.norm(src[1] - src[2])
-                max_h = int(max(height_a, height_b))
-                dst = np.array(
-                    [[0, 0], [max_w - 1, 0], [max_w - 1, max_h - 1], [0, max_h - 1]],
-                    dtype=np.float32,
-                )
-                matrix = cv2.getPerspectiveTransform(src, dst)
-                roi = cv2.warpPerspective(frame, matrix, (max_w, max_h))
-                save_flag = bool(save_roi_flags.get(cam_id))
-                if process_fn:
+            if default_module:
+                module = module_cache.get(default_module)
+                if module is None:
+                    module = load_custom_module(default_module)
+                    module_cache[default_module] = module
+                process_fn = getattr(module, "process", None) if module else None
+                if callable(process_fn):
+                    save_flag = bool(save_roi_flags.get(cam_id))
                     try:
-                        if process_has_id:
-                            if process_has_save:
-                                result = process_fn(roi, r.get("id", str(i)), save_flag)
-                            else:
-                                result = process_fn(roi, r.get("id", str(i)))
-                        else:
-                            if process_has_save:
-                                result = process_fn(roi, save_flag)
-                            else:
-                                result = process_fn(roi)
+                        result = process_fn(frame, None, save_flag)
                         if inspect.isawaitable(result):
                             await result
                     except Exception:
                         pass
-                cv2.polylines(frame, [src.astype(int)], True, (0, 255, 0), 2)
-                label_pt = src[0].astype(int)
-                cv2.putText(
-                    frame,
-                    str(r.get("id", i + 1)),
-                    (int(label_pt[0]), max(0, int(label_pt[1]) - 5)),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.5,
-                    (0, 255, 0),
-                    1,
-                    cv2.LINE_AA,
+            return cv2.resize(frame, (0, 0), fx=0.5, fy=0.5)
+
+        save_flag = bool(save_roi_flags.get(cam_id))
+        for i, r in enumerate(rois):
+            if np is None:
+                continue
+            pts = r.get("points", [])
+            if len(pts) != 4:
+                continue
+            mod_name = r.get("module") or default_module
+            if not mod_name:
+                continue
+            module = module_cache.get(mod_name)
+            if module is None:
+                module = load_custom_module(mod_name)
+                module_cache[mod_name] = module
+            if module is None:
+                print(f"module '{mod_name}' not found for ROI {r.get('id', i)}")
+                continue
+            process_fn = getattr(module, "process", None)
+            if not callable(process_fn):
+                print(
+                    f"process function not found in module '{mod_name}' for ROI {r.get('id', i)}"
                 )
+                continue
+            src = np.array([[p["x"], p["y"]] for p in pts], dtype=np.float32)
+            width_a = np.linalg.norm(src[0] - src[1])
+            width_b = np.linalg.norm(src[2] - src[3])
+            max_w = int(max(width_a, width_b))
+            height_a = np.linalg.norm(src[0] - src[3])
+            height_b = np.linalg.norm(src[1] - src[2])
+            max_h = int(max(height_a, height_b))
+            dst = np.array(
+                [[0, 0], [max_w - 1, 0], [max_w - 1, max_h - 1], [0, max_h - 1]],
+                dtype=np.float32,
+            )
+            matrix = cv2.getPerspectiveTransform(src, dst)
+            roi = cv2.warpPerspective(frame, matrix, (max_w, max_h))
+            try:
+                result = process_fn(roi, r.get("id", str(i)), save_flag)
+                if inspect.isawaitable(result):
+                    await result
+            except Exception:
+                pass
+            cv2.polylines(frame, [src.astype(int)], True, (0, 255, 0), 2)
+            label_pt = src[0].astype(int)
+            cv2.putText(
+                frame,
+                str(r.get("id", i + 1)),
+                (int(label_pt[0]), max(0, int(label_pt[1]) - 5)),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.5,
+                (0, 255, 0),
+                1,
+                cv2.LINE_AA,
+            )
         return cv2.resize(frame, (0, 0), fx=0.5, fy=0.5)
 
     queue = get_frame_queue(cam_id)
@@ -323,7 +324,11 @@ async def ws_roi(cam_id: int):
 async def set_camera(cam_id: int):
     data = await request.get_json()
     active_sources[cam_id] = data.get("name", "")
-    active_modules[cam_id] = data.get("module", "")
+    module_name = data.get("module", "")
+    if module_name:
+        active_modules[cam_id] = module_name
+    else:
+        active_modules.pop(cam_id, None)
     source_val = data.get("source", "")
     camera = cameras.get(cam_id)
     if camera and camera.isOpened():
@@ -401,7 +406,14 @@ async def start_inference(cam_id: int):
                 rois = json.load(f)
         except FileNotFoundError:
             rois = []
-    inference_rois[cam_id] = rois
+    default_module = active_modules.get(cam_id, "")
+    processed_rois = []
+    for r in rois:
+        mod_name = r.get("module") or default_module
+        if mod_name:
+            r["module"] = mod_name
+            processed_rois.append(r)
+    inference_rois[cam_id] = processed_rois
     save_roi_flags[cam_id] = True
     inference_tasks[cam_id], resp, status = await start_camera_task(
         cam_id, inference_tasks, run_inference_loop
