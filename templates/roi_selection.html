@@ -296,6 +296,26 @@
             drawAllRois();
         }
 
+        async function saveRois() {
+            try {
+                const res = await fetch('/save_roi', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ rois, source: currentSource })
+                });
+                if (!res.ok) throw new Error('Failed to save');
+                alert('Saved');
+            } catch (err) {
+                alert('Error');
+                console.error('Failed to save ROIs', err);
+            }
+        }
+
+        function updateRoiModule(i, moduleName) {
+            rois[i].module = moduleName;
+            saveRois();
+        }
+
         function saveAllRois() {
             if (rois.length === 0) {
                 alert("No ROI selected.");
@@ -347,6 +367,7 @@
         window.stopStream = stopStream;
         window.saveAllRois = saveAllRois;
         window.clearAllRois = clearAllRois;
+        window.updateRoiModule = updateRoiModule;
 
         window.addEventListener('beforeunload', () => {
             stopStream();
