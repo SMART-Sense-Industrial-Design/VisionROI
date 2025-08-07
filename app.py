@@ -19,7 +19,7 @@ from typing import Callable, Awaitable, Any
 try:  # pragma: no cover
     from websockets.exceptions import ConnectionClosed
 except Exception:  # websockets not installed
-    ConnectionClosed = Exception
+    ConnectionClosed = Exception        
 
 # เก็บสถานะของกล้องแต่ละตัวในรูปแบบ dict
 cameras: dict[int, cv2.VideoCapture | None] = {}
@@ -281,10 +281,9 @@ async def stop_camera_task(
             # ดึงกล้องออกจาก dict ก่อนปล่อยเพื่อป้องกันการใช้พร้อมกัน
             cam = cameras.pop(cam_id, None)
             if cam and cam.isOpened():
-                # ปล่อยกล้องแบบ synchronous เพื่อหลีกเลี่ยงการเกิด
-                # segmentation fault ที่อาจเกิดจากการเรียกใช้ release ใน thread อื่น
+                # ปล่อยกล้องใน thread แยกเพื่อลดโอกาสเกิด segmentation fault จาก OpenCV
                 try:
-                    cam.release()
+                    await asyncio.to_thread(cam.release)
                 except Exception:
                     pass
                 finally:
