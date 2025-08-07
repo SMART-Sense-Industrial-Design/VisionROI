@@ -260,13 +260,15 @@ async def stop_camera_task(
     ):
         lock = camera_locks.setdefault(cam_id, asyncio.Lock())
         async with lock:
-            # การปล่อยกล้องบางครั้งอาจทำให้เกิด segmentation fault
-            # จึงย้ายไปทำใน thread แยกพร้อมครอบด้วย try/except
-            try:
-                await asyncio.to_thread(camera.release)
-            except Exception:
-                pass
-            cameras[cam_id] = None
+            # ดึงกล้องออกจาก dict ก่อนปล่อยเพื่อป้องกันการใช้พร้อมกัน
+            cam = cameras.pop(cam_id, None)
+            if cam and cam.isOpened():
+                # การปล่อยกล้องบางครั้งอาจทำให้เกิด segmentation fault
+                # จึงย้ายไปทำใน thread แยกพร้อมครอบด้วย try/except
+                try:
+                    await asyncio.to_thread(cam.release)
+                except Exception:
+                    pass
     return task_dict.get(cam_id), {"status": status, "cam_id": cam_id}, 200
 
 
@@ -304,8 +306,14 @@ async def set_camera(cam_id: int):
     source_val = data.get("source", "")
     camera = cameras.get(cam_id)
     if camera and camera.isOpened():
-        camera.release()
-        cameras[cam_id] = None
+        lock = camera_locks.setdefault(cam_id, asyncio.Lock())
+        async with lock:
+            cam = cameras.pop(cam_id, None)
+            if cam and cam.isOpened():
+                try:
+                    await asyncio.to_thread(cam.release)
+                except Exception:
+                    pass
     try:
         camera_sources[cam_id] = int(source_val)
     except ValueError:
@@ -587,10 +595,12 @@ async def load_roi_file():
 # ✅ ส่ง snapshot 1 เฟรม (ใช้ในหน้า inference)
 @app.route("/ws_snapshot/<int:cam_id>")
 async def ws_snapshot(cam_id: int):
-    camera = cameras.get(cam_id)
-    if camera is None or not camera.isOpened():
-        return "Camera not initialized", 400
-    success, frame = camera.read()
+    lock = camera_locks.setdefault(cam_id, asyncio.Lock())
+    async with lock:
+        camera = cameras.get(cam_id)
+        if camera is None or not camera.isOpened():
+            return "Camera not initialized", 400
+        success, frame = await asyncio.to_thread(camera.read)
     if not success:
         return "Camera error", 500
     _, buffer = cv2.imencode('.jpg', frame)
