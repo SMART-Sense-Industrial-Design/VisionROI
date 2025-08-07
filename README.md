@@ -11,7 +11,12 @@
 - Python ≥3.10
 - dependencies ถูกกำหนดใน `pyproject.toml`
 
-### Dependencies เพิ่มเติม
+### Dependencies หลัก
+- `Quart`
+- `opencv-python`
+- `numpy`
+
+### Dependencies เพิ่มเติม (Extras)
 - `onnxruntime` – สำหรับรันโมเดล ONNX
 - `requests` – ใช้ส่งการแจ้งเตือนผ่าน Telegram เท่านั้น (หากต้องการรองรับ Line จำเป็นต้องพัฒนาโมดูลเพิ่มเติม)
 - `tensorflow` – สำหรับโมเดลที่ใช้ TFLite
@@ -77,12 +82,14 @@ pip install -e "."
 ```
 web_ocrroi/
 ├─ app.py
+├─ camera_worker.py
 ├─ data_sources/
 ├─ inference_modules/
 ├─ src/
 ├─ static/
 ├─ templates/
-└─ tests/
+├─ tests/
+└─ pyproject.toml
 ```
 
 ## การรันโปรเจ็กต์
