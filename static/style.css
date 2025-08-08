@@ -1,79 +1,24 @@
-:root {
-  --header-height: 120px;
-  --sidenav-width: 200px;
-}
-
 body {
   margin: 0;
   font-family: Arial, sans-serif;
   background-color: #ffffff;
-}
-
-header {
-  position: fixed;
-  top: 0;
-  width: 100%;
-  height: var(--header-height);
-  background-color: #e6f2ff;
-  color: #003366;
-  display: flex;
-  align-items: center;
-  padding: 0 20px;
-  box-sizing: border-box;
-  z-index: 1000;
-
-}
-
-header h1 {
-  margin: 0;
-  font-size: 1.5rem;
+  padding-top: 70px;
 }
 
 .logo {
-    height: calc(var(--header-height) - 20px);
-    width: auto;
-    object-fit: contain;
-    margin-right: 5px;
+  height: 40px;
+  width: auto;
+  object-fit: contain;
+  margin-right: 5px;
 }
 
-/* Fixed side navigation */
-.sidenav {
-  position: fixed;
-  top: var(--header-height);
-  left: 0;
-  width: var(--sidenav-width);
-  bottom: 0;
-  background-color: #e6f2ff;
-  padding-top: 20px;
-  box-sizing: border-box;
-  transition: width 0.3s ease;
-  overflow-y: auto;
-}
-
-.sidenav a {
-  padding: 10px 20px;
-  text-decoration: none;
-  font-size: 16px;
-  color: #003366;
-
-  display: block;
-}
-
-.sidenav a:hover {
-  background-color: #d0e7ff;
-}
-
-.sidenav a.active {
+.nav-link.active {
   background-color: #b2d4ff;
-
 }
 
 main {
-  margin-top: var(--header-height);
-  margin-left: var(--sidenav-width);
   padding: 20px;
   box-sizing: border-box;
-  transition: margin-left 0.3s ease;
   background-color: #ffffff;
 }
 
@@ -172,12 +117,6 @@ main {
   /* Ensure ROI card is visible even before ROIs load and prevent wrapping under the video */
   min-width: 200px;
   flex-shrink: 0;
-}
-
-@media (max-width: 600px) {
-  :root {
-    --sidenav-width: 150px;
-  }
 }
 
 /* Table styling for source list and generic tables */
