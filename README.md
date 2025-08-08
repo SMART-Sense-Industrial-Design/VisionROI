@@ -101,9 +101,9 @@ web_ocrroi/
 
 ## โฟลว์การทำงานจากการสร้าง Source ถึงการรัน Inference
 1. ไปที่หน้า `/create_source` เพื่อสร้าง source ใหม่ โดยกรอกชื่อและแหล่งกล้อง
-2. ตั้งค่ากล้องและเลือก source ด้วย `POST /set_camera/<cam_id>` หรือผ่านหน้า UI
-3. เปิดหน้า `/roi` แล้วเลือกตำแหน่ง ROI ที่ต้องการ จากนั้นกดบันทึก (เรียก `POST /save_roi`)
-4. เข้า `/inference` แล้วเลือก source กล้องและโมดูลจากโฟลเดอร์ `inference_modules` เพื่อเริ่มประมวลผล
+2. ตั้งค่ากล้องและเลือก source (พร้อมกำหนดโมดูลเริ่มต้นหากต้องการ) ด้วย `POST /set_camera/<cam_id>` หรือผ่านหน้า UI
+3. เปิดหน้า `/roi` แล้วเลือกตำแหน่ง ROI ที่ต้องการ จากนั้นกดบันทึก (ROI แต่ละจุดสามารถระบุโมดูลของตัวเองได้) – เรียก `POST /save_roi`
+4. เข้า `/inference` แล้วเลือก source กล้องเพื่อเริ่มประมวลผล ผลลัพธ์แต่ละ ROI จะถูกส่งกลับผ่าน `/ws_roi_result/<cam_id>`
 5. เมื่อเสร็จสิ้นสามารถหยุดงานได้ที่ `POST /stop_inference/<cam_id>`
 
 ## การตั้งค่าการแจ้งเตือน
@@ -122,21 +122,34 @@ tg.start_send_text("สวัสดี")
 สร้าง source ใหม่โดยระบุชื่อและแหล่งกล้อง เก็บข้อมูลไว้ใน `data_sources/<name>`
 
 ### ROI Selection (`/roi`)
-เลือกและบันทึกตำแหน่ง ROI ตาม source ที่เลือก
+เลือกและบันทึกตำแหน่ง ROI ตาม source ที่เลือก พร้อมระบุโมดูลให้แต่ละ ROI ได้
 
 ### Inference (`/inference`)
-แสดงผลวิดีโอพร้อม ROI และเรียกใช้ `custom.py` จากโมดูลที่เลือก
+แสดงผลวิดีโอพร้อม ROI และเรียกใช้ `custom.py` จากโมดูลที่เลือก ผลลัพธ์จะถูกส่งกลับผ่าน `/ws_roi_result/<cam_id>`
 
 ## API/Endpoints
 
-- **POST `/set_camera/<cam_id>`** – ตั้งค่ากล้องและเลือก source ที่จะใช้
+- **POST `/set_camera/<cam_id>`** – ตั้งค่ากล้อง เลือก source และกำหนดโมดูลเริ่มต้นได้
   ```json
-  {"name": "cam1", "source": "0"}
+  {"name": "cam1", "source": "0", "module": "yolo"}
   ```
 
-- **POST `/start_inference/<cam_id>`** – เริ่มอ่านภาพและประมวลผล ROI ที่ส่งมา
+- **POST `/start_inference/<cam_id>`** – เริ่มอ่านภาพและประมวลผล ROI ที่ส่งมา (หากไม่ส่ง `rois` จะโหลดจากไฟล์ของ source)
   ```json
-  {"rois": [{"x": 10, "y": 20, "width": 100, "height": 80}]}
+  {
+    "rois": [
+      {
+        "id": "1",
+        "module": "typhoon_ocr",
+        "points": [
+          {"x": 10, "y": 20},
+          {"x": 110, "y": 20},
+          {"x": 110, "y": 100},
+          {"x": 10, "y": 100}
+        ]
+      }
+    ]
+  }
   ```
 
 - **POST `/stop_inference/<cam_id>`** – หยุดงาน inference
@@ -154,7 +167,21 @@ tg.start_send_text("สวัสดี")
 
 - **POST `/save_roi`** – บันทึก ROI ลงไฟล์ของ source หรือพาธที่กำหนด
   ```json
-  {"source": "cam1", "rois": [{"x": 10, "y": 20, "width": 100, "height": 80}]}
+  {
+    "source": "cam1",
+    "rois": [
+      {
+        "id": "1",
+        "module": "typhoon_ocr",
+        "points": [
+          {"x": 10, "y": 20},
+          {"x": 110, "y": 20},
+          {"x": 110, "y": 100},
+          {"x": 10, "y": 100}
+        ]
+      }
+    ]
+  }
   ```
 
 - **GET `/load_roi/<name>`** – โหลด ROI ล่าสุดของ source นั้น
@@ -183,6 +210,8 @@ tg.start_send_text("สวัสดี")
 
 - **WebSocket `/ws_roi`** – ส่งภาพ JPEG แบบไบนารีต่อเนื่องสำหรับหน้า `/roi`
 
+- **WebSocket `/ws_roi_result/<cam_id>`** – ส่งผลลัพธ์ ROI (รูปภาพและข้อความ) ขณะรัน inference
+
 
 ## โครงสร้าง `data_sources/`
 ```
@@ -190,6 +219,23 @@ data_sources/
 └── <name>/
     ├─ config.json
     └─ rois.json
+```
+
+ไฟล์ `rois.json` เก็บ ROI ในรูปแบบ:
+
+```json
+[
+  {
+    "id": "1",
+    "module": "typhoon_ocr",
+    "points": [
+      {"x": 10, "y": 20},
+      {"x": 110, "y": 20},
+      {"x": 110, "y": 100},
+      {"x": 10, "y": 100}
+    ]
+  }
+]
 ```
 
 โมดูลสำหรับประมวลผลจะเก็บไว้ในโฟลเดอร์ `inference_modules/<module_name>/custom.py`
