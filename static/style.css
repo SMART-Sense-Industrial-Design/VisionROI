@@ -179,3 +179,40 @@ main {
     --sidenav-width: 150px;
   }
 }
+
+/* Table styling for source list and generic tables */
+table {
+  border-collapse: collapse;
+  width: 100%;
+  margin-top: 20px;
+}
+th,
+td {
+  border: 1px solid #ccc;
+  padding: 8px;
+}
+th {
+  background-color: #f0f0f0;
+}
+
+button.delete {
+  background-color: #e74c3c;
+  color: #fff;
+  border: none;
+  padding: 6px 12px;
+  cursor: pointer;
+}
+
+/* ROI selection page */
+#video {
+  border: 1px solid black;
+  position: relative;
+}
+
+#canvas {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 1;
+  pointer-events: none;
+}

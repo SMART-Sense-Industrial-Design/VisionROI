@@ -2,17 +2,6 @@
 {% block title %}ROI Selection{% endblock %}
 {% block content %}
 
-<style>
-    #video { border: 1px solid black; position: relative; }
-    #canvas {
-        position: absolute;
-        left: 0;
-        top: 0;
-        z-index: 1;
-        pointer-events: none;
-    }
-</style>
-
 <select id="sourceSelect"></select>
 <button id="startBtn">Start</button>
 <button id="stopBtn" disabled>Stop</button>
