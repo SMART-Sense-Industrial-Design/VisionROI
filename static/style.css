@@ -2,7 +2,6 @@ body {
   margin: 0;
   font-family: Arial, sans-serif;
   background-color: #ffffff;
-  padding-top: 70px;
 }
 
 .logo {
@@ -20,6 +19,7 @@ main {
   padding: 20px;
   box-sizing: border-box;
   background-color: #ffffff;
+  margin-top: 70px;
 }
 
 /* Standard table styling */
