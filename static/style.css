@@ -109,6 +109,25 @@ main {
   padding: 10px;
 }
 
+.roi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, 80px);
+  gap: 4px;
+  margin-left: 10px;
+}
+
+.roi-item img {
+  width: 80px;
+  height: auto;
+  display: block;
+}
+
+.roi-item p {
+  margin: 2px 0 0;
+  font-size: 12px;
+  text-align: center;
+}
+
 @media (max-width: 600px) {
   :root {
     --sidenav-width: 150px;

@@ -7,6 +7,7 @@ try:
 except Exception:  # pragma: no cover - fallback when numpy is missing
     np = None
 import json
+import base64
 import shutil
 import importlib.util
 import os
@@ -29,6 +30,7 @@ camera_locks: dict[int, asyncio.Lock] = {}
 frame_queues: dict[int, asyncio.Queue[bytes]] = {}
 inference_tasks: dict[int, asyncio.Task | None] = {}
 roi_frame_queues: dict[int, asyncio.Queue[bytes | None]] = {}
+roi_result_queues: dict[int, asyncio.Queue[str | None]] = {}
 roi_tasks: dict[int, asyncio.Task | None] = {}
 inference_rois: dict[int, list[dict]] = {}
 active_sources: dict[int, str] = {}
@@ -86,6 +88,10 @@ def get_frame_queue(cam_id: int) -> asyncio.Queue[bytes]:
 
 def get_roi_frame_queue(cam_id: int) -> asyncio.Queue[bytes | None]:
     return roi_frame_queues.setdefault(cam_id, asyncio.Queue(maxsize=1))
+
+
+def get_roi_result_queue(cam_id: int) -> asyncio.Queue[str | None]:
+    return roi_result_queues.setdefault(cam_id, asyncio.Queue(maxsize=10))
 
 
 async def read_and_queue_frame(
@@ -200,13 +206,32 @@ async def run_inference_loop(cam_id: int):
             )
             matrix = cv2.getPerspectiveTransform(src, dst)
             roi = cv2.warpPerspective(frame, matrix, (max_w, max_h))
+            result_text = ""
             try:
                 args = [roi, r.get("id", str(i)), save_flag]
                 if takes_source:
                     args.append(active_sources.get(cam_id, ""))
                 result = process_fn(*args)
                 if inspect.isawaitable(result):
-                    await result
+                    result = await result
+                if isinstance(result, str):
+                    result_text = result
+                elif isinstance(result, dict) and "text" in result:
+                    result_text = str(result["text"])
+            except Exception:
+                pass
+            try:
+                _, roi_buf = cv2.imencode('.jpg', roi)
+                roi_b64 = base64.b64encode(roi_buf).decode('ascii')
+                q = get_roi_result_queue(cam_id)
+                payload = json.dumps({
+                    "id": r.get("id", i),
+                    "image": roi_b64,
+                    "text": result_text,
+                })
+                if q.full():
+                    q.get_nowait()
+                await q.put(payload)
             except Exception:
                 pass
             cv2.polylines(frame, [src.astype(int)], True, (0, 255, 0), 2)
@@ -343,6 +368,20 @@ async def ws_roi(cam_id: int):
         pass
 
 
+@app.websocket('/ws_roi_result/<int:cam_id>')
+async def ws_roi_result(cam_id: int):
+    queue = get_roi_result_queue(cam_id)
+    try:
+        while True:
+            data = await queue.get()
+            if data is None:
+                await websocket.close(code=1000)
+                break
+            await websocket.send(data)
+    except (ConnectionClosed, asyncio.CancelledError):
+        pass
+
+
 @app.route("/set_camera/<int:cam_id>", methods=["POST"])
 async def set_camera(cam_id: int):
     data = await request.get_json()
@@ -431,6 +470,9 @@ async def start_inference(cam_id: int):
             processed_rois.append(r)
     inference_rois[cam_id] = processed_rois
     save_roi_flags[cam_id] = True
+    queue = get_roi_result_queue(cam_id)
+    while not queue.empty():
+        queue.get_nowait()
     inference_tasks[cam_id], resp, status = await start_camera_task(
         cam_id, inference_tasks, run_inference_loop
     )
@@ -443,6 +485,10 @@ async def stop_inference(cam_id: int):
     inference_tasks[cam_id], resp, status = await stop_camera_task(
         cam_id, inference_tasks, frame_queues
     )
+    queue = roi_result_queues.get(cam_id)
+    if queue is not None:
+        await queue.put(None)
+        roi_result_queues.pop(cam_id, None)
     return jsonify(resp), status
 
 
