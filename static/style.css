@@ -141,6 +141,14 @@ main {
   text-align: center;
 }
 
+.card {
+  border: 1px solid #ccc;
+  border-radius: 8px;
+  padding: 10px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  margin-bottom: 20px;
+}
+
 @media (max-width: 600px) {
   :root {
     --sidenav-width: 150px;
