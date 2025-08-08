@@ -6,6 +6,7 @@
 - เลือกและบันทึกตำแหน่ง ROI จากกล้องหรือวิดีโอ
 - รันโมเดลเพื่อตรวจจับข้อความหรือวัตถุใน ROI
 - รองรับการแจ้งเตือนผ่าน Telegram
+- มาพร้อมโมดูลตัวอย่าง `typhoon_ocr` และ `yolo` เพื่อเริ่มต้นทดลองใช้งาน
 
 ## ข้อกำหนดระบบ
 - Python ≥3.10
@@ -85,6 +86,8 @@ web_ocrroi/
 ├─ camera_worker.py
 ├─ data_sources/
 ├─ inference_modules/
+│  ├─ typhoon_ocr/
+│  └─ yolo/
 ├─ src/
 ├─ static/
 ├─ templates/
@@ -190,6 +193,10 @@ data_sources/
 ```
 
 โมดูลสำหรับประมวลผลจะเก็บไว้ในโฟลเดอร์ `inference_modules/<module_name>/custom.py`
+
+ตัวอย่างโมดูลที่มีให้:
+- `typhoon_ocr` – OCR เอกสารทั่วไป
+- `yolo` – ตรวจจับวัตถุพื้นฐานด้วย YOLOv8
 
 ## ข้อมูลเพิ่มเติม
 - `config.json` เก็บข้อมูล source และไฟล์ ROI
