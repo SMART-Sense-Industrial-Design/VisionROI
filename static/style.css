@@ -116,13 +116,26 @@ main {
   margin-left: 10px;
 }
 
-.roi-item img {
+.roi-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.roi-title {
+  margin: 0;
+  font-size: 12px;
+  text-align: center;
+}
+
+.roi-image {
   width: 80px;
   height: auto;
   display: block;
+  border: 2px solid red;
 }
 
-.roi-item p {
+.roi-text {
   margin: 2px 0 0;
   font-size: 12px;
   text-align: center;
