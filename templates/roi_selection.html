@@ -98,6 +98,8 @@
                 socket = null;
                 isStreaming = false;
                 stopBtn.disabled = true;
+                startBtn.disabled = false;
+                hasStarted = false;
                 console.log("ROI stream closed");
             };
         }
@@ -173,9 +175,10 @@
             } catch (err) {
                 console.error('Failed to stop ROI stream', err);
             }
-            video.src = "";
             isStreaming = false;
+            hasStarted = false;
             stopBtn.disabled = true;
+            startBtn.disabled = false;
         }
 
         frameContainer.addEventListener('click', (e) => {
