@@ -2,43 +2,24 @@
 {% block title %}Create Source{% endblock %}
 {% block content %}
 
-<style>
-    table {
-        border-collapse: collapse;
-        width: 100%;
-        margin-top: 20px;
-    }
-    th, td {
-        border: 1px solid #ccc;
-        padding: 8px;
-    }
-    th {
-        background-color: #f0f0f0;
-    }
-    button.delete {
-        background-color: #e74c3c;
-        color: #fff;
-        border: none;
-        padding: 6px 12px;
-        cursor: pointer;
-    }
-</style>
-
 <h2>Create Source</h2>
+
+<div id="status-message"></div>
 <form method="POST" action="/create_source">
     <div>
         <label for="name">Name:</label>
         <input type="text" id="name" name="name" required>
+
     </div>
-    <div>
-        <label for="source">Source:</label>
-        <input type="text" id="source" name="source" required>
+    <div class="mb-3">
+        <label for="source" class="form-label">Source:</label>
+        <input type="text" id="source" name="source" class="form-control" required>
     </div>
-    <button type="submit">Create</button>
+    <button type="submit" class="btn btn-primary">Create</button>
 </form>
 
 <h3>Source List</h3>
-<table>
+<table class="table table-bordered mt-3">
     <thead>
         <tr>
             <th>Name</th>
@@ -51,9 +32,24 @@
 </table>
 
 <script>
+    const messageEl = document.getElementById('status-message');
+
+    async function fetchWithStatus(url, options = {}) {
+        messageEl.textContent = 'กำลังโหลด...';
+        try {
+            const res = await fetch(url, options);
+            if (!res.ok) throw new Error('network');
+            messageEl.textContent = 'สำเร็จ';
+            return res;
+        } catch (err) {
+            messageEl.textContent = 'เกิดข้อผิดพลาด';
+            throw err;
+        }
+    }
+
     async function loadSources() {
         try {
-            const resp = await fetch('/source_list');
+            const resp = await fetchWithStatus('/source_list');
             const data = await resp.json();
             const tbody = document.getElementById('source-table-body');
             tbody.innerHTML = '';
@@ -66,15 +62,16 @@
                 const actionTd = document.createElement('td');
                 const delBtn = document.createElement('button');
                 delBtn.textContent = 'Delete';
-                delBtn.classList.add('delete');
+                delBtn.className = 'btn btn-danger btn-sm';
                 delBtn.addEventListener('click', async () => {
                     if (confirm(`Delete ${src.name}?`)) {
-                        const res = await fetch(`/delete_source/${encodeURIComponent(src.name)}`, {method: 'DELETE'});
-                        if (res.ok) {
+                        try {
+                            await fetchWithStatus(`/delete_source/${encodeURIComponent(src.name)}`, { method: 'DELETE' });
                             await loadSources();
                             showAlert('Source deleted', 'success');
                         } else {
                             showAlert('Delete failed', 'error');
+
                         }
                     }
                 });
