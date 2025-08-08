@@ -278,6 +278,7 @@
             if (rois.length === 0) return;
 
             const table = document.createElement('table');
+            table.classList.add('roi-table');
             const thead = document.createElement('thead');
             const headerRow = document.createElement('tr');
             ['ID', 'x', 'y', 'w', 'h', 'Module'].forEach(col => {
