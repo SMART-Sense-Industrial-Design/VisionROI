@@ -12,16 +12,13 @@
     <h1>AI Stream Dashboard</h1>
   </header>
   {% include 'partials/alert.html' %}
-  <div class="layout">
-    <div id="sidenav" class="sidenav">
-      <a href="/home">🏠 Home</a>
-      <a href="/create_source">➕ Create Source</a>
-      <a href="/roi">📐 ROI Selection</a>
-      <a href="/inference">🤖 Inference</a>
-    </div>
-    <main>
-      {% block content %}{% endblock %}
-    </main>
+  <div class="sidenav">
+
+    <a href="/home">🏠 Home</a>
+    <a href="/create_source">➕ Create Source</a>
+    <a href="/roi">📐 ROI Selection</a>
+    <a href="/inference">🤖 Inference</a>
+
   </div>
 
   <script>
