@@ -3,10 +3,13 @@
 {% block content %}
 
 <h2>Create Source</h2>
-<form method="POST" action="/create_source" class="mb-4">
-    <div class="mb-3">
-        <label for="name" class="form-label">Name:</label>
-        <input type="text" id="name" name="name" class="form-control" required>
+
+<div id="status-message"></div>
+<form method="POST" action="/create_source">
+    <div>
+        <label for="name">Name:</label>
+        <input type="text" id="name" name="name" required>
+
     </div>
     <div class="mb-3">
         <label for="source" class="form-label">Source:</label>
@@ -29,9 +32,24 @@
 </table>
 
 <script>
+    const messageEl = document.getElementById('status-message');
+
+    async function fetchWithStatus(url, options = {}) {
+        messageEl.textContent = 'กำลังโหลด...';
+        try {
+            const res = await fetch(url, options);
+            if (!res.ok) throw new Error('network');
+            messageEl.textContent = 'สำเร็จ';
+            return res;
+        } catch (err) {
+            messageEl.textContent = 'เกิดข้อผิดพลาด';
+            throw err;
+        }
+    }
+
     async function loadSources() {
         try {
-            const resp = await fetch('/source_list');
+            const resp = await fetchWithStatus('/source_list');
             const data = await resp.json();
             const tbody = document.getElementById('source-table-body');
             tbody.innerHTML = '';
@@ -47,9 +65,11 @@
                 delBtn.className = 'btn btn-danger btn-sm';
                 delBtn.addEventListener('click', async () => {
                     if (confirm(`Delete ${src.name}?`)) {
-                        const res = await fetch(`/delete_source/${encodeURIComponent(src.name)}`, {method: 'DELETE'});
-                        if (res.ok) {
+                        try {
+                            await fetchWithStatus(`/delete_source/${encodeURIComponent(src.name)}`, { method: 'DELETE' });
                             await loadSources();
+                        } catch (err) {
+                            /* error handled in fetchWithStatus */
                         }
                     }
                 });

@@ -52,9 +52,22 @@
         startButton.onclick = startInference;
         stopButton.onclick = stopInference;
 
+        async function fetchWithStatus(url, options = {}) {
+            statusEl.innerText = 'กำลังโหลด...';
+            try {
+                const res = await fetch(url, options);
+                if (!res.ok) throw new Error('network');
+                statusEl.innerText = 'สำเร็จ';
+                return res;
+            } catch (err) {
+                statusEl.innerText = 'เกิดข้อผิดพลาด';
+                throw err;
+            }
+        }
+
         async function loadSources() {
             try {
-                const res = await fetch('/source_list');
+                const res = await fetchWithStatus('/source_list');
                 if (!res.ok) throw new Error('Bad response');
                 const data = await res.json();
                 sourceSelect.innerHTML = '';
@@ -115,7 +128,8 @@
                 startButton.disabled = false;
                 return;
             }
-            const cfg = await fetch(`/source_config?name=${encodeURIComponent(name)}`).then(r => r.json());
+            const cfgRes = await fetchWithStatus(`/source_config?name=${encodeURIComponent(name)}`);
+            const cfg = await cfgRes.json();
 
             let roiPath = cfg.rois;
             if (!roiPath.startsWith('/')) {
@@ -123,7 +137,7 @@
             }
 
             const { module, ...cfgNoModule } = cfg;
-            const camRes = await fetch(`/set_camera/${cam}`, {
+            const camRes = await fetchWithStatus(`/set_camera/${cam}`, {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({ name, source: cfg.source, ...cfgNoModule })
@@ -135,13 +149,13 @@
                 return;
             }
 
-            const res = await fetch(`/load_roi_file?path=${encodeURIComponent(roiPath)}`);
+            const res = await fetchWithStatus(`/load_roi_file?path=${encodeURIComponent(roiPath)}`);
             const data = await res.json();
             statusEl.innerText = 'Loaded: ' + data.filename;
             rois = data.rois;
             renderRoiPlaceholders();
 
-            const startRes = await fetch(`/start_inference/${cam}`, {
+            const startRes = await fetchWithStatus(`/start_inference/${cam}`, {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({ rois })
@@ -160,7 +174,7 @@
         async function stopInference() {
             if (!running) return;
             running = false;
-            await fetch(`/stop_inference/${cam}`, { method: 'POST' });
+            await fetchWithStatus(`/stop_inference/${cam}`, { method: 'POST' });
             if (socket) {
                 socket.close();
                 socket = null;
@@ -208,17 +222,18 @@
 
         async function checkStatus() {
             const name = sourceSelect.value;
-            const res = await fetch(`/inference_status/${cam}`);
+            const res = await fetchWithStatus(`/inference_status/${cam}`);
             const data = await res.json();
             if (data.running && name) {
                 openSocket();
                 openRoiSocket();
-                const cfg = await fetch(`/source_config?name=${encodeURIComponent(name)}`).then(r => r.json());
+                const cfgRes = await fetchWithStatus(`/source_config?name=${encodeURIComponent(name)}`);
+                const cfg = await cfgRes.json();
                 let roiPath = cfg.rois;
                 if (!roiPath.startsWith('/')) {
                     roiPath = `data_sources/${cfg.name}/${roiPath}`;
                 }
-                const roiRes = await fetch(`/load_roi_file?path=${encodeURIComponent(roiPath)}`);
+                const roiRes = await fetchWithStatus(`/load_roi_file?path=${encodeURIComponent(roiPath)}`);
                 const roiData = await roiRes.json();
                 rois = roiData.rois;
                 renderRoiPlaceholders();
