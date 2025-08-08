@@ -80,10 +80,16 @@
             rois.forEach(r => {
                 const item = document.createElement('div');
                 item.className = 'roi-item';
+                const title = document.createElement('h4');
+                title.className = 'roi-title';
+                title.textContent = r.name || `ROI ${r.id}`;
                 const img = document.createElement('img');
                 img.id = `${cellId}-roi-${r.id}`;
+                img.className = 'roi-image';
                 const p = document.createElement('p');
                 p.id = `${cellId}-text-${r.id}`;
+                p.className = 'roi-text';
+                item.appendChild(title);
                 item.appendChild(img);
                 item.appendChild(p);
                 roiGrid.appendChild(item);
