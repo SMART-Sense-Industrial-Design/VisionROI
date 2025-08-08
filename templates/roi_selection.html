@@ -7,6 +7,7 @@
 <button id="stopBtn" disabled>Stop</button>
 <button id="saveBtn">Save All</button>
 <button id="clearBtn">Clear All</button>
+
 <br><br>
 <div id="frameContainer" style="position: relative; display: inline-block;">
     <img id="video" />
@@ -270,7 +271,7 @@
             if (rois.length === 0) return;
 
             const table = document.createElement('table');
-            table.classList.add('roi-table');
+            table.className = 'table table-striped table-sm';
             const thead = document.createElement('thead');
             const headerRow = document.createElement('tr');
             ['ID', 'x', 'y', 'w', 'h', 'Module', 'Delete'].forEach(col => {
@@ -300,6 +301,7 @@
                 });
                 const tdModule = document.createElement('td');
                 const select = document.createElement('select');
+                select.className = 'form-select form-select-sm';
                 const empty = document.createElement('option');
                 empty.value = '';
                 empty.textContent = '';
@@ -318,6 +320,7 @@
                 const tdDel = document.createElement('td');
                 const delBtn = document.createElement('button');
                 delBtn.textContent = 'Delete';
+                delBtn.className = 'btn btn-danger btn-sm';
                 delBtn.addEventListener('click', () => deleteRoi(idx));
                 tdDel.appendChild(delBtn);
                 tr.appendChild(tdDel);

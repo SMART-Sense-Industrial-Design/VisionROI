@@ -3,20 +3,20 @@
 {% block content %}
 
 <h2>Create Source</h2>
-<form method="POST" action="/create_source">
-    <div>
-        <label for="name">Name:</label>
-        <input type="text" id="name" name="name" required>
+<form method="POST" action="/create_source" class="mb-4">
+    <div class="mb-3">
+        <label for="name" class="form-label">Name:</label>
+        <input type="text" id="name" name="name" class="form-control" required>
     </div>
-    <div>
-        <label for="source">Source:</label>
-        <input type="text" id="source" name="source" required>
+    <div class="mb-3">
+        <label for="source" class="form-label">Source:</label>
+        <input type="text" id="source" name="source" class="form-control" required>
     </div>
-    <button type="submit">Create</button>
+    <button type="submit" class="btn btn-primary">Create</button>
 </form>
 
 <h3>Source List</h3>
-<table>
+<table class="table table-bordered mt-3">
     <thead>
         <tr>
             <th>Name</th>
@@ -44,7 +44,7 @@
                 const actionTd = document.createElement('td');
                 const delBtn = document.createElement('button');
                 delBtn.textContent = 'Delete';
-                delBtn.classList.add('delete');
+                delBtn.className = 'btn btn-danger btn-sm';
                 delBtn.addEventListener('click', async () => {
                     if (confirm(`Delete ${src.name}?`)) {
                         const res = await fetch(`/delete_source/${encodeURIComponent(src.name)}`, {method: 'DELETE'});
