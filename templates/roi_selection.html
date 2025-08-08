@@ -2,22 +2,12 @@
 {% block title %}ROI Selection{% endblock %}
 {% block content %}
 
-<style>
-    #video { border: 1px solid black; position: relative; }
-    #canvas {
-        position: absolute;
-        left: 0;
-        top: 0;
-        z-index: 1;
-        pointer-events: none;
-    }
-</style>
+<select id="sourceSelect"></select>
+<button id="startBtn">Start</button>
+<button id="stopBtn" disabled>Stop</button>
+<button id="saveBtn">Save All</button>
+<button id="clearBtn">Clear All</button>
 
-<select id="sourceSelect" class="form-select d-inline-block w-auto mb-2"></select>
-<button id="startBtn" class="btn btn-primary me-2">Start</button>
-<button id="stopBtn" class="btn btn-danger me-2" disabled>Stop</button>
-<button id="saveBtn" class="btn btn-success me-2">Save All</button>
-<button id="clearBtn" class="btn btn-secondary">Clear All</button>
 <br><br>
 <div id="frameContainer" style="position: relative; display: inline-block;">
     <img id="video" />
