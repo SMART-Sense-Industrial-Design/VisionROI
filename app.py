@@ -563,8 +563,12 @@ async def source_list():
             cfg_path = d / "config.json"
             if not cfg_path.exists():
                 continue
-            with cfg_path.open("r") as f:
-                cfg = json.load(f)
+            try:
+                with cfg_path.open("r") as f:
+                    cfg = json.load(f)
+            except (OSError, json.JSONDecodeError):
+                # skip sources with unreadable or invalid config
+                continue
             result.append(
                 {
                     "name": cfg.get("name", d.name),
