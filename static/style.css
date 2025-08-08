@@ -168,6 +168,9 @@ main {
 .roi-card {
   display: flex;
   align-items: flex-start;
+  /* Ensure ROI card is visible even before ROIs load and prevent wrapping under the video */
+  min-width: 200px;
+  flex-shrink: 0;
 }
 
 @media (max-width: 600px) {
