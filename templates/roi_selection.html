@@ -414,6 +414,11 @@
 
         function updateRoiModule(i, module) {
             rois[i].module = module;
+            fetch('/save_roi', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ rois: rois, source: currentSource })
+            });
         }
 
         function deleteRoi(i) {
