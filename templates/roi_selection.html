@@ -79,9 +79,11 @@
                 const res = await fetch('/inference_modules');
                 if (!res.ok) throw new Error('Bad response');
                 modules = await res.json();
+                renderRoiList();
             } catch (err) {
                 console.error('Failed to load modules', err);
                 modules = [];
+                renderRoiList();
             }
         }
 
@@ -194,6 +196,7 @@
                 }
                 currentPoints = [];
                 hoverPoint = null;
+                renderRoiList();
             }
             drawAllRois();
         });
@@ -229,7 +232,6 @@
                 r.points.forEach(p => {
                     ctx.beginPath();
                     ctx.arc(p.x, p.y, 5, 0, 2 * Math.PI);
-
                     ctx.fillStyle = 'blue';
                     ctx.fill();
                 });
@@ -251,7 +253,6 @@
                 currentPoints.forEach(p => {
                     ctx.beginPath();
                     ctx.arc(p.x, p.y, 5, 0, 2 * Math.PI);
-
                     ctx.fillStyle = 'red';
                     ctx.fill();
                 });
@@ -267,7 +268,6 @@
                     ctx.setLineDash([]);
                 }
             }
-            renderRoiList();
         }
 
         function renderRoiList() {
@@ -281,7 +281,7 @@
             table.classList.add('roi-table');
             const thead = document.createElement('thead');
             const headerRow = document.createElement('tr');
-            ['ID', 'x', 'y', 'w', 'h', 'Module'].forEach(col => {
+            ['ID', 'x', 'y', 'w', 'h', 'Module', 'Delete'].forEach(col => {
                 const th = document.createElement('th');
                 th.textContent = col;
                 headerRow.appendChild(th);
@@ -322,6 +322,13 @@
                 select.addEventListener('change', e => updateRoiModule(idx, e.target.value));
                 tdModule.appendChild(select);
                 tr.appendChild(tdModule);
+
+                const tdDel = document.createElement('td');
+                const delBtn = document.createElement('button');
+                delBtn.textContent = 'Delete';
+                delBtn.addEventListener('click', () => deleteRoi(idx));
+                tdDel.appendChild(delBtn);
+                tr.appendChild(tdDel);
                 tbody.appendChild(tr);
             });
 
@@ -356,26 +363,7 @@
             });
             currentPoints = [];
             drawAllRois();
-        }
-
-        async function saveRois() {
-            try {
-                const res = await fetch('/save_roi', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ rois, source: currentSource })
-                });
-                if (!res.ok) throw new Error('Failed to save');
-                alert('Saved');
-            } catch (err) {
-                alert('Error');
-                console.error('Failed to save ROIs', err);
-            }
-        }
-
-        function updateRoiModule(i, moduleName) {
-            rois[i].module = moduleName;
-            saveRois();
+            renderRoiList();
         }
 
         function saveAllRois() {
@@ -407,6 +395,7 @@
             rois = [];
             currentPoints = [];
             drawAllRois();
+            renderRoiList();
 
             fetch(`/save_roi`, {
                 method: "POST",
@@ -422,7 +411,23 @@
 
         function updateRoiModule(i, module) {
             rois[i].module = module;
-            saveAllRois();
+        }
+
+        function deleteRoi(i) {
+            if (!confirm('Delete this ROI?')) return;
+            rois.splice(i, 1);
+            drawAllRois();
+            renderRoiList();
+
+            fetch(`/save_roi`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ rois: rois, source: currentSource })
+            })
+            .then(res => res.json())
+            .then(data => {
+                alert('Deleted. Saved to: ' + data.filename);
+            });
         }
 
         startBtn.addEventListener('click', startStream);
@@ -435,6 +440,7 @@
         window.saveAllRois = saveAllRois;
         window.clearAllRois = clearAllRois;
         window.updateRoiModule = updateRoiModule;
+        window.deleteRoi = deleteRoi;
 
         window.addEventListener('beforeunload', () => {
             stopStream();
