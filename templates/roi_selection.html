@@ -132,7 +132,7 @@
             hasStarted = true;
             const name = document.getElementById("sourceSelect").value;
             if (!name) {
-                alert("Select source first");
+                if (typeof showAlert === 'function') showAlert('Select source first', 'error');
                 return;
             }
             startBtn.disabled = true;
@@ -144,7 +144,7 @@
                 body: JSON.stringify({ name, source: cfg.source })
             });
             if (!setRes.ok) {
-                alert("Failed to set camera");
+                if (typeof showAlert === 'function') showAlert('Failed to set camera', 'error');
                 isStreaming = false;
                 startBtn.disabled = false;
                 stopBtn.disabled = true;
@@ -152,7 +152,7 @@
             }
             const startRes = await fetch(`/start_roi_stream/${cam}`, { method: "POST" });
             if (!startRes.ok) {
-                alert("Failed to start ROI stream");
+                if (typeof showAlert === 'function') showAlert('Failed to start ROI stream', 'error');
                 isStreaming = false;
                 startBtn.disabled = false;
                 stopBtn.disabled = true;
@@ -373,7 +373,7 @@
 
         function saveAllRois() {
             if (rois.length === 0) {
-                alert("No ROI selected.");
+                if (typeof showAlert === 'function') showAlert('No ROI selected', 'error');
                 return;
             }
             if (!confirm("Save all ROIs?")) return;
@@ -385,14 +385,14 @@
             })
             .then(res => res.json())
             .then(data => {
-                alert("Saved to: " + data.filename);
+                if (typeof showAlert === 'function') showAlert('Saved to: ' + data.filename, 'success');
                 loadRois();
             });
         }
 
         function clearAllRois() {
             if (rois.length === 0) {
-                alert("No ROI to clear.");
+                if (typeof showAlert === 'function') showAlert('No ROI to clear', 'error');
                 return;
             }
             if (!confirm("Clear all ROIs?")) return;
@@ -409,7 +409,7 @@
             })
             .then(res => res.json())
             .then(data => {
-                alert("Cleared. Saved to: " + data.filename);
+                if (typeof showAlert === 'function') showAlert('Cleared. Saved to: ' + data.filename, 'success');
                 loadRois();
             });
         }
@@ -436,7 +436,7 @@
             })
             .then(res => res.json())
             .then(data => {
-                alert('Deleted. Saved to: ' + data.filename);
+                if (typeof showAlert === 'function') showAlert('Deleted. Saved to: ' + data.filename, 'success');
             });
 
         }
@@ -461,6 +461,7 @@
             await loadSources();
             await loadModules();
             await checkStatus();
+            if (typeof showAlert === 'function') showAlert('ROI selection ready', 'success');
         })();
     })();
 </script>

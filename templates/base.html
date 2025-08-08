@@ -11,16 +11,14 @@
     <img src="{{ url_for('static', filename='images/logo.jpg') }}" class="logo" alt="logo">
     <h1>AI Stream Dashboard</h1>
   </header>
-  <div class="layout">
-    <nav class="sidenav" id="sidenav">
-      <a href="/home">🏠 Home</a>
-      <a href="/create_source">➕ Create Source</a>
-      <a href="/roi">📐 ROI Selection</a>
-      <a href="/inference">🤖 Inference</a>
-    </nav>
-    <main id="content">
-      {% block content %}{% endblock %}
-    </main>
+  {% include 'partials/alert.html' %}
+  <div class="sidenav">
+
+    <a href="/home">🏠 Home</a>
+    <a href="/create_source">➕ Create Source</a>
+    <a href="/roi">📐 ROI Selection</a>
+    <a href="/inference">🤖 Inference</a>
+
   </div>
 
   <script>

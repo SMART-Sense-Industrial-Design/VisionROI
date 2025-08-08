@@ -77,6 +77,7 @@
                     opt.textContent = 'No sources available';
                     sourceSelect.appendChild(opt);
                     statusEl.innerText = 'Create a source first';
+                    showAlert('No sources available', 'error');
                 } else {
                     data.forEach(item => {
                         const opt = document.createElement('option');
@@ -84,6 +85,7 @@
                         opt.textContent = item.name;
                         sourceSelect.appendChild(opt);
                     });
+                    showAlert('Sources loaded', 'success');
                 }
             } catch (err) {
                 console.error('Failed to load sources', err);
@@ -93,6 +95,7 @@
                 opt.textContent = 'Error loading sources';
                 sourceSelect.appendChild(opt);
                 statusEl.innerText = 'Error fetching sources';
+                showAlert('Failed to load sources', 'error');
             }
         }
 
@@ -126,6 +129,7 @@
                 statusEl.innerText = 'Select source first';
                 running = false;
                 startButton.disabled = false;
+                showAlert('Select source first', 'error');
                 return;
             }
             const cfgRes = await fetchWithStatus(`/source_config?name=${encodeURIComponent(name)}`);
@@ -146,6 +150,7 @@
                 statusEl.innerText = 'Camera error';
                 running = false;
                 startButton.disabled = false;
+                showAlert('Camera error', 'error');
                 return;
             }
 
@@ -165,9 +170,11 @@
                 openSocket();
                 openRoiSocket();
                 setRunningUI();
+                showAlert('Inference started', 'success');
             } else {
                 running = false;
                 startButton.disabled = false;
+                showAlert('Failed to start inference', 'error');
             }
         }
 
@@ -190,6 +197,7 @@
             startButton.innerText = 'Resume';
             startButton.disabled = false;
             stopButton.disabled = true;
+            showAlert('Inference stopped', 'info');
         }
 
         function openSocket() {

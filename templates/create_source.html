@@ -68,8 +68,10 @@
                         try {
                             await fetchWithStatus(`/delete_source/${encodeURIComponent(src.name)}`, { method: 'DELETE' });
                             await loadSources();
-                        } catch (err) {
-                            /* error handled in fetchWithStatus */
+                            showAlert('Source deleted', 'success');
+                        } else {
+                            showAlert('Delete failed', 'error');
+
                         }
                     }
                 });
@@ -79,8 +81,10 @@
                 tr.appendChild(actionTd);
                 tbody.appendChild(tr);
             });
+            showAlert('Sources loaded', 'success');
         } catch (err) {
             console.error('Failed to load sources', err);
+            showAlert('Failed to load sources', 'error');
         }
     }
     loadSources();
