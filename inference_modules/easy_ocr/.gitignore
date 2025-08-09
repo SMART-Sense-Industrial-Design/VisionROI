@@ -1,0 +1,8 @@
+# Ignore all .log files
+*.log
+
+# Ignore folder 'images' and everything inside it
+images/
+
+# Ignore all __pycache__ directories everywhere
+**/__pycache__/
