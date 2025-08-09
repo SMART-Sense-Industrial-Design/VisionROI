@@ -22,15 +22,10 @@ extras = [
     "tensorflow",
     "torch",
     "websockets",
-    "scipy",
-    "lap",
-    "motmetrics",
-    "pandas",
     "onnx",
     "torchvision",
     "pycuda",
     "tensorrt",
-    "yolox",
 ]
 
 

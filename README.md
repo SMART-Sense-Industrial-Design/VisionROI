@@ -6,7 +6,7 @@
 - เลือกและบันทึกตำแหน่ง ROI จากกล้องหรือวิดีโอ
 - รันโมเดลเพื่อตรวจจับข้อความหรือวัตถุใน ROI
 - รองรับการแจ้งเตือนผ่าน Telegram
-- มาพร้อมโมดูลตัวอย่าง `typhoon_ocr` และ `yolo` เพื่อเริ่มต้นทดลองใช้งาน
+- มาพร้อมโมดูลตัวอย่าง `typhoon_ocr`, `yolo` และ `easy_ocr` เพื่อเริ่มต้นทดลองใช้งาน
 
 ## ข้อกำหนดระบบ
 - Python ≥3.10
@@ -16,12 +16,19 @@
 - `Quart`
 - `opencv-python`
 - `numpy`
+- `Pillow`
+- `easyocr`
 
 ### Dependencies เพิ่มเติม (Extras)
 - `onnxruntime` – สำหรับรันโมเดล ONNX
 - `requests` – ใช้ส่งการแจ้งเตือนผ่าน Telegram เท่านั้น (หากต้องการรองรับ Line จำเป็นต้องพัฒนาโมดูลเพิ่มเติม)
 - `tensorflow` – สำหรับโมเดลที่ใช้ TFLite
 - `torch` – สำหรับฟังก์ชันที่ใช้ PyTorch
+- `websockets` – สำหรับการเชื่อมต่อผ่าน WebSocket แบบไคลเอนต์
+- `onnx` – เครื่องมือสำหรับจัดการโมเดล ONNX
+- `torchvision` – ยูทิลิตีเสริมสำหรับ PyTorch
+- `pycuda` – จำเป็นสำหรับ TensorRT backend
+- `tensorrt` – เร่งความเร็วโมเดลด้วย TensorRT
 
 ## การติดตั้ง
 แนะนำให้สร้าง virtual environment ก่อน:
@@ -50,7 +57,7 @@ python -m venv .venv
 pip install "."
 ```
 
-หากต้องการ dependencies เพิ่มเติม เช่น `onnxruntime`, `requests`, `tensorflow`, `torch` สามารถติดตั้งผ่าน extras ได้:
+หากต้องการ dependencies เพิ่มเติม เช่น `onnxruntime`, `requests`, `tensorflow`, `torch`, `websockets`, `onnx`, `torchvision`, `pycuda` หรือ `tensorrt` สามารถติดตั้งผ่าน extras ได้:
 
 ```bash
 pip install ".[extras]"
@@ -86,6 +93,7 @@ web_ocrroi/
 ├─ camera_worker.py
 ├─ data_sources/
 ├─ inference_modules/
+│  ├─ easy_ocr/
 │  ├─ typhoon_ocr/
 │  └─ yolo/
 ├─ src/
@@ -243,6 +251,7 @@ data_sources/
 ตัวอย่างโมดูลที่มีให้:
 - `typhoon_ocr` – OCR เอกสารทั่วไป
 - `yolo` – ตรวจจับวัตถุพื้นฐานด้วย YOLOv8
+- `easy_ocr` – OCR ด้วยไลบรารี EasyOCR
 
 ## ข้อมูลเพิ่มเติม
 - `config.json` เก็บข้อมูล source และไฟล์ ROI
