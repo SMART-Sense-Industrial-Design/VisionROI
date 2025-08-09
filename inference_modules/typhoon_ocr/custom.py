@@ -51,22 +51,8 @@ def _configure_logger(source: str | None) -> None:
 
 # ตัวแปรควบคุมเวลาเรียก OCR แยกตาม roi พร้อมตัวล็อกป้องกันการเข้าถึงพร้อมกัน
 last_ocr_times = {}
+last_ocr_results = {}
 _last_ocr_lock = threading.Lock()
-
-
-def _run_ocr(base64_string, roi_id=None):
-    """เรียก OCR ในเธรดพื้นหลังและบันทึกผล"""
-    try:
-        markdown = ocr_document(base64_string)
-        if roi_id is not None:
-            logger.info(f"roi_id={roi_id} OCR result: {markdown}")
-        else:
-            logger.info(f"OCR result: {markdown}")
-    except Exception as e:
-        if roi_id is not None:
-            logger.exception(f"roi_id={roi_id} OCR error: {e}")
-        else:
-            logger.exception(f"OCR error: {e}")
 
 def _save_image_async(path, image):
     """บันทึกรูปภาพแบบแยกเธรด"""
@@ -93,13 +79,20 @@ def process(frame, roi_id=None, save=False, source=""):
         else:
             should_ocr = False
 
+    result_text = last_ocr_results.get(roi_id, "")
+
     if should_ocr:
         try:
             _, buffer = cv2.imencode('.jpg', frame)
             base64_string = base64.b64encode(buffer).decode('utf-8')
-            threading.Thread(
-                target=_run_ocr, args=(base64_string, roi_id), daemon=True
-            ).start()
+            markdown = ocr_document(base64_string)
+            logger.info(
+                f"roi_id={roi_id} OCR result: {markdown}"
+                if roi_id is not None
+                else f"OCR result: {markdown}"
+            )
+            result_text = markdown
+            last_ocr_results[roi_id] = markdown
         except Exception as e:
             logger.exception(f"roi_id={roi_id} OCR error: {e}")
 
@@ -118,8 +111,4 @@ def process(frame, roi_id=None, save=False, source=""):
                 target=_save_image_async, args=(str(path), frame.copy()), daemon=True
             ).start()
 
-    # else:
-    #     logger.info(f"OCR skipped for ROI {roi_id} (throttled)")
-
-
-    return frame
+    return result_text
