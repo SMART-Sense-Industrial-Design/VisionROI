@@ -11,6 +11,8 @@ dependencies = [
     "Quart",
     "opencv-python",
     "numpy",
+    "Pillow",
+    "easyocr",
 ]
 
 [project.optional-dependencies]
@@ -19,6 +21,16 @@ extras = [
     "requests",
     "tensorflow",
     "torch",
+    "websockets",
+    "scipy",
+    "lap",
+    "motmetrics",
+    "pandas",
+    "onnx",
+    "torchvision",
+    "pycuda",
+    "tensorrt",
+    "yolox",
 ]
 
 
