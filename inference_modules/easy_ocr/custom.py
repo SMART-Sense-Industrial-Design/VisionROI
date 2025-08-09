@@ -72,6 +72,30 @@ def _save_image_async(path, image) -> None:
     cv2.imwrite(path, image)
 
 
+def _run_ocr_async(frame, roi_id, save, source) -> None:
+    """ประมวลผล OCR และบันทึกรูปในเธรดแยก"""
+    try:
+        reader = _get_reader()
+        ocr_result = reader.readtext(frame, detail=0)
+        text = " ".join(ocr_result)
+        logger.info(
+            f"roi_id={roi_id} OCR result: {text}" if roi_id is not None else f"OCR result: {text}"
+        )
+        with _last_ocr_lock:
+            last_ocr_results[roi_id] = text
+    except Exception as e:  # pragma: no cover - log any OCR error
+        logger.exception(f"roi_id={roi_id} OCR error: {e}")
+
+    if save:
+        base_dir = _data_sources_root / source if source else Path(__file__).resolve().parent
+        roi_folder = f"{roi_id}" if roi_id is not None else "roi"
+        save_dir = base_dir / "images" / roi_folder
+        os.makedirs(save_dir, exist_ok=True)
+        filename = datetime.now().strftime("%Y%m%d%H%M%S%f") + ".jpg"
+        path = save_dir / filename
+        _save_image_async(str(path), frame)
+
+
 def process(frame, roi_id=None, save: bool = False, source: str = ""):
     """ประมวลผล ROI และเรียก OCR เมื่อเวลาห่างจากครั้งก่อน >= 2 วินาที
     บันทึกรูปภาพแบบไม่บล็อกเมื่อระบุให้บันทึก"""
@@ -95,29 +119,8 @@ def process(frame, roi_id=None, save: bool = False, source: str = ""):
     result_text = last_ocr_results.get(roi_id, "")
 
     if should_ocr:
-        try:
-            reader = _get_reader()
-            ocr_result = reader.readtext(frame, detail=0)
-            text = " ".join(ocr_result)
-            logger.info(
-                f"roi_id={roi_id} OCR result: {text}" if roi_id is not None else f"OCR result: {text}"
-            )
-            result_text = text
-            last_ocr_results[roi_id] = text
-        except Exception as e:  # pragma: no cover - log any OCR error
-            logger.exception(f"roi_id={roi_id} OCR error: {e}")
-
-        if save:
-            base_dir = (
-                _data_sources_root / source if source else Path(__file__).resolve().parent
-            )
-            roi_folder = f"{roi_id}" if roi_id is not None else "roi"
-            save_dir = base_dir / "images" / roi_folder
-            os.makedirs(save_dir, exist_ok=True)
-            filename = datetime.now().strftime("%Y%m%d%H%M%S%f") + ".jpg"
-            path = save_dir / filename
-            threading.Thread(
-                target=_save_image_async, args=(str(path), frame.copy()), daemon=True
-            ).start()
+        threading.Thread(
+            target=_run_ocr_async, args=(frame.copy(), roi_id, save, source), daemon=True
+        ).start()
 
     return result_text
