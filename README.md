@@ -1,6 +1,6 @@
-# web_ocrroi
+# VisionROI
 
-โปรเจ็กต์นี้เป็นแอป Quart สำหรับทดสอบ OCR และการจัดการ ROI
+โปรเจ็กต์ **VisionROI** เป็นแอป Quart สำหรับทดสอบ OCR และการจัดการ ROI
 
 ## ฟีเจอร์
 - เลือกและบันทึกตำแหน่ง ROI จากกล้องหรือวิดีโอ
@@ -88,7 +88,7 @@ pip install -e "."
 โครงสร้างไฟล์หลักของโปรเจ็กต์:
 
 ```
-web_ocrroi/
+VisionROI/
 ├─ app.py
 ├─ camera_worker.py
 ├─ data_sources/
