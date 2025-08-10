@@ -5,7 +5,6 @@
 <select id="sourceSelect"></select>
 <button id="startBtn">Start</button>
 <button id="stopBtn" disabled>Stop</button>
-<button id="saveBtn">Save All</button>
 <button id="clearBtn">Clear All</button>
 
 <br><br>
@@ -449,25 +448,6 @@
             renderRoiList();
         }
 
-        function saveAllRois() {
-            if (rois.length === 0) {
-                if (typeof showAlert === 'function') showAlert('No ROI selected', 'error');
-                return;
-            }
-            if (!confirm("Save all ROIs?")) return;
-
-            fetch(`/save_roi`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ rois: rois, source: currentSource })
-            })
-            .then(res => res.json())
-            .then(data => {
-                if (typeof showAlert === 'function') showAlert('Saved to: ' + data.filename, 'success');
-                loadRois();
-            });
-        }
-
         function clearAllRois() {
             if (rois.length === 0) {
                 if (typeof showAlert === 'function') showAlert('No ROI to clear', 'error');
@@ -521,12 +501,10 @@
 
         startBtn.addEventListener('click', startStream);
         stopBtn.addEventListener('click', stopStream);
-        document.getElementById('saveBtn').addEventListener('click', saveAllRois);
         document.getElementById('clearBtn').addEventListener('click', clearAllRois);
 
         window.startStream = startStream;
         window.stopStream = stopStream;
-        window.saveAllRois = saveAllRois;
         window.clearAllRois = clearAllRois;
         window.updateRoiModule = updateRoiModule;
         window.deleteRoi = deleteRoi;
