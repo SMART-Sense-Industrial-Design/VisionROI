@@ -253,16 +253,21 @@
         });
 
         frameContainer.addEventListener('mousemove', (e) => {
-            if (!drawingRect || !rectStart) return;
             const rect = frameContainer.getBoundingClientRect();
             const scaleX = canvas.width / rect.width;
             const scaleY = canvas.height / rect.height;
             const x = (e.clientX - rect.left) * scaleX;
             const y = (e.clientY - rect.top) * scaleY;
-            hoverPoint = {
-                x: Math.max(rectStart.x, x),
-                y: Math.max(rectStart.y, y)
-            };
+            if (drawingRect && rectStart) {
+                hoverPoint = {
+                    x: Math.max(rectStart.x, x),
+                    y: Math.max(rectStart.y, y)
+                };
+            } else if (currentPoints.length > 0) {
+                hoverPoint = { x, y };
+            } else {
+                hoverPoint = null;
+            }
             drawAllRois();
         });
 
@@ -306,6 +311,10 @@
                 for (let i = 1; i < currentPoints.length; i++) {
                     ctx.lineTo(currentPoints[i].x, currentPoints[i].y);
                 }
+                if (hoverPoint && !drawingRect) {
+                    ctx.lineTo(hoverPoint.x, hoverPoint.y);
+                }
+
                 ctx.strokeStyle = 'red';
                 ctx.lineWidth = 1;
                 ctx.setLineDash([5, 5]);
