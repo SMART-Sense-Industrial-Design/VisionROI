@@ -12,6 +12,7 @@ import shutil
 import importlib.util
 import os
 import sys
+import argparse
 from types import ModuleType
 from pathlib import Path
 import contextlib
@@ -709,4 +710,9 @@ async def ws_snapshot(cam_id: int):
     )
 
 if __name__ == "__main__":
-    app.run()
+    parser = argparse.ArgumentParser(description="Run VisionROI server")
+    parser.add_argument(
+        "--port", type=int, default=5000, help="Port for the web server"
+    )
+    args = parser.parse_args()
+    app.run(port=args.port)
