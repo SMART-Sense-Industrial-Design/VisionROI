@@ -22,9 +22,11 @@
         let rois = [];
         let currentPoints = [];
         let hoverPoint = null;
+
         let rectStart = null;
         let rectEnd = null;
         let drawingRect = false;
+
         let currentSource = "";
         let modules = [];
         let initialized = false;
@@ -181,17 +183,35 @@
             const scaleY = canvas.height / rect.height;
             const x = (e.clientX - rect.left) * scaleX;
             const y = (e.clientY - rect.top) * scaleY;
-            currentPoints.push({ x, y });
-            if (currentPoints.length === 4) {
+
+            if (!drawingRect) {
+                rectStart = { x, y };
+                hoverPoint = null;
+                drawingRect = true;
+            } else {
                 const roiId = prompt("ROI id?");
                 if (roiId !== null) {
                     let selectedModule = null;
                     if (modules.length > 0) {
                         selectedModule = prompt("Module? (" + modules.join(", ") + ")");
                     }
-                    rois.push({ id: roiId, module: selectedModule, points: [...currentPoints] });
+                    const x1 = Math.min(rectStart.x, x);
+                    const y1 = Math.min(rectStart.y, y);
+                    const x2 = Math.max(rectStart.x, x);
+                    const y2 = Math.max(rectStart.y, y);
+                    rois.push({
+                        id: roiId,
+                        module: selectedModule,
+                        points: [
+                            { x: x1, y: y1 },
+                            { x: x2, y: y1 },
+                            { x: x2, y: y2 },
+                            { x: x1, y: y2 }
+                        ]
+                    });
                 }
-                currentPoints = [];
+                drawingRect = false;
+                rectStart = null;
                 hoverPoint = null;
                 renderRoiList();
             }
@@ -241,17 +261,25 @@
         });
 
         frameContainer.addEventListener('mousemove', (e) => {
+            if (!drawingRect || !rectStart) return;
             const rect = frameContainer.getBoundingClientRect();
             const scaleX = canvas.width / rect.width;
             const scaleY = canvas.height / rect.height;
             const x = (e.clientX - rect.left) * scaleX;
             const y = (e.clientY - rect.top) * scaleY;
-            hoverPoint = { x, y };
+            hoverPoint = {
+                x: Math.max(rectStart.x, x),
+                y: Math.max(rectStart.y, y)
+            };
             drawAllRois();
         });
 
         frameContainer.addEventListener('mouseleave', () => {
             hoverPoint = null;
+            if (drawingRect) {
+                drawingRect = false;
+                rectStart = null;
+            }
             drawAllRois();
         });
 
@@ -280,32 +308,17 @@
                     ctx.fillText(r.id, r.points[0].x, Math.max(10, r.points[0].y - 5));
                 }
             });
-            if (currentPoints.length > 0) {
-                ctx.beginPath();
-                ctx.moveTo(currentPoints[0].x, currentPoints[0].y);
-                for (let i = 1; i < currentPoints.length; i++) {
-                    ctx.lineTo(currentPoints[i].x, currentPoints[i].y);
-                }
+            if (drawingRect && rectStart && hoverPoint) {
+                const x = Math.min(rectStart.x, hoverPoint.x);
+                const y = Math.min(rectStart.y, hoverPoint.y);
+                const w = Math.abs(hoverPoint.x - rectStart.x);
+                const h = Math.abs(hoverPoint.y - rectStart.y);
+                ctx.save();
+                ctx.setLineDash([5, 5]);
                 ctx.strokeStyle = 'red';
-                ctx.lineWidth = 2;
-                ctx.stroke();
-                currentPoints.forEach(p => {
-                    ctx.beginPath();
-                    ctx.arc(p.x, p.y, 5, 0, 2 * Math.PI);
-                    ctx.fillStyle = 'red';
-                    ctx.fill();
-                });
-                if (hoverPoint) {
-                    const last = currentPoints[currentPoints.length - 1];
-                    ctx.beginPath();
-                    ctx.moveTo(last.x, last.y);
-                    ctx.lineTo(hoverPoint.x, hoverPoint.y);
-                    ctx.strokeStyle = 'red';
-                    ctx.lineWidth = 1;
-                    ctx.setLineDash([5, 5]);
-                    ctx.stroke();
-                    ctx.setLineDash([]);
-                }
+                ctx.lineWidth = 1;
+                ctx.strokeRect(x, y, w, h);
+                ctx.restore();
             }
             if (drawingRect && rectStart) {
                 const end = hoverPoint || rectStart;
