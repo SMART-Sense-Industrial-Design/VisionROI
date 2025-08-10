@@ -184,41 +184,33 @@
             const x = (e.clientX - rect.left) * scaleX;
             const y = (e.clientY - rect.top) * scaleY;
 
-            if (!drawingRect) {
-                rectStart = { x, y };
-                hoverPoint = null;
-                drawingRect = true;
-            } else {
+            currentPoints.push({ x, y });
+            if (currentPoints.length === 4) {
                 const roiId = prompt("ROI id?");
                 if (roiId !== null) {
                     let selectedModule = null;
                     if (modules.length > 0) {
                         selectedModule = prompt("Module? (" + modules.join(", ") + ")");
                     }
-                    const x1 = Math.min(rectStart.x, x);
-                    const y1 = Math.min(rectStart.y, y);
-                    const x2 = Math.max(rectStart.x, x);
-                    const y2 = Math.max(rectStart.y, y);
                     rois.push({
                         id: roiId,
                         module: selectedModule,
-                        points: [
-                            { x: x1, y: y1 },
-                            { x: x2, y: y1 },
-                            { x: x2, y: y2 },
-                            { x: x1, y: y2 }
-                        ]
+                        points: currentPoints.slice()
+                    });
+                    renderRoiList();
+                    fetch('/save_roi', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ rois: rois, source: currentSource })
                     });
                 }
-                drawingRect = false;
-                rectStart = null;
-                hoverPoint = null;
-                renderRoiList();
+                currentPoints = [];
             }
             drawAllRois();
         });
 
         frameContainer.addEventListener('dblclick', (e) => {
+            currentPoints = [];
             const rect = frameContainer.getBoundingClientRect();
             const scaleX = canvas.width / rect.width;
             const scaleY = canvas.height / rect.height;
@@ -308,6 +300,24 @@
                     ctx.fillText(r.id, r.points[0].x, Math.max(10, r.points[0].y - 5));
                 }
             });
+            if (currentPoints.length > 0) {
+                ctx.beginPath();
+                ctx.moveTo(currentPoints[0].x, currentPoints[0].y);
+                for (let i = 1; i < currentPoints.length; i++) {
+                    ctx.lineTo(currentPoints[i].x, currentPoints[i].y);
+                }
+                ctx.strokeStyle = 'red';
+                ctx.lineWidth = 1;
+                ctx.setLineDash([5, 5]);
+                ctx.stroke();
+                ctx.setLineDash([]);
+                currentPoints.forEach(p => {
+                    ctx.beginPath();
+                    ctx.arc(p.x, p.y, 5, 0, 2 * Math.PI);
+                    ctx.fillStyle = 'red';
+                    ctx.fill();
+                });
+            }
             if (drawingRect && rectStart && hoverPoint) {
                 const x = Math.min(rectStart.x, hoverPoint.x);
                 const y = Math.min(rectStart.y, hoverPoint.y);

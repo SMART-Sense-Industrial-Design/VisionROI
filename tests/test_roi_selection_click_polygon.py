@@ -5,17 +5,17 @@ import textwrap
 from pathlib import Path
 
 
-def test_dblclick_creates_rectangle_and_saves():
+def test_click_creates_polygon_and_saves():
     html = Path('templates/roi_selection.html').read_text()
-    match = re.search(r"frameContainer.addEventListener\('dblclick',\s*\(e\) => \{([\s\S]*?drawAllRois\(\);\n\s*)\}\);", html)
-    assert match, 'dblclick handler not found'
+    match = re.search(r"frameContainer.addEventListener\('click',\s*\(e\) => \{([\s\S]*?drawAllRois\(\);\n\s*)\}\);", html)
+    assert match, 'click handler not found'
     handler = match.group(1)
 
     script = textwrap.dedent("""
     let rois = [];
     let modules = ['m1'];
-    let rectStart = null, rectEnd = null, drawingRect = false;
     let currentPoints = [];
+    let drawingRect = false;
     let currentSource = 'src';
     let fetchBody;
     function renderRoiList(){}
@@ -31,8 +31,10 @@ def test_dblclick_creates_rectangle_and_saves():
     function handler(e) {
 {handler}
     }
-    handler({clientX:10, clientY:20});
-    handler({clientX:50, clientY:60});
+    handler({clientX:10, clientY:10});
+    handler({clientX:50, clientY:10});
+    handler({clientX:50, clientY:50});
+    handler({clientX:10, clientY:50});
     console.log(JSON.stringify({rois, fetchBody}));
     """).replace('{handler}', handler)
 
@@ -40,9 +42,9 @@ def test_dblclick_creates_rectangle_and_saves():
     data = json.loads(result.stdout.strip())
     assert len(data['rois']) == 1
     pts = data['rois'][0]['points']
-    assert pts[0] == {'x': 10, 'y': 20}
-    assert pts[1] == {'x': 50, 'y': 20}
-    assert pts[2] == {'x': 50, 'y': 60}
-    assert pts[3] == {'x': 10, 'y': 60}
+    assert pts[0] == {'x': 10, 'y': 10}
+    assert pts[1] == {'x': 50, 'y': 10}
+    assert pts[2] == {'x': 50, 'y': 50}
+    assert pts[3] == {'x': 10, 'y': 50}
     payload = json.loads(data['fetchBody'])
     assert payload['rois'][0]['points'] == pts
