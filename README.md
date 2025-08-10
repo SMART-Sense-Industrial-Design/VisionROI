@@ -2,6 +2,29 @@
 
 โปรเจ็กต์ **VisionROI** เป็นแอป Quart สำหรับทดสอบ OCR และการจัดการ ROI
 
+## การเริ่มต้นอย่างรวดเร็ว
+
+1. สร้าง virtual environment แล้ว activate:
+
+   ```bash
+   python -m venv .venv
+   source .venv/bin/activate  # บน Windows ใช้ .venv\\Scripts\\activate
+   ```
+
+2. ติดตั้งแพ็กเกจของโปรเจ็กต์:
+
+   ```bash
+   pip install "."
+   ```
+
+3. รันแอปพลิเคชัน:
+
+   ```bash
+   python app.py --port 12000
+   ```
+
+4. เปิดเบราว์เซอร์ไปที่ `http://localhost:12000/` เพื่อเริ่มใช้งาน
+
 ## ฟีเจอร์
 - เลือกและบันทึกตำแหน่ง ROI จากกล้องหรือวิดีโอ
 - รันโมเดลเพื่อตรวจจับข้อความหรือวัตถุใน ROI
