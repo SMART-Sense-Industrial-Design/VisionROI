@@ -4,8 +4,7 @@
 
 <h2>Create Source</h2>
 
-<div id="status-message"></div>
-<form method="POST" action="/create_source">
+<form id="create-form" method="POST" action="/create_source">
     <div>
         <label for="name">Name:</label>
         <input type="text" id="name" name="name" required>
@@ -31,24 +30,10 @@
 </table>
 
 <script>
-    const messageEl = document.getElementById('status-message');
-
-    async function fetchWithStatus(url, options = {}) {
-        messageEl.textContent = 'กำลังโหลด...';
-        try {
-            const res = await fetch(url, options);
-            if (!res.ok) throw new Error('network');
-            messageEl.textContent = 'สำเร็จ';
-            return res;
-        } catch (err) {
-            messageEl.textContent = 'เกิดข้อผิดพลาด';
-            throw err;
-        }
-    }
-
     async function loadSources() {
         try {
-            const resp = await fetchWithStatus('/source_list');
+            const resp = await fetch('/source_list');
+            if (!resp.ok) throw new Error('network');
             const data = await resp.json();
             const tbody = document.getElementById('source-table-body');
             tbody.innerHTML = '';
@@ -65,9 +50,10 @@
                 delBtn.addEventListener('click', async () => {
                     if (confirm(`Delete ${src.name}?`)) {
                         try {
-                            await fetchWithStatus(`/delete_source/${encodeURIComponent(src.name)}`, { method: 'DELETE' });
-                            await loadSources();
+                            const delRes = await fetch(`/delete_source/${encodeURIComponent(src.name)}`, { method: 'DELETE' });
+                            if (!delRes.ok) throw new Error('network');
                             showAlert('Source deleted', 'success');
+                            await loadSources();
                         } catch (err) {
                             showAlert('Delete failed', 'error');
                         }
@@ -85,6 +71,25 @@
             showAlert('Failed to load sources', 'error');
         }
     }
+
+    document.getElementById('create-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const formData = new FormData(e.target);
+        try {
+            const res = await fetch('/create_source', { method: 'POST', body: formData });
+            const data = await res.json();
+            if (res.ok && data.status === 'created') {
+                showAlert('Source created', 'success');
+                e.target.reset();
+                await loadSources();
+            } else {
+                showAlert(data.message || 'Create failed', 'error');
+            }
+        } catch (err) {
+            showAlert('Create failed', 'error');
+        }
+    });
+
     loadSources();
 
 </script>
