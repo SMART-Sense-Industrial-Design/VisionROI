@@ -30,6 +30,7 @@ _data_sources_root = Path(__file__).resolve().parents[2] / "data_sources"
 
 _reader: easyocr.Reader | None = None
 _reader_lock = threading.Lock()
+_reader_run_lock = threading.Lock()
 
 
 def _configure_logger(source: str | None) -> None:
@@ -81,7 +82,8 @@ def _run_ocr_async(frame, roi_id, save, source) -> None:
     """ประมวลผล OCR และบันทึกรูปในเธรดแยก"""
     try:
         reader = _get_reader()
-        ocr_result = reader.readtext(frame, detail=0)
+        with _reader_run_lock:
+            ocr_result = reader.readtext(frame, detail=0)
         text = " ".join(ocr_result)
         logger.info(
             f"roi_id={roi_id} OCR result: {text}" if roi_id is not None else f"OCR result: {text}"
