@@ -2,39 +2,10 @@ import asyncio
 import contextlib
 import time
 
-import sys
-import types
+from .stubs import stub_cv2, stub_quart
 
-# สร้างโมดูล quart จำลองเพื่อหลีกเลี่ยงการติดตั้งจริง
-quart_stub = types.ModuleType("quart")
-
-
-class DummyQuart:
-    def __init__(self, name):
-        self.config = {}
-
-    def route(self, *args, **kwargs):
-        def decorator(f):
-            return f
-        return decorator
-
-    def websocket(self, *args, **kwargs):
-        def decorator(f):
-            return f
-        return decorator
-
-
-quart_stub.Quart = DummyQuart
-quart_stub.render_template = lambda *a, **k: None
-quart_stub.websocket = lambda *a, **k: None
-quart_stub.request = None
-quart_stub.jsonify = lambda *a, **k: None
-quart_stub.send_file = lambda *a, **k: None
-quart_stub.redirect = lambda *a, **k: None
-
-sys.modules["quart"] = quart_stub
-
-cv2_stub = types.ModuleType("cv2")
+quart_stub = stub_quart()
+cv2_stub = stub_cv2()
 
 
 class DummyCamera:
@@ -60,8 +31,6 @@ cv2_stub.rectangle = lambda *a, **k: None
 cv2_stub.putText = lambda *a, **k: None
 cv2_stub.resize = lambda img, dsize, fx=0, fy=0, **k: img
 cv2_stub.destroyAllWindows = lambda: None
-
-sys.modules["cv2"] = cv2_stub
 
 import app
 
