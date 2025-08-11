@@ -5,7 +5,8 @@ from pathlib import Path
 # เพิ่ม path ของ src เพื่อให้สามารถ import packages ได้
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from tests.stubs import stub_cv2
+from .stubs import stub_cv2
+
 
 cv2_stub = stub_cv2()
 

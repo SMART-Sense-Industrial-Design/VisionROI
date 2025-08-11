@@ -1,6 +1,7 @@
 import asyncio
 
-from tests.stubs import stub_cv2, stub_quart
+from .stubs import stub_cv2, stub_quart
+
 
 quart_stub = stub_quart()
 cv2_stub = stub_cv2()
