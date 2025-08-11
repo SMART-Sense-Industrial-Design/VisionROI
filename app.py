@@ -27,6 +27,7 @@ except Exception:  # websockets not installed
 # เก็บ worker ของกล้องแต่ละตัวในรูปแบบ dict
 camera_workers: dict[int, CameraWorker | None] = {}
 camera_sources: dict[int, int | str] = {}
+camera_resolutions: dict[int, tuple[int | None, int | None]] = {}
 camera_locks: dict[int, asyncio.Lock] = {}
 frame_queues: dict[int, asyncio.Queue[bytes]] = {}
 inference_tasks: dict[int, asyncio.Task | None] = {}
@@ -281,7 +282,8 @@ async def start_camera_task(
     worker = camera_workers.get(cam_id)
     if worker is None:
         src = camera_sources.get(cam_id, 0)
-        worker = CameraWorker(src, asyncio.get_running_loop())
+        width, height = camera_resolutions.get(cam_id, (None, None))
+        worker = CameraWorker(src, asyncio.get_running_loop(), width, height)
         if not worker.start():
             camera_workers[cam_id] = None
             return (
@@ -393,6 +395,17 @@ async def set_camera(cam_id: int):
     else:
         active_modules.pop(cam_id, None)
     source_val = data.get("source", "")
+    width_val = data.get("width")
+    height_val = data.get("height")
+    try:
+        w = int(width_val) if width_val not in (None, "") else None
+    except ValueError:
+        w = None
+    try:
+        h = int(height_val) if height_val not in (None, "") else None
+    except ValueError:
+        h = None
+    camera_resolutions[cam_id] = (w, h)
     worker = camera_workers.pop(cam_id, None)
     if worker:
         await worker.stop()
@@ -404,7 +417,8 @@ async def set_camera(cam_id: int):
         (inference_tasks.get(cam_id) and not inference_tasks[cam_id].done())
         or (roi_tasks.get(cam_id) and not roi_tasks[cam_id].done())
     ):
-        worker = CameraWorker(camera_sources[cam_id], asyncio.get_running_loop())
+        width, height = camera_resolutions.get(cam_id, (None, None))
+        worker = CameraWorker(camera_sources[cam_id], asyncio.get_running_loop(), width, height)
         if not worker.start():
             return jsonify({"status": "error", "cam_id": cam_id}), 400
         camera_workers[cam_id] = worker
@@ -419,6 +433,8 @@ async def create_source():
     form = await request.form
     name = form.get("name", "").strip()
     source = form.get("source", "").strip()
+    width = form.get("width")
+    height = form.get("height")
     if not name or not source:
         return jsonify({"status": "error", "message": "missing data"}), 400
 
@@ -434,6 +450,16 @@ async def create_source():
             "source": source,
             "rois": "rois.json",
         }
+        if width:
+            try:
+                config["width"] = int(width)
+            except ValueError:
+                pass
+        if height:
+            try:
+                config["height"] = int(height)
+            except ValueError:
+                pass
         rois_path = os.path.join(source_dir, "rois.json")
         with open(rois_path, "w") as f:
             f.write("[]")
