@@ -22,6 +22,8 @@ class TelegramNotify:
         }
 
         self.send_queue = queue.Queue(maxsize=100)
+        # 🔚 sentinel object สำหรับหยุด worker thread อย่างปลอดภัย
+        self._stop_sentinel = object()
         self.worker_thread = threading.Thread(target=self._process_queue, daemon=True)
         self.worker_thread.start()
 
@@ -49,12 +51,17 @@ class TelegramNotify:
 
     def _process_queue(self):
         while True:
-            try:
-                func, args = self.send_queue.get()
-                func(*args)
+            item = self.send_queue.get()
+            if item is self._stop_sentinel:
                 self.send_queue.task_done()
+                break
+            func, args = item
+            try:
+                func(*args)
             except Exception as e:
                 print(f"❌ Error in queue processor: {e}")
+            finally:
+                self.send_queue.task_done()
 
     def _should_send(self, key, time_interval=None):
         now = time.time()
@@ -160,5 +167,9 @@ class TelegramNotify:
                 print("⚠️ Send queue is full. Skipping video.")
 
     def close(self):
-        """ปิด session เพื่อป้องกัน resource leak"""
+        """ส่งสัญญาณหยุดและรอ thread ก่อนปิด session"""
+        # ส่ง sentinel เพื่อหยุด worker thread
+        self.send_queue.put(self._stop_sentinel)
+        # รอให้ thread ทำงานเสร็จ
+        self.worker_thread.join()
         self.session.close()
