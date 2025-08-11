@@ -132,10 +132,11 @@
             startBtn.disabled = true;
             currentSource = name;
             const cfg = await fetch(`/source_config?name=${encodeURIComponent(name)}`).then(r => r.json());
+            const { module, ...cfgNoModule } = cfg;
             const setRes = await fetch(`/set_camera/${cam}`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ name, source: cfg.source })
+                body: JSON.stringify(cfgNoModule)
             });
             if (!setRes.ok) {
                 if (typeof showAlert === 'function') showAlert('Failed to set camera', 'error');

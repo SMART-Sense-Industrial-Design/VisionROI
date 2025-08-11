@@ -144,7 +144,7 @@
             const camRes = await fetchWithStatus(`/set_camera/${cam}`, {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ name, source: cfg.source, ...cfgNoModule })
+                body: JSON.stringify(cfgNoModule)
             });
             if (!camRes.ok) {
                 statusEl.innerText = 'Camera error';

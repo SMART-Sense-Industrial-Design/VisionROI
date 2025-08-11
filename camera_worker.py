@@ -6,10 +6,20 @@ import time
 class CameraWorker:
     """อ่านภาพจากกล้องในเธรดแยกแล้วส่งผ่าน asyncio.Queue"""
 
-    def __init__(self, src, loop: asyncio.AbstractEventLoop | None = None):
+    def __init__(
+        self,
+        src,
+        loop: asyncio.AbstractEventLoop | None = None,
+        width: int | None = None,
+        height: int | None = None,
+    ):
         self.src = src
         self.loop = loop or asyncio.get_event_loop()
         self.cap = cv2.VideoCapture(src)
+        if width is not None:
+            self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
+        if height is not None:
+            self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
         self.queue: asyncio.Queue = asyncio.Queue(maxsize=1)
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._reader, daemon=True)
