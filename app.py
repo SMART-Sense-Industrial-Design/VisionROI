@@ -600,6 +600,8 @@ async def source_list():
                 {
                     "name": cfg.get("name", d.name),
                     "source": cfg.get("source", ""),
+                    "width": cfg.get("width"),
+                    "height": cfg.get("height"),
                 }
             )
     except FileNotFoundError:

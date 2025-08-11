@@ -34,6 +34,8 @@
         <tr>
             <th>Name</th>
             <th>Source</th>
+            <th>Width</th>
+            <th>Height</th>
             <th>Actions</th>
         </tr>
     </thead>
@@ -68,6 +70,10 @@
                 nameTd.textContent = src.name;
                 const sourceTd = document.createElement('td');
                 sourceTd.textContent = src.source;
+                const widthTd = document.createElement('td');
+                widthTd.textContent = src.width ?? '';
+                const heightTd = document.createElement('td');
+                heightTd.textContent = src.height ?? '';
                 const actionTd = document.createElement('td');
                 const delBtn = document.createElement('button');
                 delBtn.textContent = 'Delete';
@@ -87,6 +93,8 @@
                 actionTd.appendChild(delBtn);
                 tr.appendChild(nameTd);
                 tr.appendChild(sourceTd);
+                tr.appendChild(widthTd);
+                tr.appendChild(heightTd);
                 tr.appendChild(actionTd);
                 tbody.appendChild(tr);
             });
