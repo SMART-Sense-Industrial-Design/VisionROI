@@ -7,6 +7,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from .stubs import stub_cv2
 
+
 cv2_stub = stub_cv2()
 
 # stub requests module and its submodules
