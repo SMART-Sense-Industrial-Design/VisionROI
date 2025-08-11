@@ -51,12 +51,17 @@ def _configure_logger(source: str | None) -> None:
 # ตัวแปรควบคุมเวลาเรียก OCR แยกตาม roi พร้อมตัวล็อกป้องกันการเข้าถึงพร้อมกัน
 last_ocr_times = {}
 _last_ocr_lock = threading.Lock()
+_imwrite_lock = threading.Lock()
 
 
 
 def _save_image_async(path, image):
     """บันทึกรูปภาพแบบแยกเธรด"""
-    cv2.imwrite(path, image)
+    try:
+        with _imwrite_lock:
+            cv2.imwrite(path, image)
+    except Exception as e:  # pragma: no cover
+        logger.exception(f"Failed to save image {path}: {e}")
 
 
 def process(frame, roi_id=None, save=False, source=""):

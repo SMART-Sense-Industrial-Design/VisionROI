@@ -65,11 +65,16 @@ def _get_reader() -> easyocr.Reader:
 last_ocr_times: dict = {}
 last_ocr_results: dict = {}
 _last_ocr_lock = threading.Lock()
+_imwrite_lock = threading.Lock()
 
 
 def _save_image_async(path, image) -> None:
     """บันทึกรูปภาพแบบแยกเธรด"""
-    cv2.imwrite(path, image)
+    try:
+        with _imwrite_lock:
+            cv2.imwrite(path, image)
+    except Exception as e:  # pragma: no cover
+        logger.exception(f"Failed to save image {path}: {e}")
 
 
 def _run_ocr_async(frame, roi_id, save, source) -> None:

@@ -53,10 +53,15 @@ def _configure_logger(source: str | None) -> None:
 last_ocr_times = {}
 last_ocr_results = {}
 _last_ocr_lock = threading.Lock()
+_cv_lock = threading.Lock()
 
 def _save_image_async(path, image):
     """บันทึกรูปภาพแบบแยกเธรด"""
-    cv2.imwrite(path, image)
+    try:
+        with _cv_lock:
+            cv2.imwrite(path, image)
+    except Exception as e:  # pragma: no cover
+        logger.exception(f"Failed to save image {path}: {e}")
 
 
 def process(frame, roi_id=None, save=False, source=""):
@@ -83,7 +88,8 @@ def process(frame, roi_id=None, save=False, source=""):
 
     if should_ocr:
         try:
-            _, buffer = cv2.imencode('.jpg', frame)
+            with _cv_lock:
+                _, buffer = cv2.imencode('.jpg', frame)
             base64_string = base64.b64encode(buffer).decode('utf-8')
             markdown = ocr_document(base64_string)
             logger.info(
