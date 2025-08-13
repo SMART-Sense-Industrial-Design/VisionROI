@@ -18,6 +18,7 @@ def test_dblclick_creates_rectangle_and_saves():
     let currentPoints = [];
     let currentSource = 'src';
     let fetchBody;
+    let hoverPoint = null;
     function renderRoiList(){}
     function drawAllRois(){}
     global.prompt = (msg) => {
