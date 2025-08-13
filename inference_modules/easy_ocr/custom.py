@@ -118,7 +118,7 @@ def process(
     if cam_id is not None:
         try:
             import app  # type: ignore
-            app.save_roi_flags[cam_id] = True
+            app.save_roi_flags[cam_id] = False
         except Exception:  # pragma: no cover
             pass
 
