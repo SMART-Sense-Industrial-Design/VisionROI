@@ -5,11 +5,13 @@ import textwrap
 from pathlib import Path
 
 
-def test_dblclick_creates_rectangle_and_saves():
+def test_drag_creates_rectangle_and_saves():
     html = Path('templates/roi_selection.html').read_text()
-    match = re.search(r"frameContainer.addEventListener\('dblclick',\s*\(e\) => \{([\s\S]*?drawAllRois\(\);\n\s*)\}\);", html)
-    assert match, 'dblclick handler not found'
-    handler = match.group(1)
+    down_match = re.search(r"frameContainer.addEventListener\('mousedown',\s*\(e\) => \{([\s\S]*?)\}\);", html)
+    up_match = re.search(r"frameContainer.addEventListener\('mouseup',\s*\(e\) => \{([\s\S]*?drawAllRois\(\);\n\s*)\}\);", html)
+    assert down_match and up_match, 'handlers not found'
+    down_handler = down_match.group(1)
+    up_handler = up_match.group(1)
 
     script = textwrap.dedent("""
     let rois = [];
@@ -18,6 +20,8 @@ def test_dblclick_creates_rectangle_and_saves():
     let currentPoints = [];
     let currentSource = 'src';
     let fetchBody;
+    let hoverPoint = null;
+    let currentTool = 'rect';
     function renderRoiList(){}
     function drawAllRois(){}
     global.prompt = (msg) => {
@@ -28,13 +32,16 @@ def test_dblclick_creates_rectangle_and_saves():
     global.fetch = (url, opts) => { fetchBody = opts.body; return Promise.resolve({}); };
     const frameContainer = { getBoundingClientRect: () => ({left:0, top:0, width:100, height:100}) };
     const canvas = { width:100, height:100 };
-    function handler(e) {
-{handler}
+    function handlerDown(e) {
+{down_handler}
     }
-    handler({clientX:10, clientY:20});
-    handler({clientX:50, clientY:60});
+    function handlerUp(e) {
+{up_handler}
+    }
+    handlerDown({clientX:10, clientY:20});
+    handlerUp({clientX:50, clientY:60});
     console.log(JSON.stringify({rois, fetchBody}));
-    """).replace('{handler}', handler)
+    """).replace('{down_handler}', down_handler).replace('{up_handler}', up_handler)
 
     result = subprocess.run(['node', '-e', script], capture_output=True, text=True, check=True)
     data = json.loads(result.stdout.strip())

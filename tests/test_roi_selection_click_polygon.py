@@ -17,6 +17,7 @@ def test_click_creates_polygon_and_saves():
     let currentPoints = [];
     let drawingRect = false;
     let currentSource = 'src';
+    let currentTool = 'pick';
     let fetchBody;
     function renderRoiList(){}
     function drawAllRois(){}
