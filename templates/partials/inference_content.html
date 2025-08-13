@@ -125,10 +125,15 @@
             });
         }
 
-        function loadGroupOptions(rois) {
+        function loadGroupOptions(list) {
             groupSelect.innerHTML = '';
-            const groups = Array.from(new Set(rois.map(r => r.group).filter(g => g !== undefined && g !== null && g !== '')));
-
+            const optAll = document.createElement('option');
+            optAll.value = 'all';
+            optAll.textContent = 'All';
+            groupSelect.appendChild(optAll);
+            const groups = Array.from(
+                new Set(list.map(r => r.group).filter(g => g))
+            );
             groups.forEach(g => {
                 const opt = document.createElement('option');
                 opt.value = g;
@@ -137,8 +142,7 @@
             });
         }
 
-        async function startInference() {
-
+        async function startInference(roisOverride = null, selectedGroup = 'all') {
             if (running) return;
             running = true;
             startButton.disabled = true;
@@ -167,18 +171,23 @@
                 return;
             }
 
+            let roiPath = cfg.rois;
+            if (!roiPath.startsWith('/')) {
+                roiPath = `data_sources/${cfg.name}/${roiPath}`;
+            }
             const res = await fetchWithStatus(`/load_roi_file?path=${encodeURIComponent(roiPath)}`);
             const data = await res.json();
             statusEl.innerText = 'Loaded: ' + data.filename;
-            rois = data.rois;
-            loadGroupOptions(rois);
+            allRois = data.rois || [];
+            loadGroupOptions(allRois);
+            groupSelect.value = selectedGroup;
+            rois = roisOverride || (selectedGroup === 'all' ? allRois : allRois.filter(r => r.group === selectedGroup));
             renderRoiPlaceholders();
-
 
             const startRes = await fetchWithStatus(`/start_inference/${cam}`, {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ rois: roiList })
+                body: JSON.stringify({ rois })
             });
             const startData = await startRes.json();
             if (startData.status === 'started' || startData.status === 'already_running') {
@@ -258,11 +267,11 @@
                 }
                 const roiRes = await fetchWithStatus(`/load_roi_file?path=${encodeURIComponent(roiPath)}`);
                 const roiData = await roiRes.json();
-                rois = roiData.rois;
-                loadGroupOptions(rois);
-
+                allRois = roiData.rois || [];
+                loadGroupOptions(allRois);
+                groupSelect.value = 'all';
+                rois = allRois;
                 renderRoiPlaceholders();
-                populateGroupSelect();
                 setRunningUI();
                 running = true;
             } else {
@@ -278,9 +287,7 @@
             const selected = groupSelect.value;
             const filtered = selected === 'all' ? allRois : allRois.filter(r => r.group === selected);
             await stopInference();
-            rois = filtered;
-            renderRoiPlaceholders();
-            await startInference(rois);
+            await startInference(filtered, selected);
         }
 
         function setRunningUI() {
