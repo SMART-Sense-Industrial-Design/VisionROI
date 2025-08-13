@@ -16,6 +16,7 @@ def test_mousemove_updates_hover_point_for_polygon():
     let currentPoints = [{x:10, y:10}];
     let drawingRect = false;
     let rectStart = null;
+    let currentTool = 'pick';
     const frameContainer = { getBoundingClientRect: () => ({left:0, top:0, width:100, height:100}) };
     const canvas = { width:100, height:100 };
     function drawAllRois(){}
