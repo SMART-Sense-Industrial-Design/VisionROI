@@ -134,7 +134,7 @@ async def read_and_queue_frame(
 
 async def run_inference_loop(cam_id: int):
     default_module = active_modules.get(cam_id, "")
-    module_cache: dict[str, tuple[ModuleType | None, bool]] = {}
+    module_cache: dict[str, tuple[ModuleType | None, bool, bool]] = {}
 
     async def process_frame(frame):
         rois = inference_rois.get(cam_id, [])
@@ -144,19 +144,24 @@ async def run_inference_loop(cam_id: int):
                 if module_entry is None:
                     module = load_custom_module(default_module)
                     takes_source = False
+                    takes_cam_id = False
                     if module:
                         proc = getattr(module, "process", None)
                         if callable(proc):
-                            takes_source = "source" in inspect.signature(proc).parameters
-                    module_cache[default_module] = (module, takes_source)
+                            params = inspect.signature(proc).parameters
+                            takes_source = "source" in params
+                            takes_cam_id = "cam_id" in params
+                    module_cache[default_module] = (module, takes_source, takes_cam_id)
                 else:
-                    module, takes_source = module_entry
+                    module, takes_source, takes_cam_id = module_entry
                 process_fn = getattr(module, "process", None) if module else None
                 if callable(process_fn):
                     save_flag = bool(save_roi_flags.get(cam_id))
                     args = [frame, None, save_flag]
                     if takes_source:
                         args.append(active_sources.get(cam_id, ""))
+                    if takes_cam_id:
+                        args.append(cam_id)
                     try:
                         result = process_fn(*args)
                         if inspect.isawaitable(result):
@@ -180,13 +185,16 @@ async def run_inference_loop(cam_id: int):
             if module_entry is None:
                 module = load_custom_module(mod_name)
                 takes_source = False
+                takes_cam_id = False
                 if module:
                     proc = getattr(module, "process", None)
                     if callable(proc):
-                        takes_source = "source" in inspect.signature(proc).parameters
-                module_cache[mod_name] = (module, takes_source)
+                        params = inspect.signature(proc).parameters
+                        takes_source = "source" in params
+                        takes_cam_id = "cam_id" in params
+                module_cache[mod_name] = (module, takes_source, takes_cam_id)
             else:
-                module, takes_source = module_entry
+                module, takes_source, takes_cam_id = module_entry
             if module is None:
                 print(f"module '{mod_name}' not found for ROI {r.get('id', i)}")
                 continue
@@ -214,6 +222,8 @@ async def run_inference_loop(cam_id: int):
                 args = [roi, r.get("id", str(i)), save_flag]
                 if takes_source:
                     args.append(active_sources.get(cam_id, ""))
+                if takes_cam_id:
+                    args.append(cam_id)
                 result = process_fn(*args)
                 if inspect.isawaitable(result):
                     result = await result
@@ -505,7 +515,6 @@ async def start_inference(cam_id: int):
             r["module"] = mod_name
             processed_rois.append(r)
     inference_rois[cam_id] = processed_rois
-    save_roi_flags[cam_id] = True
     queue = get_roi_result_queue(cam_id)
     while not queue.empty():
         queue.get_nowait()
