@@ -258,7 +258,8 @@ data_sources/
 [
   {
     "id": "1",
-    "module": "typhoon_ocr",
+    "group": "g1",
+    "module": "",
     "points": [
       {"x": 10, "y": 20},
       {"x": 110, "y": 20},
@@ -268,6 +269,8 @@ data_sources/
   }
 ]
 ```
+
+แต่ละ ROI สามารถกำหนด `group` สำหรับเลือก group id ได้ ส่วนค่า `module` จะเริ่มต้นเป็นค่าว่าง
 
 โมดูลสำหรับประมวลผลจะเก็บไว้ในโฟลเดอร์ `inference_modules/<module_name>/custom.py`
 

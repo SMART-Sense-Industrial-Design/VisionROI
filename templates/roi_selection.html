@@ -27,7 +27,7 @@
         let drawingRect = false;
 
         let currentSource = "";
-        let modules = [];
+        let groups = [];
         let initialized = false;
         let isStreaming = false;
         let hasStarted = false;
@@ -68,17 +68,17 @@
             });
         }
 
-        async function loadModules() {
+        // Load available groups from server (if any)
+        async function loadGroups() {
             try {
-                const res = await fetch('/inference_modules');
+                const res = await fetch('/groups');
                 if (!res.ok) throw new Error('Bad response');
-                modules = await res.json();
-                renderRoiList();
+                groups = await res.json();
             } catch (err) {
-                console.error('Failed to load modules', err);
-                modules = [];
-                renderRoiList();
+                console.error('Failed to load groups', err);
+                groups = [];
             }
+            renderRoiList();
         }
 
         function openSocket() {
@@ -188,13 +188,11 @@
             if (currentPoints.length === 4) {
                 const roiId = prompt("ROI id?");
                 if (roiId !== null) {
-                    let selectedModule = null;
-                    if (modules.length > 0) {
-                        selectedModule = prompt("Module? (" + modules.join(", ") + ")");
-                    }
+                    const groupId = prompt("Group id?");
                     rois.push({
                         id: roiId,
-                        module: selectedModule,
+                        group: groupId,
+                        module: "",
                         points: currentPoints.slice()
                     });
                     renderRoiList();
@@ -233,11 +231,8 @@
                 ];
                 const roiId = prompt("ROI id?");
                 if (roiId !== null) {
-                    let selectedModule = null;
-                    if (modules.length > 0) {
-                        selectedModule = prompt("Module? (" + modules.join(", ") + ")");
-                    }
-                    rois.push({ id: roiId, module: selectedModule, points });
+                    const groupId = prompt("Group id?");
+                    rois.push({ id: roiId, group: groupId, module: "", points });
                     renderRoiList();
                     fetch('/save_roi', {
                         method: 'POST',
@@ -362,7 +357,7 @@
             table.className = 'table table-striped table-sm';
             const thead = document.createElement('thead');
             const headerRow = document.createElement('tr');
-            ['ID', 'x', 'y', 'w', 'h', 'Module', 'Delete'].forEach(col => {
+            ['ID', 'x', 'y', 'w', 'h', 'Group', 'Delete'].forEach(col => {
                 const th = document.createElement('th');
                 th.textContent = col;
                 headerRow.appendChild(th);
@@ -387,23 +382,13 @@
                     td.textContent = Math.round(val);
                     tr.appendChild(td);
                 });
-                const tdModule = document.createElement('td');
-                const select = document.createElement('select');
-                select.className = 'form-select form-select-sm';
-                const empty = document.createElement('option');
-                empty.value = '';
-                empty.textContent = '';
-                select.appendChild(empty);
-                modules.forEach(m => {
-                    const opt = document.createElement('option');
-                    opt.value = m;
-                    opt.textContent = m;
-                    select.appendChild(opt);
-                });
-                select.value = r.module || '';
-                select.addEventListener('change', e => updateRoiModule(idx, e.target.value));
-                tdModule.appendChild(select);
-                tr.appendChild(tdModule);
+                const tdGroup = document.createElement('td');
+                const input = document.createElement('input');
+                input.className = 'form-control form-control-sm';
+                input.value = r.group || '';
+                input.addEventListener('change', e => updateRoiGroup(idx, e.target.value));
+                tdGroup.appendChild(input);
+                tr.appendChild(tdGroup);
 
                 const tdDel = document.createElement('td');
                 const delBtn = document.createElement('button');
@@ -440,7 +425,8 @@
                 }
                 return {
                     id: r.id ?? String(idx + 1),
-                    module: r.module ?? null,
+                    group: r.group ?? null,
+                    module: r.module ?? "",
                     points: pts || []
                 };
             });
@@ -473,8 +459,8 @@
             });
         }
 
-        function updateRoiModule(i, module) {
-            rois[i].module = module;
+        function updateRoiGroup(i, group) {
+            rois[i].group = group;
             fetch('/save_roi', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -507,7 +493,7 @@
         window.startStream = startStream;
         window.stopStream = stopStream;
         window.clearAllRois = clearAllRois;
-        window.updateRoiModule = updateRoiModule;
+        window.updateRoiGroup = updateRoiGroup;
         window.deleteRoi = deleteRoi;
 
         window.addEventListener('beforeunload', () => {
@@ -516,7 +502,7 @@
 
         (async () => {
             await loadSources();
-            await loadModules();
+            await loadGroups();
             await checkStatus();
             if (typeof showAlert === 'function') showAlert('ROI selection ready', 'success');
         })();
