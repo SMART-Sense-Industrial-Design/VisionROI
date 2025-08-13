@@ -6,6 +6,7 @@
             <select id="cam1-sourceSelect" class="form-select mb-2"></select>
             <button id="cam1-startButton" class="btn btn-primary me-2">Start</button>
             <button id="cam1-stopButton" class="btn btn-danger" disabled>Stop</button>
+            <select id="cam1-groupSelect" class="form-select mb-2"></select>
             <p id="cam1-status"></p>
             <div class="video-wrapper">
                 <img id="cam1-video" width="320" height="240" />
@@ -22,6 +23,7 @@
             <select id="cam2-sourceSelect" class="form-select mb-2"></select>
             <button id="cam2-startButton" class="btn btn-primary me-2">Start</button>
             <button id="cam2-stopButton" class="btn btn-danger" disabled>Stop</button>
+            <select id="cam2-groupSelect" class="form-select mb-2"></select>
             <p id="cam2-status"></p>
             <div class="video-wrapper">
                 <img id="cam2-video" width="320" height="240" />
@@ -47,6 +49,7 @@
         const stopButton = getEl('stopButton');
         const statusEl = getEl('status');
         const sourceSelect = getEl('sourceSelect');
+        const groupSelect = getEl('groupSelect');
         const roiGrid = getEl('rois');
 
         startButton.onclick = startInference;
@@ -120,6 +123,17 @@
             });
         }
 
+        function loadGroupOptions(rois) {
+            groupSelect.innerHTML = '';
+            const groups = Array.from(new Set(rois.map(r => r.group).filter(g => g !== undefined && g !== null && g !== '')));
+            groups.forEach(g => {
+                const opt = document.createElement('option');
+                opt.value = g;
+                opt.textContent = g;
+                groupSelect.appendChild(opt);
+            });
+        }
+
         async function startInference() {
             if (running) return;
             running = true;
@@ -158,6 +172,7 @@
             const data = await res.json();
             statusEl.innerText = 'Loaded: ' + data.filename;
             rois = data.rois;
+            loadGroupOptions(rois);
             renderRoiPlaceholders();
 
             const startRes = await fetchWithStatus(`/start_inference/${cam}`, {
@@ -244,6 +259,7 @@
                 const roiRes = await fetchWithStatus(`/load_roi_file?path=${encodeURIComponent(roiPath)}`);
                 const roiData = await roiRes.json();
                 rois = roiData.rois;
+                loadGroupOptions(rois);
                 renderRoiPlaceholders();
                 setRunningUI();
                 running = true;
