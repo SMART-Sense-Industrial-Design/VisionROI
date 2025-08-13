@@ -93,7 +93,6 @@ def _run_ocr_async(frame, roi_id, save, source) -> None:
     except Exception as e:  # pragma: no cover - log any OCR error
         logger.exception(f"roi_id={roi_id} OCR error: {e}")
 
-    save = False
     if save:
         base_dir = _data_sources_root / source if source else Path(__file__).resolve().parent
         roi_folder = f"{roi_id}" if roi_id is not None else "roi"
