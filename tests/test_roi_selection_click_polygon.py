@@ -15,6 +15,8 @@ def test_click_creates_polygon_and_saves():
     let rois = [];
     let currentPoints = [];
     let drawingRect = false;
+    let currentMode = 'points';
+    let rectStart = null, rectEnd = null;
     let currentSource = 'src';
     let fetchBody;
     function renderRoiList(){}
