@@ -490,6 +490,13 @@ async def start_inference(cam_id: int):
                 rois = json.load(f)
         except FileNotFoundError:
             rois = []
+    elif isinstance(rois, str):
+        try:
+            rois = json.loads(rois)
+        except json.JSONDecodeError:
+            rois = []
+    if not isinstance(rois, list):
+        rois = []
     default_module = active_modules.get(cam_id, "")
     processed_rois = []
     for r in rois:
