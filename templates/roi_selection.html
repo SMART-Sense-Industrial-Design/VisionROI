@@ -9,6 +9,10 @@
 
 <br><br>
 <div id="frameContainer" style="position: relative; display: inline-block;">
+    <div id="toolMenu" style="position:absolute; top:10px; left:10px; display:flex; flex-direction:column; gap:5px; z-index:10;">
+        <button id="pickToolBtn">Pick Points</button>
+        <button id="rectToolBtn">Rectangle</button>
+    </div>
     <img id="video" />
     <canvas id="canvas"></canvas>
 </div>
@@ -48,7 +52,9 @@
         const rectToolBtn = document.getElementById("rectToolBtn");
 
         pickToolBtn.classList.add('active');
-        pickToolBtn.addEventListener('click', () => {
+        pickToolBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+
             currentTool = 'pick';
             currentPoints = [];
             drawingRect = false;
@@ -58,9 +64,14 @@
             rectToolBtn.classList.remove('active');
             drawAllRois();
         });
-        rectToolBtn.addEventListener('click', () => {
+        rectToolBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
             currentTool = 'rect';
             currentPoints = [];
+            drawingRect = false;
+            rectStart = null;
+            hoverPoint = null;
+
             pickToolBtn.classList.remove('active');
             rectToolBtn.classList.add('active');
             drawAllRois();
@@ -203,81 +214,72 @@
         }
 
         frameContainer.addEventListener('click', (e) => {
-            if (currentTool !== 'pick' || drawingRect) return;
+
             const rect = frameContainer.getBoundingClientRect();
             const scaleX = canvas.width / rect.width;
             const scaleY = canvas.height / rect.height;
             const x = (e.clientX - rect.left) * scaleX;
             const y = (e.clientY - rect.top) * scaleY;
 
-            currentPoints.push({ x, y });
-            if (currentPoints.length === 4) {
-                const roiId = prompt("ROI id?");
-                if (roiId !== null) {
-                    let selectedModule = null;
-                    if (modules.length > 0) {
-                        selectedModule = prompt("Module? (" + modules.join(", ") + ")");
+            if (currentTool === 'pick' && !drawingRect) {
+                currentPoints.push({ x, y });
+                if (currentPoints.length === 4) {
+                    const roiId = prompt("ROI id?");
+                    if (roiId !== null) {
+                        let selectedModule = null;
+                        if (modules.length > 0) {
+                            selectedModule = prompt("Module? (" + modules.join(", ") + ")");
+                        }
+                        rois.push({
+                            id: roiId,
+                            module: selectedModule,
+                            points: currentPoints.slice()
+                        });
+                        renderRoiList();
+                        fetch('/save_roi', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ rois: rois, source: currentSource })
+                        });
                     }
-                    rois.push({
-                        id: roiId,
-                        module: selectedModule,
-                        points: currentPoints.slice()
-                    });
-                    renderRoiList();
-                    fetch('/save_roi', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ rois: rois, source: currentSource })
-                    });
+                    currentPoints = [];
                 }
-                currentPoints = [];
-            }
-            drawAllRois();
-        });
-
-        frameContainer.addEventListener('mousedown', (e) => {
-            if (currentTool !== 'rect') return;
-            currentPoints = [];
-            const rect = frameContainer.getBoundingClientRect();
-            const scaleX = canvas.width / rect.width;
-            const scaleY = canvas.height / rect.height;
-            const x = (e.clientX - rect.left) * scaleX;
-            const y = (e.clientY - rect.top) * scaleY;
-            rectStart = { x, y };
-            drawingRect = true;
-        });
-
-        frameContainer.addEventListener('mouseup', (e) => {
-            if (currentTool !== 'rect' || !drawingRect || !rectStart) return;
-            const rect = frameContainer.getBoundingClientRect();
-            const scaleX = canvas.width / rect.width;
-            const scaleY = canvas.height / rect.height;
-            const x = (e.clientX - rect.left) * scaleX;
-            const y = (e.clientY - rect.top) * scaleY;
-            rectEnd = { x, y };
-            const x1 = Math.min(rectStart.x, rectEnd.x);
-            const y1 = Math.min(rectStart.y, rectEnd.y);
-            const x2 = Math.max(rectStart.x, rectEnd.x);
-            const y2 = Math.max(rectStart.y, rectEnd.y);
-            const points = [
-                { x: x1, y: y1 },
-                { x: x2, y: y1 },
-                { x: x2, y: y2 },
-                { x: x1, y: y2 }
-            ];
-            const roiId = prompt("ROI id?");
-            if (roiId !== null) {
-                let selectedModule = null;
-                if (modules.length > 0) {
-                    selectedModule = prompt("Module? (" + modules.join(", ") + ")");
+            } else if (currentTool === 'rect') {
+                if (!drawingRect) {
+                    rectStart = { x, y };
+                    drawingRect = true;
+                } else {
+                    rectEnd = { x, y };
+                    const x1 = Math.min(rectStart.x, rectEnd.x);
+                    const y1 = Math.min(rectStart.y, rectEnd.y);
+                    const x2 = Math.max(rectStart.x, rectEnd.x);
+                    const y2 = Math.max(rectStart.y, rectEnd.y);
+                    const points = [
+                        { x: x1, y: y1 },
+                        { x: x2, y: y1 },
+                        { x: x2, y: y2 },
+                        { x: x1, y: y2 }
+                    ];
+                    const roiId = prompt("ROI id?");
+                    if (roiId !== null) {
+                        let selectedModule = null;
+                        if (modules.length > 0) {
+                            selectedModule = prompt("Module? (" + modules.join(", ") + ")");
+                        }
+                        rois.push({ id: roiId, module: selectedModule, points });
+                        renderRoiList();
+                        fetch('/save_roi', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ rois: rois, source: currentSource })
+                        });
+                    }
+                    rectStart = null;
+                    rectEnd = null;
+                    drawingRect = false;
+                    hoverPoint = null;
                 }
-                rois.push({ id: roiId, module: selectedModule, points });
-                renderRoiList();
-                fetch('/save_roi', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ rois: rois, source: currentSource })
-                });
+
             }
             rectStart = null;
             rectEnd = null;
@@ -293,10 +295,8 @@
             const x = (e.clientX - rect.left) * scaleX;
             const y = (e.clientY - rect.top) * scaleY;
             if (drawingRect && rectStart && currentTool === 'rect') {
-                hoverPoint = {
-                    x: Math.max(rectStart.x, x),
-                    y: Math.max(rectStart.y, y)
-                };
+                hoverPoint = { x, y };
+
             } else if (currentPoints.length > 0 && currentTool === 'pick') {
                 hoverPoint = { x, y };
             } else {
@@ -372,16 +372,6 @@
                 ctx.lineWidth = 1;
                 ctx.strokeRect(x, y, w, h);
                 ctx.restore();
-            }
-            if (drawingRect && rectStart) {
-                const end = hoverPoint || rectStart;
-                ctx.beginPath();
-                ctx.rect(rectStart.x, rectStart.y, end.x - rectStart.x, end.y - rectStart.y);
-                ctx.strokeStyle = 'red';
-                ctx.lineWidth = 1;
-                ctx.setLineDash([5, 5]);
-                ctx.stroke();
-                ctx.setLineDash([]);
             }
         }
 
