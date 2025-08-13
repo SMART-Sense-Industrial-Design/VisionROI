@@ -28,6 +28,7 @@
 
         let currentSource = "";
         let groups = [];
+        let modules = [];
         let initialized = false;
         let isStreaming = false;
         let hasStarted = false;
@@ -77,6 +78,19 @@
             } catch (err) {
                 console.error('Failed to load groups', err);
                 groups = [];
+            }
+            renderRoiList();
+        }
+
+        // Load available inference modules from server
+        async function loadModules() {
+            try {
+                const res = await fetch('/inference_modules');
+                if (!res.ok) throw new Error('Bad response');
+                modules = await res.json();
+            } catch (err) {
+                console.error('Failed to load inference modules', err);
+                modules = [];
             }
             renderRoiList();
         }
@@ -357,7 +371,7 @@
             table.className = 'table table-striped table-sm';
             const thead = document.createElement('thead');
             const headerRow = document.createElement('tr');
-            ['ID', 'x', 'y', 'w', 'h', 'Group', 'Delete'].forEach(col => {
+            ['ID', 'x', 'y', 'w', 'h', 'Group', 'Inference Module', 'Delete'].forEach(col => {
                 const th = document.createElement('th');
                 th.textContent = col;
                 headerRow.appendChild(th);
@@ -389,6 +403,24 @@
                 input.addEventListener('change', e => updateRoiGroup(idx, e.target.value));
                 tdGroup.appendChild(input);
                 tr.appendChild(tdGroup);
+
+                const tdModule = document.createElement('td');
+                const select = document.createElement('select');
+                select.className = 'form-select form-select-sm';
+                const blank = document.createElement('option');
+                blank.value = '';
+                blank.textContent = '';
+                select.appendChild(blank);
+                modules.forEach(m => {
+                    const opt = document.createElement('option');
+                    opt.value = m;
+                    opt.textContent = m;
+                    if (r.module === m) opt.selected = true;
+                    select.appendChild(opt);
+                });
+                select.addEventListener('change', e => updateRoiModule(idx, e.target.value));
+                tdModule.appendChild(select);
+                tr.appendChild(tdModule);
 
                 const tdDel = document.createElement('td');
                 const delBtn = document.createElement('button');
@@ -468,6 +500,15 @@
             });
         }
 
+        function updateRoiModule(i, module) {
+            rois[i].module = module;
+            fetch('/save_roi', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ rois: rois, source: currentSource })
+            });
+        }
+
         function deleteRoi(i) {
             if (!confirm('Delete this ROI?')) return;
             rois.splice(i, 1);
@@ -494,6 +535,7 @@
         window.stopStream = stopStream;
         window.clearAllRois = clearAllRois;
         window.updateRoiGroup = updateRoiGroup;
+        window.updateRoiModule = updateRoiModule;
         window.deleteRoi = deleteRoi;
 
         window.addEventListener('beforeunload', () => {
@@ -503,6 +545,7 @@
         (async () => {
             await loadSources();
             await loadGroups();
+            await loadModules();
             await checkStatus();
             if (typeof showAlert === 'function') showAlert('ROI selection ready', 'success');
         })();
