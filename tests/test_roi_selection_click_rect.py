@@ -5,10 +5,10 @@ import textwrap
 from pathlib import Path
 
 
-def test_dblclick_creates_rectangle_and_saves():
+def test_click_creates_rectangle_and_saves():
     html = Path('templates/roi_selection.html').read_text()
-    match = re.search(r"frameContainer.addEventListener\('dblclick',\s*\(e\) => \{([\s\S]*?drawAllRois\(\);\n\s*)\}\);", html)
-    assert match, 'dblclick handler not found'
+    match = re.search(r"frameContainer.addEventListener\('click',\s*\(e\) => \{([\s\S]*?drawAllRois\(\);\n\s*)\}\);", html)
+    assert match, 'click handler not found'
     handler = match.group(1)
 
     script = textwrap.dedent("""
@@ -18,6 +18,8 @@ def test_dblclick_creates_rectangle_and_saves():
     let currentPoints = [];
     let currentSource = 'src';
     let fetchBody;
+    let hoverPoint = null;
+    let currentTool = 'rect';
     function renderRoiList(){}
     function drawAllRois(){}
     global.prompt = (msg) => {
