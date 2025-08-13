@@ -8,9 +8,15 @@
 <button id="clearBtn">Clear All</button>
 
 <br><br>
-<div id="frameContainer" style="position: relative; display: inline-block;">
-    <img id="video" />
-    <canvas id="canvas"></canvas>
+<div class="d-flex">
+    <div id="roiToolbar" class="btn-group-vertical me-2">
+        <button id="pickBtn" class="btn btn-primary">Pick Points</button>
+        <button id="rectBtn" class="btn btn-secondary">Rectangle</button>
+    </div>
+    <div id="frameContainer" style="position: relative; display: inline-block;">
+        <img id="video" />
+        <canvas id="canvas"></canvas>
+    </div>
 </div>
 
 <div id="roiList"></div>
@@ -25,6 +31,7 @@
         let rectStart = null;
         let rectEnd = null;
         let drawingRect = false;
+        let currentMode = 'points';
 
         let currentSource = "";
         let groups = [];
@@ -40,6 +47,32 @@
         const ctx = canvas.getContext("2d");
         const startBtn = document.getElementById("startBtn");
         const stopBtn = document.getElementById("stopBtn");
+        const pickBtn = document.getElementById("pickBtn");
+        const rectBtn = document.getElementById("rectBtn");
+
+        function setMode(mode) {
+            currentMode = mode;
+            if (mode === 'points') {
+                pickBtn.classList.add('btn-primary');
+                pickBtn.classList.remove('btn-secondary');
+                rectBtn.classList.add('btn-secondary');
+                rectBtn.classList.remove('btn-primary');
+            } else {
+                rectBtn.classList.add('btn-primary');
+                rectBtn.classList.remove('btn-secondary');
+                pickBtn.classList.add('btn-secondary');
+                pickBtn.classList.remove('btn-primary');
+            }
+            currentPoints = [];
+            rectStart = null;
+            rectEnd = null;
+            drawingRect = false;
+            hoverPoint = null;
+            drawAllRois();
+        }
+
+        pickBtn.addEventListener('click', () => setMode('points'));
+        rectBtn.addEventListener('click', () => setMode('rect'));
 
         video.onload = () => {
             if (!initialized || canvas.width !== video.naturalWidth || canvas.height !== video.naturalHeight) {
@@ -127,6 +160,7 @@
                 startBtn.disabled = true;
                 startBtn.textContent = "Start";
                 stopBtn.disabled = false;
+                setMode('points');
             } else {
                 startBtn.disabled = false;
                 startBtn.textContent = "Start";
@@ -169,6 +203,7 @@
             }
             openSocket();
             await loadRois();
+            setMode('points');
             isStreaming = true;
             stopBtn.disabled = false;
             startBtn.textContent = "Start";
@@ -191,72 +226,64 @@
         }
 
         frameContainer.addEventListener('click', (e) => {
-            if (drawingRect) return;
             const rect = frameContainer.getBoundingClientRect();
             const scaleX = canvas.width / rect.width;
             const scaleY = canvas.height / rect.height;
             const x = (e.clientX - rect.left) * scaleX;
             const y = (e.clientY - rect.top) * scaleY;
 
-            currentPoints.push({ x, y });
-            if (currentPoints.length === 4) {
-                const roiId = prompt("ROI id?");
-                if (roiId !== null) {
-                    const groupId = prompt("Group id?");
-                    rois.push({
-                        id: roiId,
-                        group: groupId,
-                        module: "",
-                        points: currentPoints.slice()
-                    });
-                    renderRoiList();
-                    fetch('/save_roi', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ rois: rois, source: currentSource })
-                    });
+            if (currentMode === 'points') {
+                currentPoints.push({ x, y });
+                if (currentPoints.length === 4) {
+                    const roiId = prompt("ROI id?");
+                    if (roiId !== null) {
+                        const groupId = prompt("Group id?");
+                        rois.push({
+                            id: roiId,
+                            group: groupId,
+                            module: "",
+                            points: currentPoints.slice()
+                        });
+                        renderRoiList();
+                        fetch('/save_roi', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ rois: rois, source: currentSource })
+                        });
+                    }
+                    currentPoints = [];
                 }
-                currentPoints = [];
-            }
-            drawAllRois();
-        });
-
-        frameContainer.addEventListener('dblclick', (e) => {
-            currentPoints = [];
-            const rect = frameContainer.getBoundingClientRect();
-            const scaleX = canvas.width / rect.width;
-            const scaleY = canvas.height / rect.height;
-            const x = (e.clientX - rect.left) * scaleX;
-            const y = (e.clientY - rect.top) * scaleY;
-            if (!rectStart) {
-                rectStart = { x, y };
-                drawingRect = true;
-            } else if (drawingRect) {
-                rectEnd = { x, y };
-                const x1 = Math.min(rectStart.x, rectEnd.x);
-                const y1 = Math.min(rectStart.y, rectEnd.y);
-                const x2 = Math.max(rectStart.x, rectEnd.x);
-                const y2 = Math.max(rectStart.y, rectEnd.y);
-                const points = [
-                    { x: x1, y: y1 },
-                    { x: x2, y: y1 },
-                    { x: x2, y: y2 },
-                    { x: x1, y: y2 }
-                ];
-                const roiId = prompt("ROI id?");
-                if (roiId !== null) {
-                    const groupId = prompt("Group id?");
-                    rois.push({ id: roiId, group: groupId, module: "", points });
-                    renderRoiList();
-                    fetch('/save_roi', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ rois: rois, source: currentSource })
-                    });
+            } else if (currentMode === 'rect') {
+                if (!rectStart) {
+                    rectStart = { x, y };
+                    drawingRect = true;
+                } else if (drawingRect) {
+                    rectEnd = { x, y };
+                    const x1 = Math.min(rectStart.x, rectEnd.x);
+                    const y1 = Math.min(rectStart.y, rectEnd.y);
+                    const x2 = Math.max(rectStart.x, rectEnd.x);
+                    const y2 = Math.max(rectStart.y, rectEnd.y);
+                    const points = [
+                        { x: x1, y: y1 },
+                        { x: x2, y: y1 },
+                        { x: x2, y: y2 },
+                        { x: x1, y: y2 }
+                    ];
+                    const roiId = prompt("ROI id?");
+                    if (roiId !== null) {
+                        const groupId = prompt("Group id?");
+                        rois.push({ id: roiId, group: groupId, module: "", points });
+                        renderRoiList();
+                        fetch('/save_roi', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ rois: rois, source: currentSource })
+                        });
+                    }
+                    rectStart = null;
+                    rectEnd = null;
+                    drawingRect = false;
                 }
-                rectStart = null;
-                rectEnd = null;
-                drawingRect = false;
             }
             drawAllRois();
         });
@@ -267,12 +294,12 @@
             const scaleY = canvas.height / rect.height;
             const x = (e.clientX - rect.left) * scaleX;
             const y = (e.clientY - rect.top) * scaleY;
-            if (drawingRect && rectStart) {
+            if (currentMode === 'rect' && drawingRect && rectStart) {
                 hoverPoint = {
                     x: Math.max(rectStart.x, x),
                     y: Math.max(rectStart.y, y)
                 };
-            } else if (currentPoints.length > 0) {
+            } else if (currentMode === 'points' && currentPoints.length > 0) {
                 hoverPoint = { x, y };
             } else {
                 hoverPoint = null;
@@ -282,7 +309,7 @@
 
         frameContainer.addEventListener('mouseleave', () => {
             hoverPoint = null;
-            if (drawingRect) {
+            if (currentMode === 'rect' && drawingRect) {
                 drawingRect = false;
                 rectStart = null;
             }
@@ -541,6 +568,8 @@
         window.addEventListener('beforeunload', () => {
             stopStream();
         });
+
+        setMode('points');
 
         (async () => {
             await loadSources();
