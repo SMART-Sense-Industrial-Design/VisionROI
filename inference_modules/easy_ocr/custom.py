@@ -93,6 +93,7 @@ def _run_ocr_async(frame, roi_id, save, source) -> None:
     except Exception as e:  # pragma: no cover - log any OCR error
         logger.exception(f"roi_id={roi_id} OCR error: {e}")
 
+    save = False
     if save:
         base_dir = _data_sources_root / source if source else Path(__file__).resolve().parent
         roi_folder = f"{roi_id}" if roi_id is not None else "roi"
@@ -117,7 +118,7 @@ def process(frame, roi_id=None, save: bool = False, source: str = ""):
     with _last_ocr_lock:
         last_time = last_ocr_times.get(roi_id)
         diff_time = 0 if last_time is None else current_time - last_time
-        if last_time is None or diff_time >= 2:
+        if last_time is None or diff_time >= 3:
             last_ocr_times[roi_id] = current_time
             should_ocr = True
         else:
