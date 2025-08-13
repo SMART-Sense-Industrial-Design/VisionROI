@@ -125,7 +125,7 @@
             });
         }
 
-        function loadGroupOptions(list) {
+        function loadGroupOptions(list, selected = '') {
             groupSelect.innerHTML = '';
             const optSelect = document.createElement('option');
             optSelect.value = '';
@@ -144,8 +144,8 @@
                 opt.textContent = g;
                 groupSelect.appendChild(opt);
             });
-            groupSelect.value = '';
-            localStorage.removeItem(`${cellId}-group`);
+            const stored = selected || localStorage.getItem(`${cellId}-group`) || '';
+            groupSelect.value = stored;
         }
 
         async function startInference(roisOverride = null, selectedGroup = '') {
@@ -185,11 +185,12 @@
             const data = await res.json();
             statusEl.innerText = 'Loaded: ' + data.filename;
             allRois = data.rois || [];
-            loadGroupOptions(allRois);
-            groupSelect.value = selectedGroup;
             if (selectedGroup) {
                 localStorage.setItem(`${cellId}-group`, selectedGroup);
+            } else {
+                localStorage.removeItem(`${cellId}-group`);
             }
+            loadGroupOptions(allRois, selectedGroup);
             rois = roisOverride || (selectedGroup && selectedGroup !== 'all'
                 ? allRois.filter(r => r.group === selectedGroup)
                 : selectedGroup === 'all' ? allRois : []);
@@ -287,8 +288,7 @@
                 const roiData = await roiRes.json();
                 allRois = roiData.rois || [];
                 loadGroupOptions(allRois);
-                const stored = localStorage.getItem(`${cellId}-group`) || '';
-                groupSelect.value = stored;
+                const stored = groupSelect.value;
                 rois = stored === 'all' ? allRois : stored ? allRois.filter(r => r.group === stored) : [];
                 if (rois.length > 0) {
                     renderRoiPlaceholders();
