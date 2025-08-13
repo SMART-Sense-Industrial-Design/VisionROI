@@ -172,8 +172,9 @@ async def run_inference_loop(cam_id: int):
             pts = r.get("points", [])
             if len(pts) != 4:
                 continue
-            mod_name = r.get("module") or default_module
+            mod_name = r.get("module")
             if not mod_name:
+                print(f"module missing for ROI {r.get('id', i)}")
                 continue
             module_entry = module_cache.get(mod_name)
             if module_entry is None:
@@ -479,7 +480,8 @@ async def start_inference(cam_id: int):
         return jsonify({"status": "roi_running", "cam_id": cam_id}), 400
     data = await request.get_json() or {}
     rois = data.get("rois")
-    if not rois:
+    # เมื่อ rois เป็น None (ไม่ได้ส่งมาจาก client) ให้โหลดจากไฟล์﻿
+    if rois is None:
         source = active_sources.get(cam_id, "")
         source_dir = os.path.join("data_sources", source)
         rois_path = os.path.join(source_dir, "rois.json")

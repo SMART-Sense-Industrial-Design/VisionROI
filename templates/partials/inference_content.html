@@ -14,6 +14,7 @@
         </div>
     </div>
     <div class="card roi-card">
+        <select id="cam1-groupSelect" class="form-select mb-2"></select>
         <div id="cam1-rois" class="roi-grid"></div>
     </div>
 </div>
@@ -31,6 +32,7 @@
         </div>
     </div>
     <div class="card roi-card">
+        <select id="cam2-groupSelect" class="form-select mb-2"></select>
         <div id="cam2-rois" class="roi-grid"></div>
     </div>
 </div>
@@ -40,6 +42,7 @@
         let socket;
         let roiSocket;
         let rois = [];
+        let allRois = [];
         let running = false;
         const cam = cellId.replace(/\D/g, '');
         const getEl = suffix => document.getElementById(`${cellId}-${suffix}`);
@@ -51,9 +54,11 @@
         const sourceSelect = getEl('sourceSelect');
         const groupSelect = getEl('groupSelect');
         const roiGrid = getEl('rois');
+        const groupSelect = getEl('groupSelect');
 
         startButton.onclick = startInference;
         stopButton.onclick = stopInference;
+        groupSelect.onchange = switchGroup;
 
         async function fetchWithStatus(url, options = {}) {
             statusEl.innerText = 'กำลังโหลด...';
@@ -102,9 +107,9 @@
             }
         }
 
-        function renderRoiPlaceholders() {
+        function renderRoiPlaceholders(list = rois) {
             roiGrid.innerHTML = '';
-            rois.forEach(r => {
+            list.forEach(r => {
                 const item = document.createElement('div');
                 item.className = 'roi-item';
                 const title = document.createElement('h4');
@@ -126,6 +131,7 @@
         function loadGroupOptions(rois) {
             groupSelect.innerHTML = '';
             const groups = Array.from(new Set(rois.map(r => r.group).filter(g => g !== undefined && g !== null && g !== '')));
+
             groups.forEach(g => {
                 const opt = document.createElement('option');
                 opt.value = g;
@@ -135,6 +141,7 @@
         }
 
         async function startInference() {
+
             if (running) return;
             running = true;
             startButton.disabled = true;
@@ -148,11 +155,6 @@
             }
             const cfgRes = await fetchWithStatus(`/source_config?name=${encodeURIComponent(name)}`);
             const cfg = await cfgRes.json();
-
-            let roiPath = cfg.rois;
-            if (!roiPath.startsWith('/')) {
-                roiPath = `data_sources/${cfg.name}/${roiPath}`;
-            }
 
             const { module, ...cfgNoModule } = cfg;
             const camRes = await fetchWithStatus(`/set_camera/${cam}`, {
@@ -175,10 +177,11 @@
             loadGroupOptions(rois);
             renderRoiPlaceholders();
 
+
             const startRes = await fetchWithStatus(`/start_inference/${cam}`, {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ rois })
+                body: JSON.stringify({ rois: roiList })
             });
             const startData = await startRes.json();
             if (startData.status === 'started' || startData.status === 'already_running') {
@@ -260,7 +263,9 @@
                 const roiData = await roiRes.json();
                 rois = roiData.rois;
                 loadGroupOptions(rois);
+
                 renderRoiPlaceholders();
+                populateGroupSelect();
                 setRunningUI();
                 running = true;
             } else {
@@ -270,6 +275,15 @@
                 stopButton.disabled = true;
                 running = false;
             }
+        }
+
+        async function switchGroup() {
+            const selected = groupSelect.value;
+            const filtered = selected === 'all' ? allRois : allRois.filter(r => r.group === selected);
+            await stopInference();
+            rois = filtered;
+            renderRoiPlaceholders();
+            await startInference(rois);
         }
 
         function setRunningUI() {
