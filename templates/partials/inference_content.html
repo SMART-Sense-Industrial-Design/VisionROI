@@ -6,7 +6,6 @@
             <select id="cam1-sourceSelect" class="form-select mb-2"></select>
             <button id="cam1-startButton" class="btn btn-primary me-2">Start</button>
             <button id="cam1-stopButton" class="btn btn-danger" disabled>Stop</button>
-            <select id="cam1-groupSelect" class="form-select mb-2"></select>
             <p id="cam1-status"></p>
             <div class="video-wrapper">
                 <img id="cam1-video" width="320" height="240" />
@@ -24,7 +23,6 @@
             <select id="cam2-sourceSelect" class="form-select mb-2"></select>
             <button id="cam2-startButton" class="btn btn-primary me-2">Start</button>
             <button id="cam2-stopButton" class="btn btn-danger" disabled>Stop</button>
-            <select id="cam2-groupSelect" class="form-select mb-2"></select>
             <p id="cam2-status"></p>
             <div class="video-wrapper">
                 <img id="cam2-video" width="320" height="240" />
@@ -54,7 +52,6 @@
         const sourceSelect = getEl('sourceSelect');
         const groupSelect = getEl('groupSelect');
         const roiGrid = getEl('rois');
-        const groupSelect = getEl('groupSelect');
 
         startButton.onclick = startInference;
         stopButton.onclick = stopInference;
