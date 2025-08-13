@@ -5,7 +5,7 @@ import textwrap
 from pathlib import Path
 
 
-def test_mousemove_updates_hover_point_for_polygon():
+def test_mousemove_updates_hover_point_for_rectangle():
     html = Path('templates/roi_selection.html').read_text()
     match = re.search(r"frameContainer.addEventListener\('mousemove',\s*\(e\) => \{([\s\S]*?)\}\);", html)
     assert match, 'mousemove handler not found'
@@ -13,14 +13,14 @@ def test_mousemove_updates_hover_point_for_polygon():
 
     script = textwrap.dedent("""
     let hoverPoint = null;
-    let currentPoints = [{x:10, y:10}];
-    let drawingRect = false;
-    let rectStart = null;
-    let currentTool = 'pick';
+    let currentPoints = [];
+    let drawingRect = true;
+    let rectStart = {x:10, y:20};
+    let currentTool = 'rect';
     const frameContainer = { getBoundingClientRect: () => ({left:0, top:0, width:100, height:100}) };
     const canvas = { width:100, height:100 };
     function drawAllRois(){}
-    function handler(e) {
+    function handler(e){
     {handler}
     }
     handler({clientX:50, clientY:60});

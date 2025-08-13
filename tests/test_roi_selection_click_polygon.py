@@ -16,7 +16,11 @@ def test_click_creates_polygon_and_saves():
     let modules = ['m1'];
     let currentPoints = [];
     let drawingRect = false;
+    let rectStart = null;
+    let rectEnd = null;
+    let hoverPoint = null;
     let currentSource = 'src';
+    let currentTool = 'pick';
     let fetchBody;
     function renderRoiList(){}
     function drawAllRois(){}
