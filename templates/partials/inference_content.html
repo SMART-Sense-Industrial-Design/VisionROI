@@ -140,9 +140,11 @@
                 opt.textContent = g;
                 groupSelect.appendChild(opt);
             });
+            const stored = localStorage.getItem(`${cellId}-group`) || 'all';
+            groupSelect.value = stored;
         }
 
-        async function startInference(roisOverride = null, selectedGroup = 'all') {
+        async function startInference(roisOverride = null, selectedGroup = localStorage.getItem(`${cellId}-group`) || 'all') {
             if (running) return;
             running = true;
             startButton.disabled = true;
@@ -181,6 +183,7 @@
             allRois = data.rois || [];
             loadGroupOptions(allRois);
             groupSelect.value = selectedGroup;
+            localStorage.setItem(`${cellId}-group`, selectedGroup);
             rois = roisOverride || (selectedGroup === 'all' ? allRois : allRois.filter(r => r.group === selectedGroup));
             renderRoiPlaceholders();
 
@@ -269,8 +272,9 @@
                 const roiData = await roiRes.json();
                 allRois = roiData.rois || [];
                 loadGroupOptions(allRois);
-                groupSelect.value = 'all';
-                rois = allRois;
+                const stored = localStorage.getItem(`${cellId}-group`) || 'all';
+                groupSelect.value = stored;
+                rois = stored === 'all' ? allRois : allRois.filter(r => r.group === stored);
                 renderRoiPlaceholders();
                 setRunningUI();
                 running = true;
@@ -285,6 +289,7 @@
 
         async function switchGroup() {
             const selected = groupSelect.value;
+            localStorage.setItem(`${cellId}-group`, selected);
             const filtered = selected === 'all' ? allRois : allRois.filter(r => r.group === selected);
             await stopInference();
             await startInference(filtered, selected);
