@@ -14,6 +14,10 @@
     <img id="video" />
     <canvas id="canvas"></canvas>
 </div>
+<div id="toolMenu" style="display:inline-block; vertical-align: top; margin-left:10px;">
+    <button id="pickToolBtn">Pick Points</button>
+    <button id="rectToolBtn">Rectangle</button>
+</div>
 
 <div id="roiList"></div>
 
@@ -39,12 +43,14 @@
         const canvas = document.getElementById("canvas");
         const frameContainer = document.getElementById("frameContainer");
         const ctx = canvas.getContext("2d");
+
         const pickToolBtn = document.getElementById("pickToolBtn");
         const rectToolBtn = document.getElementById("rectToolBtn");
 
         pickToolBtn.classList.add('active');
         pickToolBtn.addEventListener('click', (e) => {
             e.stopPropagation();
+
             currentTool = 'pick';
             currentPoints = [];
             drawingRect = false;
@@ -61,6 +67,7 @@
             drawingRect = false;
             rectStart = null;
             hoverPoint = null;
+
             pickToolBtn.classList.remove('active');
             rectToolBtn.classList.add('active');
             drawAllRois();
@@ -183,6 +190,7 @@
         }
 
         frameContainer.addEventListener('click', (e) => {
+
             const rect = frameContainer.getBoundingClientRect();
             const scaleX = canvas.width / rect.width;
             const scaleY = canvas.height / rect.height;
@@ -247,7 +255,12 @@
                     drawingRect = false;
                     hoverPoint = null;
                 }
+
             }
+            rectStart = null;
+            rectEnd = null;
+            drawingRect = false;
+            hoverPoint = null;
             drawAllRois();
         });
 
@@ -259,6 +272,7 @@
             const y = (e.clientY - rect.top) * scaleY;
             if (drawingRect && rectStart && currentTool === 'rect') {
                 hoverPoint = { x, y };
+
             } else if (currentPoints.length > 0 && currentTool === 'pick') {
                 hoverPoint = { x, y };
             } else {
