@@ -15,7 +15,7 @@ def test_inference_switches_module_by_group(monkeypatch):
 
     def make_mod(name):
         mod = types.SimpleNamespace()
-        def process(frame, roi_id=None, save=False, source=""):
+        def process(frame, roi_id=None, save=False, source="", cam_id=None):
             calls.append((name, roi_id))
         mod.process = process
         return mod

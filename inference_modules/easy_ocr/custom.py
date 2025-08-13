@@ -103,11 +103,24 @@ def _run_ocr_async(frame, roi_id, save, source) -> None:
         _save_image_async(str(path), frame)
 
 
-def process(frame, roi_id=None, save: bool = False, source: str = ""):
+def process(
+    frame,
+    roi_id=None,
+    save: bool = False,
+    source: str = "",
+    cam_id: int | None = None,
+):
     """ประมวลผล ROI และเรียก OCR เมื่อเวลาห่างจากครั้งก่อน >= 2 วินาที
     บันทึกรูปภาพแบบไม่บล็อกเมื่อระบุให้บันทึก"""
 
     _configure_logger(source)
+
+    if cam_id is not None:
+        try:
+            import app  # type: ignore
+            app.save_roi_flags[cam_id] = True
+        except Exception:  # pragma: no cover
+            pass
 
     if isinstance(frame, Image.Image) and np is not None:
         frame = cv2.cvtColor(np.array(frame), cv2.COLOR_RGB2BGR)
