@@ -127,6 +127,10 @@
 
         function loadGroupOptions(list) {
             groupSelect.innerHTML = '';
+            const optSelect = document.createElement('option');
+            optSelect.value = '';
+            optSelect.textContent = '-- Select --';
+            groupSelect.appendChild(optSelect);
             const optAll = document.createElement('option');
             optAll.value = 'all';
             optAll.textContent = 'All';
@@ -140,11 +144,11 @@
                 opt.textContent = g;
                 groupSelect.appendChild(opt);
             });
-            const stored = localStorage.getItem(`${cellId}-group`) || 'all';
-            groupSelect.value = stored;
+            groupSelect.value = '';
+            localStorage.removeItem(`${cellId}-group`);
         }
 
-        async function startInference(roisOverride = null, selectedGroup = localStorage.getItem(`${cellId}-group`) || 'all') {
+        async function startInference(roisOverride = null, selectedGroup = '') {
             if (running) return;
             running = true;
             startButton.disabled = true;
@@ -183,9 +187,17 @@
             allRois = data.rois || [];
             loadGroupOptions(allRois);
             groupSelect.value = selectedGroup;
-            localStorage.setItem(`${cellId}-group`, selectedGroup);
-            rois = roisOverride || (selectedGroup === 'all' ? allRois : allRois.filter(r => r.group === selectedGroup));
-            renderRoiPlaceholders();
+            if (selectedGroup) {
+                localStorage.setItem(`${cellId}-group`, selectedGroup);
+            }
+            rois = roisOverride || (selectedGroup && selectedGroup !== 'all'
+                ? allRois.filter(r => r.group === selectedGroup)
+                : selectedGroup === 'all' ? allRois : []);
+            if (rois.length > 0) {
+                renderRoiPlaceholders();
+            } else {
+                roiGrid.innerHTML = '';
+            }
 
             const startRes = await fetchWithStatus(`/start_inference/${cam}`, {
                 method: 'POST',
@@ -195,9 +207,13 @@
             const startData = await startRes.json();
             if (startData.status === 'started' || startData.status === 'already_running') {
                 openSocket();
-                openRoiSocket();
+                if (rois.length > 0) {
+                    openRoiSocket();
+                    showAlert('Inference started', 'success');
+                } else {
+                    showAlert('Camera started', 'success');
+                }
                 setRunningUI();
-                showAlert('Inference started', 'success');
             } else {
                 running = false;
                 startButton.disabled = false;
@@ -261,7 +277,6 @@
             const data = await res.json();
             if (data.running && name) {
                 openSocket();
-                openRoiSocket();
                 const cfgRes = await fetchWithStatus(`/source_config?name=${encodeURIComponent(name)}`);
                 const cfg = await cfgRes.json();
                 let roiPath = cfg.rois;
@@ -272,10 +287,13 @@
                 const roiData = await roiRes.json();
                 allRois = roiData.rois || [];
                 loadGroupOptions(allRois);
-                const stored = localStorage.getItem(`${cellId}-group`) || 'all';
+                const stored = localStorage.getItem(`${cellId}-group`) || '';
                 groupSelect.value = stored;
-                rois = stored === 'all' ? allRois : allRois.filter(r => r.group === stored);
-                renderRoiPlaceholders();
+                rois = stored === 'all' ? allRois : stored ? allRois.filter(r => r.group === stored) : [];
+                if (rois.length > 0) {
+                    renderRoiPlaceholders();
+                    openRoiSocket();
+                }
                 setRunningUI();
                 running = true;
             } else {
@@ -289,6 +307,7 @@
 
         async function switchGroup() {
             const selected = groupSelect.value;
+            if (!selected) return;
             localStorage.setItem(`${cellId}-group`, selected);
             const filtered = selected === 'all' ? allRois : allRois.filter(r => r.group === selected);
             await stopInference();
