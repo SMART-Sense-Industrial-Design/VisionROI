@@ -13,7 +13,6 @@ def test_dblclick_creates_rectangle_and_saves():
 
     script = textwrap.dedent("""
     let rois = [];
-    let modules = ['m1'];
     let rectStart = null, rectEnd = null, drawingRect = false;
     let currentPoints = [];
     let currentSource = 'src';
@@ -22,7 +21,7 @@ def test_dblclick_creates_rectangle_and_saves():
     function drawAllRois(){}
     global.prompt = (msg) => {
         if (msg === 'ROI id?') return '1';
-        if (msg.startsWith('Module?')) return 'm1';
+        if (msg === 'Group id?') return 'g1';
         return null;
     };
     global.fetch = (url, opts) => { fetchBody = opts.body; return Promise.resolve({}); };
@@ -44,5 +43,9 @@ def test_dblclick_creates_rectangle_and_saves():
     assert pts[1] == {'x': 50, 'y': 20}
     assert pts[2] == {'x': 50, 'y': 60}
     assert pts[3] == {'x': 10, 'y': 60}
+    assert data['rois'][0]['group'] == 'g1'
+    assert data['rois'][0]['module'] == ''
     payload = json.loads(data['fetchBody'])
     assert payload['rois'][0]['points'] == pts
+    assert payload['rois'][0]['group'] == 'g1'
+    assert payload['rois'][0]['module'] == ''

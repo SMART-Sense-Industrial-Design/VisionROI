@@ -579,6 +579,30 @@ async def list_inference_modules():
     return jsonify(names)
 
 
+@app.route("/groups")
+async def list_groups():
+    base_dir = Path(__file__).resolve().parent / "data_sources"
+    groups: set[str] = set()
+    try:
+        for d in base_dir.iterdir():
+            if not d.is_dir():
+                continue
+            roi_path = d / "rois.json"
+            if not roi_path.exists():
+                continue
+            try:
+                data = json.loads(roi_path.read_text())
+                for r in data:
+                    g = r.get("group")
+                    if g:
+                        groups.add(str(g))
+            except Exception:
+                continue
+    except FileNotFoundError:
+        pass
+    return jsonify(sorted(groups))
+
+
 @app.route("/source_list", methods=["GET"])
 async def source_list():
     base_dir = Path(__file__).resolve().parent / "data_sources"
