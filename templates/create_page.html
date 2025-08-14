@@ -143,9 +143,9 @@
       nameTd.appendChild(input);
       const actionTd = document.createElement('td');
       const btn = document.createElement('button');
-      btn.textContent = 'Create Page';
+      btn.textContent = 'Crop Frame';
       btn.className = 'btn btn-primary btn-sm';
-      btn.addEventListener('click', () => createPage(i));
+      btn.addEventListener('click', () => cropFrame(i));
       actionTd.appendChild(btn);
       tr.appendChild(idTd);
       tr.appendChild(nameTd);
@@ -205,7 +205,7 @@
     });
   }
 
-  async function createPage(i){
+  async function cropFrame(i){
     const nameInput = document.getElementById(`name_${i}`);
     const pageName = nameInput.value.trim();
     if (!pageName) {
@@ -247,7 +247,7 @@
       body: JSON.stringify({ rois: all, source: currentSource })
     });
     if (saveRes.ok) {
-      if (typeof showAlert === 'function') showAlert('Page created', 'success');
+      if (typeof showAlert === 'function') showAlert('Cropped and saved', 'success');
       rois.splice(i, 1);
       renderTable();
       drawAll();
