@@ -3,6 +3,7 @@ from pathlib import Path
 from typing import Dict, Any
 
 STATE_FILE = Path(__file__).resolve().parent / "state.json"
+ALLOWED_KEYS = ("active_sources", "active_modules", "inference_started")
 
 
 def load_state() -> Dict[str, Dict[int, Any]]:
@@ -12,7 +13,7 @@ def load_state() -> Dict[str, Dict[int, Any]]:
     except (FileNotFoundError, json.JSONDecodeError):
         return {"active_sources": {}, "active_modules": {}, "inference_started": {}}
     result: Dict[str, Dict[int, Any]] = {}
-    for key in ("active_sources", "active_modules", "inference_started"):
+    for key in ALLOWED_KEYS:
         raw = data.get(key, {})
         if isinstance(raw, dict):
             try:
@@ -24,6 +25,26 @@ def load_state() -> Dict[str, Dict[int, Any]]:
                 result[key] = {}
         else:
             result[key] = {}
+    if any(k not in ALLOWED_KEYS for k in data.keys()):
+        try:
+            with STATE_FILE.open("w", encoding="utf-8") as f:
+                json.dump(
+                    {
+                        "active_sources": {
+                            str(k): v for k, v in result.get("active_sources", {}).items()
+                        },
+                        "active_modules": {
+                            str(k): v for k, v in result.get("active_modules", {}).items()
+                        },
+                        "inference_started": {
+                            str(k): bool(v)
+                            for k, v in result.get("inference_started", {}).items()
+                        },
+                    },
+                    f,
+                )
+        except Exception:
+            pass
     return result
 
 
