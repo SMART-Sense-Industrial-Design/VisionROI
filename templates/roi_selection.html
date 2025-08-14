@@ -234,22 +234,20 @@
             if (currentMode === 'points') {
                 currentPoints.push({ x, y });
                 if (currentPoints.length === 4) {
-                    const roiId = prompt("ROI id?");
-                    if (roiId !== null) {
-                        const groupId = prompt("Group id?");
-                        rois.push({
-                            id: roiId,
-                            group: groupId,
-                            module: "",
-                            points: currentPoints.slice()
-                        });
-                        renderRoiList();
-                        fetch('/save_roi', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ rois: rois, source: currentSource })
-                        });
-                    }
+                    const roiId = `roi_${Date.now()}`;
+                    const groupId = 'main';
+                    rois.push({
+                        id: roiId,
+                        group: groupId,
+                        module: "",
+                        points: currentPoints.slice()
+                    });
+                    renderRoiList();
+                    fetch('/save_roi', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ rois: rois, source: currentSource })
+                    });
                     currentPoints = [];
                 }
             } else if (currentMode === 'rect') {
@@ -268,17 +266,15 @@
                         { x: x2, y: y2 },
                         { x: x1, y: y2 }
                     ];
-                    const roiId = prompt("ROI id?");
-                    if (roiId !== null) {
-                        const groupId = prompt("Group id?");
-                        rois.push({ id: roiId, group: groupId, module: "", points });
-                        renderRoiList();
-                        fetch('/save_roi', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ rois: rois, source: currentSource })
-                        });
-                    }
+                    const roiId = `roi_${Date.now()}`;
+                    const groupId = 'main';
+                    rois.push({ id: roiId, group: groupId, module: "", points });
+                    renderRoiList();
+                    fetch('/save_roi', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ rois: rois, source: currentSource })
+                    });
                     rectStart = null;
                     rectEnd = null;
                     drawingRect = false;
