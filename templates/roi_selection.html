@@ -25,6 +25,7 @@
     (function() {
         let socket;
         let rois = [];
+        let otherRois = [];
         let currentPoints = [];
         let hoverPoint = null;
 
@@ -232,13 +233,14 @@
                         id: roiId,
                         group: groupId,
                         module: "",
-                        points: currentPoints.slice()
+                        points: currentPoints.slice(),
+                        type: 'roi'
                     });
                     renderRoiList();
                     fetch('/save_roi', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ rois: rois, source: currentSource })
+                        body: JSON.stringify({ rois: rois.concat(typeof otherRois !== 'undefined' ? otherRois : []), source: currentSource })
                     });
                     currentPoints = [];
                 }
@@ -260,12 +262,12 @@
                     ];
                     const roiId = `roi_${Date.now()}`;
                     const groupId = 'main';
-                    rois.push({ id: roiId, group: groupId, module: "", points });
+                    rois.push({ id: roiId, group: groupId, module: "", points, type: 'roi' });
                     renderRoiList();
                     fetch('/save_roi', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ rois: rois, source: currentSource })
+                        body: JSON.stringify({ rois: rois.concat(typeof otherRois !== 'undefined' ? otherRois : []), source: currentSource })
                     });
                     rectStart = null;
                     rectEnd = null;
@@ -459,23 +461,27 @@
             }
             const res = await fetch(`/load_roi/${encodeURIComponent(currentSource)}`);
             const data = await res.json();
-            rois = data.rois.map((r, idx) => {
-                let pts = r.points;
-                if (!pts && "x" in r && "y" in r && "width" in r && "height" in r) {
-                    pts = [
-                        { x: r.x, y: r.y },
-                        { x: r.x + r.width, y: r.y },
-                        { x: r.x + r.width, y: r.y + r.height },
-                        { x: r.x, y: r.y + r.height }
-                    ];
-                }
-                return {
-                    id: r.id ?? String(idx + 1),
-                    group: r.group ?? null,
-                    module: r.module ?? "",
-                    points: pts || []
-                };
-            });
+            otherRois = data.rois.filter(r => (r.type ?? 'roi') !== 'roi');
+            rois = data.rois
+                .filter(r => (r.type ?? 'roi') === 'roi')
+                .map((r, idx) => {
+                    let pts = r.points;
+                    if (!pts && "x" in r && "y" in r && "width" in r && "height" in r) {
+                        pts = [
+                            { x: r.x, y: r.y },
+                            { x: r.x + r.width, y: r.y },
+                            { x: r.x + r.width, y: r.y + r.height },
+                            { x: r.x, y: r.y + r.height }
+                        ];
+                    }
+                    return {
+                        id: r.id ?? String(idx + 1),
+                        group: r.group ?? null,
+                        module: r.module ?? "",
+                        points: pts || [],
+                        type: 'roi'
+                    };
+                });
             currentPoints = [];
             drawAllRois();
             renderRoiList();
@@ -496,7 +502,7 @@
             fetch(`/save_roi`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ rois: rois, source: currentSource })
+                body: JSON.stringify({ rois: rois.concat(typeof otherRois !== 'undefined' ? otherRois : []), source: currentSource })
             })
             .then(res => res.json())
             .then(data => {
@@ -510,7 +516,7 @@
             fetch('/save_roi', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ rois: rois, source: currentSource })
+                body: JSON.stringify({ rois: rois.concat(typeof otherRois !== 'undefined' ? otherRois : []), source: currentSource })
             });
         }
 
@@ -519,7 +525,7 @@
             fetch('/save_roi', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ rois: rois, source: currentSource })
+                body: JSON.stringify({ rois: rois.concat(typeof otherRois !== 'undefined' ? otherRois : []), source: currentSource })
             });
         }
 
@@ -532,7 +538,7 @@
             fetch(`/save_roi`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ rois: rois, source: currentSource })
+                body: JSON.stringify({ rois: rois.concat(typeof otherRois !== 'undefined' ? otherRois : []), source: currentSource })
             })
             .then(res => res.json())
             .then(data => {
