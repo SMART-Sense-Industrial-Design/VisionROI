@@ -608,6 +608,7 @@ async def resume_from_state() -> None:
             continue
         # หากไม่ได้ระบุชื่อ source ใน cfg ให้ใช้ค่าที่บันทึกไว้
         cfg.setdefault("name", active_sources.get(cam_id, ""))
+
         try:
             resp, status = await apply_set_camera(cam_id, cfg)
             if status != 200:
