@@ -662,7 +662,8 @@ async def stop_roi_stream(cam_id: int):
 async def inference_status(cam_id: int):
     """คืนค่าความพร้อมของงาน inference"""
     running = inference_tasks.get(cam_id) is not None and not inference_tasks[cam_id].done()
-    return jsonify({"running": running, "cam_id": cam_id})
+    source = active_sources.get(cam_id, "")
+    return jsonify({"running": running, "cam_id": cam_id, "source": source})
 
 
 # ✅ สถานะงาน ROI stream
