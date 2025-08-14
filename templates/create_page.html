@@ -26,6 +26,7 @@
   let currentPoints = [];
   let previewRect = null;
   let hoverPoint = null;
+
   let initialized = false;
   let currentSource = "";
   const cam = 1;
@@ -87,6 +88,7 @@
     const x = Math.round(e.clientX - rect.left);
     const y = Math.round(e.clientY - rect.top);
     if (currentPoints.length === 1) {
+
       const x1 = Math.min(currentPoints[0].x, x);
       const y1 = Math.min(currentPoints[0].y, y);
       const x2 = Math.max(currentPoints[0].x, x);
@@ -102,6 +104,7 @@
   canvas.addEventListener('mouseleave', () => {
     hoverPoint = null;
     drawAll();
+
   });
 
   function drawAll(){
@@ -117,6 +120,7 @@
       ctx.arc(hoverPoint.x, hoverPoint.y, 3, 0, Math.PI * 2);
       ctx.fill();
     }
+
     if (previewRect) {
       ctx.setLineDash([5, 3]);
       ctx.strokeRect(previewRect.x, previewRect.y, previewRect.width, previewRect.height);
