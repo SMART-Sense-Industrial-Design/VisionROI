@@ -273,9 +273,12 @@
         }
 
         async function checkStatus() {
-            const name = sourceSelect.value;
             const res = await fetchWithStatus(`/inference_status/${cam}`);
             const data = await res.json();
+            if (data.source && !sourceSelect.value) {
+                sourceSelect.value = data.source;
+            }
+            const name = sourceSelect.value;
             if (data.running && name) {
                 openSocket();
                 const cfgRes = await fetchWithStatus(`/source_config?name=${encodeURIComponent(name)}`);

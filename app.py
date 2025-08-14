@@ -599,7 +599,11 @@ async def resume_from_state() -> None:
             cam_id = int(cam_id_str)
         except Exception:
             continue
-        cfg = camera_cfgs.get(str(cam_id), {})
+        cfg = camera_cfgs.get(str(cam_id))
+        if not cfg:
+            # หากไม่มีการบันทึก config ของกล้องไว้ ให้ข้ามเพื่อไม่ให้ state เสียหาย
+            print(f"resume warning missing camera settings for cam {cam_id}")
+            continue
         try:
             resp, status = await apply_set_camera(cam_id, cfg)
             if status != 200:
@@ -658,7 +662,8 @@ async def stop_roi_stream(cam_id: int):
 async def inference_status(cam_id: int):
     """คืนค่าความพร้อมของงาน inference"""
     running = inference_tasks.get(cam_id) is not None and not inference_tasks[cam_id].done()
-    return jsonify({"running": running, "cam_id": cam_id})
+    source = active_sources.get(cam_id, "")
+    return jsonify({"running": running, "cam_id": cam_id, "source": source})
 
 
 # ✅ สถานะงาน ROI stream
