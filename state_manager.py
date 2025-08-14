@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import Dict, Any
 
 STATE_FILE = Path(__file__).resolve().parent / "state.json"
-ALLOWED_KEYS = ("active_sources", "active_modules", "inference_started")
+ALLOWED_KEYS = ("active_sources", "inference_started")
 
 
 def load_state() -> Dict[str, Dict[int, Any]]:
@@ -11,7 +11,7 @@ def load_state() -> Dict[str, Dict[int, Any]]:
         with STATE_FILE.open("r", encoding="utf-8") as f:
             data = json.load(f)
     except (FileNotFoundError, json.JSONDecodeError):
-        return {"active_sources": {}, "active_modules": {}, "inference_started": {}}
+        return {"active_sources": {}, "inference_started": {}}
     result: Dict[str, Dict[int, Any]] = {}
     for key in ALLOWED_KEYS:
         raw = data.get(key, {})
@@ -33,9 +33,6 @@ def load_state() -> Dict[str, Dict[int, Any]]:
                         "active_sources": {
                             str(k): v for k, v in result.get("active_sources", {}).items()
                         },
-                        "active_modules": {
-                            str(k): v for k, v in result.get("active_modules", {}).items()
-                        },
                         "inference_started": {
                             str(k): bool(v)
                             for k, v in result.get("inference_started", {}).items()
@@ -50,12 +47,10 @@ def load_state() -> Dict[str, Dict[int, Any]]:
 
 def save_state(
     active_sources: Dict[int, str],
-    active_modules: Dict[int, str],
     inference_started: Dict[int, bool],
 ) -> None:
     data = {
         "active_sources": {str(k): v for k, v in active_sources.items()},
-        "active_modules": {str(k): v for k, v in active_modules.items()},
         "inference_started": {str(k): bool(v) for k, v in inference_started.items()},
     }
     try:

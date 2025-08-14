@@ -50,7 +50,6 @@ ALLOWED_ROI_DIR = os.path.realpath("data_sources")
 async def restore_state():
     state = load_state()
     active_sources.update(state.get("active_sources", {}))
-    active_modules.update(state.get("active_modules", {}))
     inference_started.update(state.get("inference_started", {}))
     for cam_id, source_name in list(active_sources.items()):
         source_dir = os.path.join("data_sources", source_name)
@@ -77,7 +76,7 @@ async def restore_state():
                 )
         else:
             inference_started[cam_id] = False
-    save_state(active_sources, active_modules, inference_started)
+    save_state(active_sources, inference_started)
 
 if hasattr(app, "before_serving"):
     app.before_serving(restore_state)
@@ -392,7 +391,7 @@ async def stop_camera_task(
             gc.collect()
     if task_dict is inference_tasks and status == "stopped":
         inference_started[cam_id] = False
-        save_state(active_sources, active_modules, inference_started)
+        save_state(active_sources, inference_started)
     return task_dict.get(cam_id), {"status": status, "cam_id": cam_id}, 200
 
 
@@ -444,7 +443,7 @@ async def apply_set_camera(cam_id: int, data: dict) -> tuple[dict, int]:
         active_modules[cam_id] = module_name
     else:
         active_modules.pop(cam_id, None)
-    save_state(active_sources, active_modules, inference_started)
+    save_state(active_sources, inference_started)
     source_val = data.get("source", "")
     width_val = data.get("width")
     height_val = data.get("height")
@@ -528,7 +527,7 @@ async def create_source():
     except Exception:
         shutil.rmtree(source_dir, ignore_errors=True)
         return jsonify({"status": "error", "message": "save failed"}), 500
-    save_state(active_sources, active_modules, inference_started)
+    save_state(active_sources, inference_started)
     return jsonify({"status": "created"})
 
 
@@ -579,7 +578,7 @@ async def start_inference(cam_id: int):
     resp, status = await apply_start_inference(cam_id, data)
     if status == 200:
         inference_started[cam_id] = True
-        save_state(active_sources, active_modules, inference_started)
+        save_state(active_sources, inference_started)
     return jsonify(resp), status
 
 
@@ -599,7 +598,11 @@ async def resume_from_state() -> None:
             cam_id = int(cam_id_str)
         except Exception:
             continue
-        cfg = camera_cfgs.get(str(cam_id), {})
+        cfg = camera_cfgs.get(str(cam_id))
+        if not cfg:
+            # หากไม่มีการบันทึก config ของกล้องไว้ ให้ข้ามเพื่อไม่ให้ state เสียหาย
+            print(f"resume warning missing camera settings for cam {cam_id}")
+            continue
         try:
             resp, status = await apply_set_camera(cam_id, cfg)
             if status != 200:
@@ -658,7 +661,8 @@ async def stop_roi_stream(cam_id: int):
 async def inference_status(cam_id: int):
     """คืนค่าความพร้อมของงาน inference"""
     running = inference_tasks.get(cam_id) is not None and not inference_tasks[cam_id].done()
-    return jsonify({"running": running, "cam_id": cam_id})
+    source = active_sources.get(cam_id, "")
+    return jsonify({"running": running, "cam_id": cam_id, "source": source})
 
 
 # ✅ สถานะงาน ROI stream
