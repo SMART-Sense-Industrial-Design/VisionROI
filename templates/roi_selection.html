@@ -280,6 +280,7 @@
                     const groupId = 'main';
                     if (currentType === 'page') {
                         pageRois.push({ id: roiId, points, type: 'page', page: '', image: null });
+
                     } else {
                         rois.push({ id: roiId, group: groupId, module: "", points, type: 'roi' });
                     }
@@ -586,6 +587,7 @@
                         id: r.id ?? String(idx + 1),
                         page: r.page ?? r.name ?? '',
                         image: r.image ?? null,
+
                         points: pts || [],
                         type: 'page'
                     };
