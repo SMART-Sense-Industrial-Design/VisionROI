@@ -553,13 +553,18 @@
                     tr.appendChild(imgTd);
 
                     const actionTd = document.createElement('td');
-                    if (!r.image) {
-                        const btn = document.createElement('button');
-                        btn.textContent = 'Crop';
-                        btn.className = 'btn btn-primary btn-sm';
-                        btn.addEventListener('click', () => cropPageRoi(idx));
-                        actionTd.appendChild(btn);
-                    }
+                    const cropBtn = document.createElement('button');
+                    cropBtn.textContent = 'Crop';
+                    cropBtn.className = 'btn btn-primary btn-sm me-2';
+                    cropBtn.addEventListener('click', () => cropPageRoi(idx));
+                    actionTd.appendChild(cropBtn);
+
+                    const delBtn = document.createElement('button');
+                    delBtn.textContent = 'Delete';
+                    delBtn.className = 'btn btn-danger btn-sm';
+                    delBtn.addEventListener('click', () => deletePageRoi(idx));
+                    actionTd.appendChild(delBtn);
+
                     tr.appendChild(actionTd);
 
                     tbody.appendChild(tr);
@@ -687,6 +692,22 @@
 
         }
 
+        function deletePageRoi(i) {
+            pageRois.splice(i, 1);
+            drawAllRois();
+            renderRoiList();
+
+            fetch('/save_roi', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ rois: rois.concat(pageRois).concat(typeof otherRois !== 'undefined' ? otherRois : []), source: currentSource })
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (typeof showAlert === 'function') showAlert('Deleted. Saved to: ' + data.filename, 'success');
+            });
+        }
+
         async function cropPageRoi(i) {
             const nameInput = document.getElementById(`page_${i}`);
             const pageName = nameInput.value.trim();
@@ -738,6 +759,7 @@
         window.updateRoiGroup = updateRoiGroup;
         window.updateRoiModule = updateRoiModule;
         window.deleteRoi = deleteRoi;
+        window.deletePageRoi = deletePageRoi;
 
         window.addEventListener('beforeunload', () => {
             stopStream();
