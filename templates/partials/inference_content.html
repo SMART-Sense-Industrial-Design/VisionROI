@@ -163,7 +163,7 @@
             const cfgRes = await fetchWithStatus(`/source_config?name=${encodeURIComponent(name)}`);
             const cfg = await cfgRes.json();
 
-            const { rois: roiPathRaw, ...camCfg } = cfg;
+            const { module: _unused, rois: roiPathRaw, ...camCfg } = cfg;
             let roiPath = roiPathRaw;
             if (!roiPath.startsWith('/')) {
                 roiPath = `data_sources/${cfg.name}/${roiPath}`;

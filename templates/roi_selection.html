@@ -180,11 +180,11 @@
             startBtn.disabled = true;
             currentSource = name;
             const cfg = await fetch(`/source_config?name=${encodeURIComponent(name)}`).then(r => r.json());
-            const { module, rois, ...cfgNoModule } = cfg;
+            const { rois, ...camCfg } = cfg;
             const startRes = await fetch(`/start_roi_stream/${cam}`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(cfgNoModule)
+                body: JSON.stringify(camCfg)
             });
             if (!startRes.ok) {
                 if (typeof showAlert === 'function') showAlert('Failed to start ROI stream', 'error');
