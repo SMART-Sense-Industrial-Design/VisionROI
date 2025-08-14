@@ -19,6 +19,7 @@ import contextlib
 import inspect
 import gc
 from typing import Callable, Awaitable, Any
+from state_manager import load_state, save_state
 try:  # pragma: no cover
     from websockets.exceptions import ConnectionClosed
 except Exception:  # websockets not installed
@@ -38,6 +39,7 @@ inference_rois: dict[int, list[dict]] = {}
 active_sources: dict[int, str] = {}
 save_roi_flags: dict[int, bool] = {}
 active_modules: dict[int, str] = {}
+inference_started: dict[int, bool] = {}
 
 # จัดการ state ของระบบเพื่อให้สามารถกู้คืนสถานะเดิมได้
 STATE_FILE = "state.json"
@@ -58,6 +60,42 @@ app = Quart(__name__)
 # กำหนดเพดานขนาดไฟล์ที่เซิร์ฟเวอร์ยอมรับ (100 MB)
 app.config["MAX_CONTENT_LENGTH"] = 100 * 1024 * 1024
 ALLOWED_ROI_DIR = os.path.realpath("data_sources")
+
+# โหลด state จากไฟล์และเปิดกล้องตามที่บันทึกไว้
+async def restore_state():
+    state = load_state()
+    active_sources.update(state.get("active_sources", {}))
+    active_modules.update(state.get("active_modules", {}))
+    inference_started.update(state.get("inference_started", {}))
+    for cam_id, source_name in list(active_sources.items()):
+        source_dir = os.path.join("data_sources", source_name)
+        cfg_path = os.path.join(source_dir, "config.json")
+        try:
+            with open(cfg_path, "r", encoding="utf-8") as f:
+                cfg = json.load(f)
+        except Exception:
+            continue
+        src_val = cfg.get("source", 0)
+        width = cfg.get("width")
+        height = cfg.get("height")
+        try:
+            camera_sources[cam_id] = int(src_val)
+        except ValueError:
+            camera_sources[cam_id] = src_val
+        camera_resolutions[cam_id] = (width, height)
+        worker = CameraWorker(camera_sources[cam_id], asyncio.get_running_loop(), width, height)
+        if worker.start():
+            camera_workers[cam_id] = worker
+            if inference_started.get(cam_id):
+                inference_tasks[cam_id], _, _ = await start_camera_task(
+                    cam_id, inference_tasks, run_inference_loop
+                )
+        else:
+            inference_started[cam_id] = False
+    save_state(active_sources, active_modules, inference_started)
+
+if hasattr(app, "before_serving"):
+    app.before_serving(restore_state)
 
 # ✅ Redirect root ไปหน้า home
 @app.route("/")
@@ -367,7 +405,9 @@ async def stop_camera_task(
             roi_frame_queues.pop(cam_id, None)
             del worker
             gc.collect()
-
+    if task_dict is inference_tasks and status == "stopped":
+        inference_started[cam_id] = False
+        save_state(active_sources, active_modules, inference_started)
     return task_dict.get(cam_id), {"status": status, "cam_id": cam_id}, 200
 
 
@@ -419,6 +459,7 @@ async def apply_set_camera(cam_id: int, data: dict) -> tuple[dict, int]:
         active_modules[cam_id] = module_name
     else:
         active_modules.pop(cam_id, None)
+    save_state(active_sources, active_modules, inference_started)
     source_val = data.get("source", "")
     width_val = data.get("width")
     height_val = data.get("height")
@@ -502,7 +543,7 @@ async def create_source():
     except Exception:
         shutil.rmtree(source_dir, ignore_errors=True)
         return jsonify({"status": "error", "message": "save failed"}), 500
-
+    save_state(active_sources, active_modules, inference_started)
     return jsonify({"status": "created"})
 
 
@@ -551,6 +592,9 @@ async def apply_start_inference(cam_id: int, data: dict | None = None) -> tuple[
 async def start_inference(cam_id: int):
     data = await request.get_json() or {}
     resp, status = await apply_start_inference(cam_id, data)
+    if status == 200:
+        inference_started[cam_id] = True
+        save_state(active_sources, active_modules, inference_started)
     return jsonify(resp), status
 
 
