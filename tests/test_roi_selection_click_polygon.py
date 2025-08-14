@@ -13,9 +13,12 @@ def test_click_creates_polygon_and_saves():
 
     script = textwrap.dedent("""
     let rois = [];
+    let pageRois = [];
+    let otherRois = [];
     let currentPoints = [];
     let drawingRect = false;
     let currentMode = 'points';
+    let currentType = 'roi';
     let rectStart = null, rectEnd = null;
     let currentSource = 'src';
     let fetchBody;
