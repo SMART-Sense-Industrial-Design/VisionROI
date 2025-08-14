@@ -426,6 +426,10 @@
             container.innerHTML = '';
 
             if (rois.length > 0) {
+                const roiTitle = document.createElement('h5');
+                roiTitle.textContent = 'ROI List';
+                container.appendChild(roiTitle);
+
                 const table = document.createElement('table');
                 table.className = 'table table-striped table-sm';
                 const thead = document.createElement('thead');
@@ -496,8 +500,13 @@
             }
 
             if (pageRois.length > 0) {
+                const pageTitle = document.createElement('h5');
+                pageTitle.textContent = 'Page ROI List';
+                pageTitle.className = 'mt-3';
+                container.appendChild(pageTitle);
+
                 const table = document.createElement('table');
-                table.className = 'table table-striped table-sm mt-3';
+                table.className = 'table table-striped table-sm';
                 const thead = document.createElement('thead');
                 const headerRow = document.createElement('tr');
                 ['ID', 'x', 'y', 'w', 'h', 'Page', 'Crop Image', 'Action'].forEach(col => {
