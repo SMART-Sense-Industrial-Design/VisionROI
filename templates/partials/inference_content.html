@@ -290,6 +290,11 @@
                 loadGroupOptions(allRois);
                 const stored = groupSelect.value;
                 rois = stored === 'all' ? allRois : stored ? allRois.filter(r => r.group === stored) : [];
+                await fetchWithStatus(`/start_inference/${cam}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ rois })
+                });
                 if (rois.length > 0) {
                     renderRoiPlaceholders();
                     openRoiSocket();
