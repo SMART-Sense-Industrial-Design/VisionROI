@@ -163,21 +163,8 @@
             const cfgRes = await fetchWithStatus(`/source_config?name=${encodeURIComponent(name)}`);
             const cfg = await cfgRes.json();
 
-            const { module, ...cfgNoModule } = cfg;
-            const camRes = await fetchWithStatus(`/set_camera/${cam}`, {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify(cfgNoModule)
-            });
-            if (!camRes.ok) {
-                statusEl.innerText = 'Camera error';
-                running = false;
-                startButton.disabled = false;
-                showAlert('Camera error', 'error');
-                return;
-            }
-
-            let roiPath = cfg.rois;
+            const { rois: roiPathRaw, ...camCfg } = cfg;
+            let roiPath = roiPathRaw;
             if (!roiPath.startsWith('/')) {
                 roiPath = `data_sources/${cfg.name}/${roiPath}`;
             }
@@ -203,7 +190,7 @@
             const startRes = await fetchWithStatus(`/start_inference/${cam}`, {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ rois })
+                body: JSON.stringify({ ...camCfg, rois })
             });
             const startData = await startRes.json();
             if (startData.status === 'started' || startData.status === 'already_running') {

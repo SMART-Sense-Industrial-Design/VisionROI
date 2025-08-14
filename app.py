@@ -464,9 +464,7 @@ async def ws_roi_result(cam_id: int):
         pass
 
 
-@app.route("/set_camera/<int:cam_id>", methods=["POST"])
-async def set_camera(cam_id: int):
-    data = await request.get_json()
+async def apply_camera_settings(cam_id: int, data: dict) -> bool:
     active_sources[cam_id] = data.get("name", "")
     module_name = data.get("module", "")
     if module_name:
@@ -497,12 +495,15 @@ async def set_camera(cam_id: int):
         or (roi_tasks.get(cam_id) and not roi_tasks[cam_id].done())
     ):
         width, height = camera_resolutions.get(cam_id, (None, None))
-        worker = CameraWorker(camera_sources[cam_id], asyncio.get_running_loop(), width, height)
+        worker = CameraWorker(
+            camera_sources[cam_id], asyncio.get_running_loop(), width, height
+        )
         if not worker.start():
-            return jsonify({"status": "error", "cam_id": cam_id}), 400
+            save_service_state()
+            return False
         camera_workers[cam_id] = worker
     save_service_state()
-    return jsonify({"status": "ok", "cam_id": cam_id})
+    return True
 
 
 @app.route("/create_source", methods=["GET", "POST"])
@@ -597,7 +598,13 @@ async def start_inference(cam_id: int):
     if roi_tasks.get(cam_id) and not roi_tasks[cam_id].done():
         return jsonify({"status": "roi_running", "cam_id": cam_id}), 400
     data = await request.get_json() or {}
-    ok = await perform_start_inference(cam_id, data.get("rois"))
+    cfg = dict(data)
+    rois = cfg.pop("rois", None)
+    if cfg:
+        cfg_ok = await apply_camera_settings(cam_id, cfg)
+        if not cfg_ok:
+            return jsonify({"status": "error", "cam_id": cam_id}), 400
+    ok = await perform_start_inference(cam_id, rois)
     if ok:
         return jsonify({"status": "started", "cam_id": cam_id}), 200
     return jsonify({"status": "error", "cam_id": cam_id}), 400
@@ -622,6 +629,11 @@ async def stop_inference(cam_id: int):
 async def start_roi_stream(cam_id: int):
     if inference_tasks.get(cam_id) and not inference_tasks[cam_id].done():
         return jsonify({"status": "inference_running", "cam_id": cam_id}), 400
+    data = await request.get_json() or {}
+    if data:
+        cfg_ok = await apply_camera_settings(cam_id, data)
+        if not cfg_ok:
+            return jsonify({"status": "error", "cam_id": cam_id}), 400
     queue = get_roi_frame_queue(cam_id)
     while not queue.empty():
         queue.get_nowait()

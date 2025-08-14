@@ -132,7 +132,7 @@ VisionROI/
 
 ## โฟลว์การทำงานจากการสร้าง Source ถึงการรัน Inference
 1. ไปที่หน้า `/create_source` เพื่อสร้าง source ใหม่ โดยกรอกชื่อและแหล่งกล้อง
-2. ตั้งค่ากล้องและเลือก source (พร้อมกำหนดโมดูลเริ่มต้นหากต้องการ) ด้วย `POST /set_camera/<cam_id>` หรือผ่านหน้า UI
+2. เลือก source ที่ต้องการในหน้า UI (ระบบจะตั้งค่ากล้องให้อัตโนมัติเมื่อเริ่มสตรีมภาพหรือทำ inference)
 3. เปิดหน้า `/roi` แล้วเลือกตำแหน่ง ROI ที่ต้องการ จากนั้นกดบันทึก (ROI แต่ละจุดสามารถระบุโมดูลของตัวเองได้) – เรียก `POST /save_roi`
 4. เข้า `/inference` แล้วเลือก source กล้องเพื่อเริ่มประมวลผล ผลลัพธ์แต่ละ ROI จะถูกส่งกลับผ่าน `/ws_roi_result/<cam_id>`
 5. เมื่อเสร็จสิ้นสามารถหยุดงานได้ที่ `POST /stop_inference/<cam_id>`
@@ -160,14 +160,12 @@ tg.start_send_text("สวัสดี")
 
 ## API/Endpoints
 
-- **POST `/set_camera/<cam_id>`** – ตั้งค่ากล้อง เลือก source และกำหนดโมดูลเริ่มต้นได้
-  ```json
-  {"name": "cam1", "source": "0", "module": "yolo"}
-  ```
-
-- **POST `/start_inference/<cam_id>`** – เริ่มอ่านภาพและประมวลผล ROI ที่ส่งมา (หากไม่ส่ง `rois` จะโหลดจากไฟล์ของ source)
+- **POST `/start_inference/<cam_id>`** – เริ่มอ่านภาพและประมวลผล ROI ที่ส่งมา (หากไม่ส่ง `rois` จะโหลดจากไฟล์ของ source) พร้อมตั้งค่ากล้องจากข้อมูลใน body (`name`, `source`, `width`, `height`, `module`)
   ```json
   {
+    "name": "cam1",
+    "source": "0",
+    "module": "yolo",
     "rois": [
       {
         "id": "1",
@@ -185,7 +183,7 @@ tg.start_send_text("สวัสดี")
 
 - **POST `/stop_inference/<cam_id>`** – หยุดงาน inference
 
-- **POST `/start_roi_stream/<cam_id>`** – เริ่มส่งภาพสดสำหรับหน้าเลือก ROI
+- **POST `/start_roi_stream/<cam_id>`** – เริ่มส่งภาพสดสำหรับหน้าเลือก ROI พร้อมตั้งค่ากล้องจากข้อมูลใน body (`name`, `source`, `width`, `height`)
 
 - **POST `/stop_roi_stream/<cam_id>`** – หยุดส่งภาพ ROI
 
