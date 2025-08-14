@@ -24,6 +24,7 @@
   let socket;
   let rois = [];
   let currentPoints = [];
+  let previewRect = null;
   let initialized = false;
   let currentSource = "";
   const cam = 1;
@@ -58,7 +59,10 @@
     const x = Math.round(e.clientX - rect.left);
     const y = Math.round(e.clientY - rect.top);
     currentPoints.push({x, y});
-    if (currentPoints.length === 2) {
+    if (currentPoints.length === 1) {
+      previewRect = { x, y, width: 0, height: 0 };
+      drawAll();
+    } else if (currentPoints.length === 2) {
       const x1 = Math.min(currentPoints[0].x, currentPoints[1].x);
       const y1 = Math.min(currentPoints[0].y, currentPoints[1].y);
       const x2 = Math.max(currentPoints[0].x, currentPoints[1].x);
@@ -71,8 +75,23 @@
         height: y2 - y1
       });
       currentPoints = [];
+      previewRect = null;
       drawAll();
       renderTable();
+    }
+  });
+
+  canvas.addEventListener('mousemove', (e) => {
+    if (currentPoints.length === 1) {
+      const rect = canvas.getBoundingClientRect();
+      const x = Math.round(e.clientX - rect.left);
+      const y = Math.round(e.clientY - rect.top);
+      const x1 = Math.min(currentPoints[0].x, x);
+      const y1 = Math.min(currentPoints[0].y, y);
+      const x2 = Math.max(currentPoints[0].x, x);
+      const y2 = Math.max(currentPoints[0].y, y);
+      previewRect = { x: x1, y: y1, width: x2 - x1, height: y2 - y1 };
+      drawAll();
     }
   });
 
@@ -83,6 +102,11 @@
     rois.forEach(r => {
       ctx.strokeRect(r.x, r.y, r.width, r.height);
     });
+    if (previewRect) {
+      ctx.setLineDash([5, 3]);
+      ctx.strokeRect(previewRect.x, previewRect.y, previewRect.width, previewRect.height);
+      ctx.setLineDash([]);
+    }
   }
 
   function renderTable(){
