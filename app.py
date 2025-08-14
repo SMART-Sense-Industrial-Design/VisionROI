@@ -41,21 +41,6 @@ save_roi_flags: dict[int, bool] = {}
 active_modules: dict[int, str] = {}
 inference_started: dict[int, bool] = {}
 
-# จัดการ state ของระบบเพื่อให้สามารถกู้คืนสถานะเดิมได้
-STATE_FILE = "state.json"
-
-
-def load_state() -> dict:
-    """โหลด state จากไฟล์ ถ้าไม่มีให้คืนค่าเริ่มต้น"""
-    try:
-        with open(STATE_FILE, "r") as f:
-            return json.load(f)
-    except Exception:
-        return {"inference_started": {}, "camera_settings": {}}
-
-
-state: dict = load_state()
-
 app = Quart(__name__)
 # กำหนดเพดานขนาดไฟล์ที่เซิร์ฟเวอร์ยอมรับ (100 MB)
 app.config["MAX_CONTENT_LENGTH"] = 100 * 1024 * 1024
@@ -600,6 +585,7 @@ async def start_inference(cam_id: int):
 
 async def resume_from_state() -> None:
     """กู้คืนงาน inference จาก state ที่บันทึกไว้"""
+    state = load_state()
     started = state.get("inference_started", {})
     camera_cfgs = (
         state.get("camera_settings")
