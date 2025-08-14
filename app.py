@@ -41,6 +41,21 @@ save_roi_flags: dict[int, bool] = {}
 active_modules: dict[int, str] = {}
 inference_started: dict[int, bool] = {}
 
+# จัดการ state ของระบบเพื่อให้สามารถกู้คืนสถานะเดิมได้
+STATE_FILE = "state.json"
+
+
+def load_state() -> dict:
+    """โหลด state จากไฟล์ ถ้าไม่มีให้คืนค่าเริ่มต้น"""
+    try:
+        with open(STATE_FILE, "r") as f:
+            return json.load(f)
+    except Exception:
+        return {"inference_started": {}, "camera_settings": {}}
+
+
+state: dict = load_state()
+
 app = Quart(__name__)
 # กำหนดเพดานขนาดไฟล์ที่เซิร์ฟเวอร์ยอมรับ (100 MB)
 app.config["MAX_CONTENT_LENGTH"] = 100 * 1024 * 1024
@@ -436,9 +451,8 @@ async def ws_roi_result(cam_id: int):
         pass
 
 
-@app.route("/set_camera/<int:cam_id>", methods=["POST"])
-async def set_camera(cam_id: int):
-    data = await request.get_json()
+async def apply_set_camera(cam_id: int, data: dict) -> tuple[dict, int]:
+    """ตั้งค่ากล้องตามข้อมูลที่กำหนด"""
     active_sources[cam_id] = data.get("name", "")
     module_name = data.get("module", "")
     if module_name:
@@ -470,11 +484,20 @@ async def set_camera(cam_id: int):
         or (roi_tasks.get(cam_id) and not roi_tasks[cam_id].done())
     ):
         width, height = camera_resolutions.get(cam_id, (None, None))
-        worker = CameraWorker(camera_sources[cam_id], asyncio.get_running_loop(), width, height)
+        worker = CameraWorker(
+            camera_sources[cam_id], asyncio.get_running_loop(), width, height
+        )
         if not worker.start():
-            return jsonify({"status": "error", "cam_id": cam_id}), 400
+            return {"status": "error", "cam_id": cam_id}, 400
         camera_workers[cam_id] = worker
-    return jsonify({"status": "ok", "cam_id": cam_id})
+    return {"status": "ok", "cam_id": cam_id}, 200
+
+
+@app.route("/set_camera/<int:cam_id>", methods=["POST"])
+async def set_camera(cam_id: int):
+    data = await request.get_json() or {}
+    resp, status = await apply_set_camera(cam_id, data)
+    return jsonify(resp), status
 
 
 @app.route("/create_source", methods=["GET", "POST"])
@@ -525,13 +548,13 @@ async def create_source():
 
 
 # ✅ เริ่มงาน inference
-@app.route('/start_inference/<int:cam_id>', methods=["POST"])
-async def start_inference(cam_id: int):
+async def apply_start_inference(cam_id: int, data: dict | None = None) -> tuple[dict, int]:
+    """เริ่มงาน inference สำหรับกล้องที่ระบุ"""
     if roi_tasks.get(cam_id) and not roi_tasks[cam_id].done():
-        return jsonify({"status": "roi_running", "cam_id": cam_id}), 400
-    data = await request.get_json() or {}
+        return {"status": "roi_running", "cam_id": cam_id}, 400
+    data = data or {}
     rois = data.get("rois")
-    # เมื่อ rois เป็น None (ไม่ได้ส่งมาจาก client) ให้โหลดจากไฟล์﻿
+    # เมื่อ rois เป็น None (ไม่ได้ส่งมาจาก client) ให้โหลดจากไฟล์
     if rois is None:
         source = active_sources.get(cam_id, "")
         source_dir = os.path.join("data_sources", source)
@@ -562,10 +585,50 @@ async def start_inference(cam_id: int):
     inference_tasks[cam_id], resp, status = await start_camera_task(
         cam_id, inference_tasks, run_inference_loop
     )
+    return resp, status
+
+
+@app.route('/start_inference/<int:cam_id>', methods=["POST"])
+async def start_inference(cam_id: int):
+    data = await request.get_json() or {}
+    resp, status = await apply_start_inference(cam_id, data)
     if status == 200:
         inference_started[cam_id] = True
         save_state(active_sources, active_modules, inference_started)
     return jsonify(resp), status
+
+
+async def resume_from_state() -> None:
+    """กู้คืนงาน inference จาก state ที่บันทึกไว้"""
+    started = state.get("inference_started", {})
+    camera_cfgs = (
+        state.get("camera_settings")
+        or state.get("cameras")
+        or {}
+    )
+    for cam_id_str, flag in started.items():
+        if not flag:
+            continue
+        try:
+            cam_id = int(cam_id_str)
+        except Exception:
+            continue
+        cfg = camera_cfgs.get(str(cam_id), {})
+        try:
+            resp, status = await apply_set_camera(cam_id, cfg)
+            if status != 200:
+                print(f"resume warning set_camera {cam_id}: {resp}")
+                continue
+            resp, status = await apply_start_inference(cam_id)
+            if status != 200:
+                print(f"resume warning start_inference {cam_id}: {resp}")
+        except Exception as e:
+            # ถ้ากล้องหรือ source มีปัญหา ให้แจ้งเตือนแล้วข้าม
+            print(f"resume skipped cam {cam_id}: {e}")
+
+
+if hasattr(app, "before_serving"):
+    app.before_serving(resume_from_state)
 
 
 # ✅ หยุดงาน inference
