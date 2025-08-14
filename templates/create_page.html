@@ -1,0 +1,221 @@
+{% extends "base.html" %}
+{% block title %}Create Page{% endblock %}
+{% block content %}
+
+<select id="sourceSelect"></select>
+<button id="startBtn">Start</button>
+<button id="stopBtn" disabled>Stop</button>
+
+<br><br>
+<div id="frameContainer" style="position: relative; display: inline-block;">
+    <img id="video" />
+    <canvas id="canvas"></canvas>
+</div>
+
+<table class="table mt-3">
+    <thead>
+        <tr><th>ROI ID</th><th>Page Name</th><th>Action</th></tr>
+    </thead>
+    <tbody id="roiTableBody"></tbody>
+</table>
+
+<script>
+(function(){
+  let socket;
+  let rois = [];
+  let currentPoints = [];
+  let initialized = false;
+  let currentSource = "";
+  const cam = 1;
+
+  const video = document.getElementById("video");
+  const canvas = document.getElementById("canvas");
+  const frameContainer = document.getElementById("frameContainer");
+  const ctx = canvas.getContext("2d");
+  const startBtn = document.getElementById("startBtn");
+  const stopBtn = document.getElementById("stopBtn");
+
+  video.onload = () => {
+    if (!initialized || canvas.width !== video.naturalWidth || canvas.height !== video.naturalHeight) {
+      canvas.width = video.naturalWidth;
+      canvas.height = video.naturalHeight;
+      canvas.style.width = video.naturalWidth + 'px';
+      canvas.style.height = video.naturalHeight + 'px';
+      frameContainer.style.width = video.naturalWidth + 'px';
+      frameContainer.style.height = video.naturalHeight + 'px';
+      initialized = true;
+    }
+    drawAll();
+    URL.revokeObjectURL(video.src);
+  };
+
+  canvas.addEventListener('click', (e) => {
+    if (!currentSource) {
+      if (typeof showAlert === 'function') showAlert('Start stream first', 'error');
+      return;
+    }
+    const rect = canvas.getBoundingClientRect();
+    const x = Math.round(e.clientX - rect.left);
+    const y = Math.round(e.clientY - rect.top);
+    currentPoints.push({x, y});
+    if (currentPoints.length === 2) {
+      const x1 = Math.min(currentPoints[0].x, currentPoints[1].x);
+      const y1 = Math.min(currentPoints[0].y, currentPoints[1].y);
+      const x2 = Math.max(currentPoints[0].x, currentPoints[1].x);
+      const y2 = Math.max(currentPoints[0].y, currentPoints[1].y);
+      rois.push({
+        id: `roi_${Date.now()}`,
+        x: x1,
+        y: y1,
+        width: x2 - x1,
+        height: y2 - y1
+      });
+      currentPoints = [];
+      drawAll();
+      renderTable();
+    }
+  });
+
+  function drawAll(){
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = 'red';
+    rois.forEach(r => {
+      ctx.strokeRect(r.x, r.y, r.width, r.height);
+    });
+  }
+
+  function renderTable(){
+    const tbody = document.getElementById('roiTableBody');
+    tbody.innerHTML = '';
+    rois.forEach((r, i) => {
+      const tr = document.createElement('tr');
+      const idTd = document.createElement('td');
+      idTd.textContent = r.id;
+      const nameTd = document.createElement('td');
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.id = `name_${i}`;
+      input.className = 'form-control';
+      nameTd.appendChild(input);
+      const actionTd = document.createElement('td');
+      const btn = document.createElement('button');
+      btn.textContent = 'Create Page';
+      btn.className = 'btn btn-primary btn-sm';
+      btn.addEventListener('click', () => createPage(i));
+      actionTd.appendChild(btn);
+      tr.appendChild(idTd);
+      tr.appendChild(nameTd);
+      tr.appendChild(actionTd);
+      tbody.appendChild(tr);
+    });
+  }
+
+  function openSocket(){
+    socket = new WebSocket(`ws://${location.host}/ws_roi/${cam}`);
+    socket.binaryType = 'arraybuffer';
+    socket.onmessage = function(event){
+      const blob = new Blob([event.data], {type: 'image/jpeg'});
+      video.src = URL.createObjectURL(blob);
+    };
+    socket.onclose = function(){
+      socket = null;
+      stopBtn.disabled = true;
+      startBtn.disabled = false;
+    };
+  }
+
+  async function startStream(){
+    const name = document.getElementById('sourceSelect').value;
+    if (!name) {
+      if (typeof showAlert === 'function') showAlert('Select source first', 'error');
+      return;
+    }
+    currentSource = name;
+    startBtn.disabled = true;
+    const cfg = await fetch(`/source_config?name=${encodeURIComponent(name)}`).then(r => r.json());
+    const { rois: _ignored, ...camCfg } = cfg;
+    await fetch(`/start_roi_stream/${cam}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(camCfg)
+    });
+    openSocket();
+    stopBtn.disabled = false;
+  }
+
+  async function stopStream(){
+    await fetch(`/stop_roi_stream/${cam}`, { method: 'POST' });
+    if (socket) socket.close();
+  }
+
+  async function loadSources(){
+    const res = await fetch('/source_list');
+    const data = await res.json();
+    const select = document.getElementById('sourceSelect');
+    select.innerHTML = '';
+    data.forEach(item => {
+      const opt = document.createElement('option');
+      opt.value = item.name;
+      opt.textContent = item.name;
+      select.appendChild(opt);
+    });
+  }
+
+  async function createPage(i){
+    const nameInput = document.getElementById(`name_${i}`);
+    const pageName = nameInput.value.trim();
+    if (!pageName) {
+      if (typeof showAlert === 'function') showAlert('Enter page name', 'error');
+      return;
+    }
+    const r = rois[i];
+    const img = document.getElementById('video');
+    const tmp = document.createElement('canvas');
+    tmp.width = img.naturalWidth;
+    tmp.height = img.naturalHeight;
+    const tctx = tmp.getContext('2d');
+    tctx.drawImage(img, 0, 0);
+    const crop = document.createElement('canvas');
+    crop.width = r.width;
+    crop.height = r.height;
+    const cctx = crop.getContext('2d');
+    cctx.drawImage(tmp, r.x, r.y, r.width, r.height, 0, 0, r.width, r.height);
+    const base64 = crop.toDataURL('image/jpeg').split(',')[1];
+
+    const res = await fetch(`/load_roi/${encodeURIComponent(currentSource)}`);
+    const data = await res.json();
+    const all = data.rois || [];
+    all.push({
+      id: r.id,
+      name: pageName,
+      points: [
+        { x: r.x, y: r.y },
+        { x: r.x + r.width, y: r.y },
+        { x: r.x + r.width, y: r.y + r.height },
+        { x: r.x, y: r.y + r.height }
+      ],
+      image: base64,
+      type: 'page'
+    });
+    const saveRes = await fetch('/save_roi', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rois: all, source: currentSource })
+    });
+    if (saveRes.ok) {
+      if (typeof showAlert === 'function') showAlert('Page created', 'success');
+      rois.splice(i, 1);
+      renderTable();
+      drawAll();
+    } else {
+      if (typeof showAlert === 'function') showAlert('Save failed', 'error');
+    }
+  }
+
+  startBtn.addEventListener('click', startStream);
+  stopBtn.addEventListener('click', stopStream);
+  loadSources();
+})();
+</script>
+{% endblock %}

@@ -117,6 +117,10 @@ async def index():
 async def home():
     return await render_template("home.html")
 
+@app.route("/create_page")
+async def create_page():
+    return await render_template("create_page.html")
+
 # ✅ หน้าเลือก ROI
 @app.route("/roi")
 async def roi_page():
