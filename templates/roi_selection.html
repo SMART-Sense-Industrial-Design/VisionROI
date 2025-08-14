@@ -12,6 +12,7 @@
     <div id="roiToolbar" class="btn-group-vertical me-2">
         <button id="pickBtn" class="btn btn-primary">Pick Points</button>
         <button id="rectBtn" class="btn btn-secondary">Rectangle</button>
+        <button id="pageBtn" class="btn btn-secondary">Page Rect</button>
     </div>
     <div id="frameContainer" style="position: relative; display: inline-block;">
         <img id="video" />
@@ -25,6 +26,7 @@
     (function() {
         let socket;
         let rois = [];
+        let pageRois = [];
         let otherRois = [];
         let currentPoints = [];
         let hoverPoint = null;
@@ -33,6 +35,7 @@
         let rectEnd = null;
         let drawingRect = false;
         let currentMode = 'points';
+        let currentType = 'roi';
 
         let currentSource = "";
         let groups = [];
@@ -50,17 +53,29 @@
         const stopBtn = document.getElementById("stopBtn");
         const pickBtn = document.getElementById("pickBtn");
         const rectBtn = document.getElementById("rectBtn");
-
-        function setMode(mode) {
+        const pageBtn = document.getElementById("pageBtn");
+        function setMode(mode, type = 'roi') {
             currentMode = mode;
+            currentType = type;
             if (mode === 'points') {
                 pickBtn.classList.add('btn-primary');
                 pickBtn.classList.remove('btn-secondary');
                 rectBtn.classList.add('btn-secondary');
                 rectBtn.classList.remove('btn-primary');
+                pageBtn.classList.add('btn-secondary');
+                pageBtn.classList.remove('btn-primary');
+            } else if (type === 'page') {
+                pageBtn.classList.add('btn-primary');
+                pageBtn.classList.remove('btn-secondary');
+                rectBtn.classList.add('btn-secondary');
+                rectBtn.classList.remove('btn-primary');
+                pickBtn.classList.add('btn-secondary');
+                pickBtn.classList.remove('btn-primary');
             } else {
                 rectBtn.classList.add('btn-primary');
                 rectBtn.classList.remove('btn-secondary');
+                pageBtn.classList.add('btn-secondary');
+                pageBtn.classList.remove('btn-primary');
                 pickBtn.classList.add('btn-secondary');
                 pickBtn.classList.remove('btn-primary');
             }
@@ -73,7 +88,8 @@
         }
 
         pickBtn.addEventListener('click', () => setMode('points'));
-        rectBtn.addEventListener('click', () => setMode('rect'));
+        rectBtn.addEventListener('click', () => setMode('rect', 'roi'));
+        pageBtn.addEventListener('click', () => setMode('rect', 'page'));
 
         video.onload = () => {
             if (!initialized || canvas.width !== video.naturalWidth || canvas.height !== video.naturalHeight) {
@@ -240,7 +256,7 @@
                     fetch('/save_roi', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ rois: rois.concat(typeof otherRois !== 'undefined' ? otherRois : []), source: currentSource })
+                        body: JSON.stringify({ rois: rois.concat(pageRois).concat(typeof otherRois !== 'undefined' ? otherRois : []), source: currentSource })
                     });
                     currentPoints = [];
                 }
@@ -262,12 +278,16 @@
                     ];
                     const roiId = `roi_${Date.now()}`;
                     const groupId = 'main';
-                    rois.push({ id: roiId, group: groupId, module: "", points, type: 'roi' });
+                    if (currentType === 'page') {
+                        pageRois.push({ id: roiId, points, type: 'page' });
+                    } else {
+                        rois.push({ id: roiId, group: groupId, module: "", points, type: 'roi' });
+                    }
                     renderRoiList();
                     fetch('/save_roi', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ rois: rois.concat(typeof otherRois !== 'undefined' ? otherRois : []), source: currentSource })
+                        body: JSON.stringify({ rois: rois.concat(pageRois).concat(typeof otherRois !== 'undefined' ? otherRois : []), source: currentSource })
                     });
                     rectStart = null;
                     rectEnd = null;
@@ -307,6 +327,29 @@
 
         function drawAllRois() {
             ctx.clearRect(0, 0, canvas.width, canvas.height);
+            pageRois.forEach(r => {
+                if (!r.points || r.points.length === 0) return;
+                ctx.beginPath();
+                ctx.moveTo(r.points[0].x, r.points[0].y);
+                for (let i = 1; i < r.points.length; i++) {
+                    ctx.lineTo(r.points[i].x, r.points[i].y);
+                }
+                ctx.closePath();
+                ctx.strokeStyle = 'green';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+                r.points.forEach(p => {
+                    ctx.beginPath();
+                    ctx.arc(p.x, p.y, 5, 0, 2 * Math.PI);
+                    ctx.fillStyle = 'green';
+                    ctx.fill();
+                });
+                if (r.id !== undefined) {
+                    ctx.font = '16px sans-serif';
+                    ctx.fillStyle = 'green';
+                    ctx.fillText(r.id, r.points[0].x, Math.max(10, r.points[0].y - 5));
+                }
+            });
             rois.forEach(r => {
                 if (!r.points || r.points.length === 0) return;
                 ctx.beginPath();
@@ -461,7 +504,25 @@
             }
             const res = await fetch(`/load_roi/${encodeURIComponent(currentSource)}`);
             const data = await res.json();
-            otherRois = data.rois.filter(r => (r.type ?? 'roi') !== 'roi');
+            otherRois = data.rois.filter(r => !['roi', 'page'].includes(r.type ?? 'roi'));
+            pageRois = data.rois
+                .filter(r => (r.type ?? 'roi') === 'page')
+                .map((r, idx) => {
+                    let pts = r.points;
+                    if (!pts && "x" in r && "y" in r && "width" in r && "height" in r) {
+                        pts = [
+                            { x: r.x, y: r.y },
+                            { x: r.x + r.width, y: r.y },
+                            { x: r.x + r.width, y: r.y + r.height },
+                            { x: r.x, y: r.y + r.height }
+                        ];
+                    }
+                    return {
+                        id: r.id ?? String(idx + 1),
+                        points: pts || [],
+                        type: 'page'
+                    };
+                });
             rois = data.rois
                 .filter(r => (r.type ?? 'roi') === 'roi')
                 .map((r, idx) => {
@@ -502,7 +563,7 @@
             fetch(`/save_roi`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ rois: rois.concat(typeof otherRois !== 'undefined' ? otherRois : []), source: currentSource })
+                body: JSON.stringify({ rois: rois.concat(pageRois).concat(typeof otherRois !== 'undefined' ? otherRois : []), source: currentSource })
             })
             .then(res => res.json())
             .then(data => {
@@ -516,7 +577,7 @@
             fetch('/save_roi', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ rois: rois.concat(typeof otherRois !== 'undefined' ? otherRois : []), source: currentSource })
+                body: JSON.stringify({ rois: rois.concat(pageRois).concat(typeof otherRois !== 'undefined' ? otherRois : []), source: currentSource })
             });
         }
 
@@ -525,7 +586,7 @@
             fetch('/save_roi', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ rois: rois.concat(typeof otherRois !== 'undefined' ? otherRois : []), source: currentSource })
+                body: JSON.stringify({ rois: rois.concat(pageRois).concat(typeof otherRois !== 'undefined' ? otherRois : []), source: currentSource })
             });
         }
 
@@ -538,7 +599,7 @@
             fetch(`/save_roi`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ rois: rois.concat(typeof otherRois !== 'undefined' ? otherRois : []), source: currentSource })
+                body: JSON.stringify({ rois: rois.concat(pageRois).concat(typeof otherRois !== 'undefined' ? otherRois : []), source: currentSource })
             })
             .then(res => res.json())
             .then(data => {

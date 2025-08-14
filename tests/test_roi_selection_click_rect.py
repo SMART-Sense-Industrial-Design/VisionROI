@@ -13,9 +13,12 @@ def test_click_creates_rectangle_and_saves():
 
     script = textwrap.dedent("""
     let rois = [];
+    let pageRois = [];
+    let otherRois = [];
     let rectStart = null, rectEnd = null, drawingRect = false;
     let currentPoints = [];
     let currentMode = 'rect';
+    let currentType = 'roi';
     let currentSource = 'src';
     let fetchBody;
     function renderRoiList(){}
