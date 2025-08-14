@@ -279,7 +279,8 @@
                     const roiId = `roi_${Date.now()}`;
                     const groupId = 'main';
                     if (currentType === 'page') {
-                        pageRois.push({ id: roiId, points, type: 'page' });
+                        pageRois.push({ id: roiId, points, type: 'page', page: '', image: null });
+
                     } else {
                         rois.push({ id: roiId, group: groupId, module: "", points, type: 'roi' });
                     }
@@ -424,75 +425,140 @@
             if (!container) return;
             container.innerHTML = '';
 
-            if (rois.length === 0) return;
-
-            const table = document.createElement('table');
-            table.className = 'table table-striped table-sm';
-            const thead = document.createElement('thead');
-            const headerRow = document.createElement('tr');
-            ['ID', 'x', 'y', 'w', 'h', 'Group', 'Inference Module', 'Delete'].forEach(col => {
-                const th = document.createElement('th');
-                th.textContent = col;
-                headerRow.appendChild(th);
-            });
-            thead.appendChild(headerRow);
-            table.appendChild(thead);
-
-            const tbody = document.createElement('tbody');
-            rois.forEach((r, idx) => {
-                const xs = r.points.map(p => p.x);
-                const ys = r.points.map(p => p.y);
-                const x = Math.min(...xs);
-                const y = Math.min(...ys);
-                const w = Math.max(...xs) - x;
-                const h = Math.max(...ys) - y;
-                const tr = document.createElement('tr');
-                const idTd = document.createElement('td');
-                idTd.textContent = r.id;
-                tr.appendChild(idTd);
-                [x, y, w, h].forEach(val => {
-                    const td = document.createElement('td');
-                    td.textContent = Math.round(val);
-                    tr.appendChild(td);
+            if (rois.length > 0) {
+                const table = document.createElement('table');
+                table.className = 'table table-striped table-sm';
+                const thead = document.createElement('thead');
+                const headerRow = document.createElement('tr');
+                ['ID', 'x', 'y', 'w', 'h', 'Group', 'Inference Module', 'Delete'].forEach(col => {
+                    const th = document.createElement('th');
+                    th.textContent = col;
+                    headerRow.appendChild(th);
                 });
-                const tdGroup = document.createElement('td');
-                const input = document.createElement('input');
-                input.className = 'form-control form-control-sm';
-                input.value = r.group || '';
-                input.addEventListener('change', e => updateRoiGroup(idx, e.target.value));
-                tdGroup.appendChild(input);
-                tr.appendChild(tdGroup);
+                thead.appendChild(headerRow);
+                table.appendChild(thead);
 
-                const tdModule = document.createElement('td');
-                const select = document.createElement('select');
-                select.className = 'form-select form-select-sm';
-                const blank = document.createElement('option');
-                blank.value = '';
-                blank.textContent = '';
-                select.appendChild(blank);
-                modules.forEach(m => {
-                    const opt = document.createElement('option');
-                    opt.value = m;
-                    opt.textContent = m;
-                    if (r.module === m) opt.selected = true;
-                    select.appendChild(opt);
+                const tbody = document.createElement('tbody');
+                rois.forEach((r, idx) => {
+                    const xs = r.points.map(p => p.x);
+                    const ys = r.points.map(p => p.y);
+                    const x = Math.min(...xs);
+                    const y = Math.min(...ys);
+                    const w = Math.max(...xs) - x;
+                    const h = Math.max(...ys) - y;
+                    const tr = document.createElement('tr');
+                    const idTd = document.createElement('td');
+                    idTd.textContent = r.id;
+                    tr.appendChild(idTd);
+                    [x, y, w, h].forEach(val => {
+                        const td = document.createElement('td');
+                        td.textContent = Math.round(val);
+                        tr.appendChild(td);
+                    });
+                    const tdGroup = document.createElement('td');
+                    const input = document.createElement('input');
+                    input.className = 'form-control form-control-sm';
+                    input.value = r.group || '';
+                    input.addEventListener('change', e => updateRoiGroup(idx, e.target.value));
+                    tdGroup.appendChild(input);
+                    tr.appendChild(tdGroup);
+
+                    const tdModule = document.createElement('td');
+                    const select = document.createElement('select');
+                    select.className = 'form-select form-select-sm';
+                    const blank = document.createElement('option');
+                    blank.value = '';
+                    blank.textContent = '';
+                    select.appendChild(blank);
+                    modules.forEach(m => {
+                        const opt = document.createElement('option');
+                        opt.value = m;
+                        opt.textContent = m;
+                        if (r.module === m) opt.selected = true;
+                        select.appendChild(opt);
+                    });
+                    select.addEventListener('change', e => updateRoiModule(idx, e.target.value));
+                    tdModule.appendChild(select);
+                    tr.appendChild(tdModule);
+
+                    const tdDel = document.createElement('td');
+                    const delBtn = document.createElement('button');
+                    delBtn.textContent = 'Delete';
+                    delBtn.className = 'btn btn-danger btn-sm';
+                    delBtn.addEventListener('click', () => deleteRoi(idx));
+                    tdDel.appendChild(delBtn);
+                    tr.appendChild(tdDel);
+                    tbody.appendChild(tr);
                 });
-                select.addEventListener('change', e => updateRoiModule(idx, e.target.value));
-                tdModule.appendChild(select);
-                tr.appendChild(tdModule);
 
-                const tdDel = document.createElement('td');
-                const delBtn = document.createElement('button');
-                delBtn.textContent = 'Delete';
-                delBtn.className = 'btn btn-danger btn-sm';
-                delBtn.addEventListener('click', () => deleteRoi(idx));
-                tdDel.appendChild(delBtn);
-                tr.appendChild(tdDel);
-                tbody.appendChild(tr);
-            });
+                table.appendChild(tbody);
+                container.appendChild(table);
+            }
 
-            table.appendChild(tbody);
-            container.appendChild(table);
+            if (pageRois.length > 0) {
+                const table = document.createElement('table');
+                table.className = 'table table-striped table-sm mt-3';
+                const thead = document.createElement('thead');
+                const headerRow = document.createElement('tr');
+                ['ID', 'x', 'y', 'w', 'h', 'Page', 'Crop Image', 'Action'].forEach(col => {
+                    const th = document.createElement('th');
+                    th.textContent = col;
+                    headerRow.appendChild(th);
+                });
+                thead.appendChild(headerRow);
+                table.appendChild(thead);
+
+                const tbody = document.createElement('tbody');
+                pageRois.forEach((r, idx) => {
+                    const xs = r.points.map(p => p.x);
+                    const ys = r.points.map(p => p.y);
+                    const x = Math.min(...xs);
+                    const y = Math.min(...ys);
+                    const w = Math.max(...xs) - x;
+                    const h = Math.max(...ys) - y;
+                    const tr = document.createElement('tr');
+                    const idTd = document.createElement('td');
+                    idTd.textContent = r.id;
+                    tr.appendChild(idTd);
+                    [x, y, w, h].forEach(val => {
+                        const td = document.createElement('td');
+                        td.textContent = Math.round(val);
+                        tr.appendChild(td);
+                    });
+                    const tdPage = document.createElement('td');
+                    const input = document.createElement('input');
+                    input.className = 'form-control form-control-sm';
+                    input.id = `page_${idx}`;
+                    input.value = r.page || '';
+                    if (r.image) input.disabled = true;
+                    tdPage.appendChild(input);
+                    tr.appendChild(tdPage);
+
+                    const imgTd = document.createElement('td');
+                    if (r.image) {
+                        const img = document.createElement('img');
+                        img.src = `data:image/jpeg;base64,${r.image}`;
+                        img.style.maxWidth = '100px';
+                        imgTd.appendChild(img);
+                    }
+                    tr.appendChild(imgTd);
+
+                    const actionTd = document.createElement('td');
+                    if (!r.image) {
+                        const btn = document.createElement('button');
+                        btn.textContent = 'Crop';
+                        btn.className = 'btn btn-primary btn-sm';
+                        btn.addEventListener('click', () => cropPageRoi(idx));
+                        actionTd.appendChild(btn);
+                    }
+                    tr.appendChild(actionTd);
+
+                    tbody.appendChild(tr);
+                });
+
+                table.appendChild(tbody);
+                container.appendChild(table);
+            }
         }
 
         async function loadRois() {
@@ -519,6 +585,9 @@
                     }
                     return {
                         id: r.id ?? String(idx + 1),
+                        page: r.page ?? r.name ?? '',
+                        image: r.image ?? null,
+
                         points: pts || [],
                         type: 'page'
                     };
@@ -549,13 +618,14 @@
         }
 
         function clearAllRois() {
-            if (rois.length === 0) {
+            if (rois.length === 0 && pageRois.length === 0) {
                 if (typeof showAlert === 'function') showAlert('No ROI to clear', 'error');
                 return;
             }
             if (!confirm("Clear all ROIs?")) return;
 
             rois = [];
+            pageRois = [];
             currentPoints = [];
             drawAllRois();
             renderRoiList();
@@ -606,6 +676,47 @@
                 if (typeof showAlert === 'function') showAlert('Deleted. Saved to: ' + data.filename, 'success');
             });
 
+        }
+
+        async function cropPageRoi(i) {
+            const nameInput = document.getElementById(`page_${i}`);
+            const pageName = nameInput.value.trim();
+            if (!pageName) {
+                if (typeof showAlert === 'function') showAlert('Enter page name', 'error');
+                return;
+            }
+            const r = pageRois[i];
+            const xs = r.points.map(p => p.x);
+            const ys = r.points.map(p => p.y);
+            const x = Math.min(...xs);
+            const y = Math.min(...ys);
+            const w = Math.max(...xs) - x;
+            const h = Math.max(...ys) - y;
+
+            const img = document.getElementById('video');
+            const tmp = document.createElement('canvas');
+            tmp.width = img.naturalWidth;
+            tmp.height = img.naturalHeight;
+            const tctx = tmp.getContext('2d');
+            tctx.drawImage(img, 0, 0);
+            const crop = document.createElement('canvas');
+            crop.width = w;
+            crop.height = h;
+            const cctx = crop.getContext('2d');
+            cctx.drawImage(tmp, x, y, w, h, 0, 0, w, h);
+            const base64 = crop.toDataURL('image/jpeg').split(',')[1];
+
+            r.page = pageName;
+            r.image = base64;
+
+            await fetch('/save_roi', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ rois: rois.concat(pageRois).concat(typeof otherRois !== 'undefined' ? otherRois : []), source: currentSource })
+            });
+
+            renderRoiList();
+            if (typeof showAlert === 'function') showAlert('Cropped and saved', 'success');
         }
 
         startBtn.addEventListener('click', startStream);
