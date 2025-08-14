@@ -14,6 +14,8 @@ def test_update_roi_group_triggers_save():
     script = textwrap.dedent(
         f"""
         let rois = [{{id:'1', group:'old', module:'', points:[{{x:1,y:2}}]}}];
+        let pageRois = [];
+        let otherRois = [];
         let currentSource = 'src';
         let fetchOpts;
         global.fetch = (url, opts) => {{ fetchOpts = opts; return Promise.resolve({{}}); }};
