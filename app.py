@@ -39,11 +39,79 @@ active_sources: dict[int, str] = {}
 save_roi_flags: dict[int, bool] = {}
 active_modules: dict[int, str] = {}
 
+# ไฟล์สำหรับเก็บสถานะการทำงาน เพื่อให้สามารถกลับมารันต่อหลังรีสตาร์ท service
+STATE_FILE = "service_state.json"
+
+
+def save_service_state() -> None:
+    """บันทึกข้อมูลกล้องและสถานะ inference ลงไฟล์"""
+    data: dict[str, dict[str, object]] = {}
+    cam_ids = set(
+        list(camera_sources.keys())
+        + list(active_sources.keys())
+        + list(inference_tasks.keys())
+    )
+    for cam_id in cam_ids:
+        running = bool(
+            inference_tasks.get(cam_id) and not inference_tasks[cam_id].done()
+        )
+        w, h = camera_resolutions.get(cam_id, (None, None))
+        data[str(cam_id)] = {
+            "source": camera_sources.get(cam_id),
+            "resolution": [w, h],
+            "active_source": active_sources.get(cam_id, ""),
+            "active_module": active_modules.get(cam_id, ""),
+            "inference_running": running,
+        }
+    try:
+        with open(STATE_FILE, "w") as f:
+            json.dump({"cameras": data}, f)
+    except Exception:
+        pass
+
+
+def load_service_state() -> dict[str, dict[str, object]]:
+    """โหลดข้อมูลสถานะจากไฟล์"""
+    if not os.path.exists(STATE_FILE):
+        return {}
+    try:
+        with open(STATE_FILE, "r") as f:
+            data = json.load(f)
+        cams = data.get("cameras")
+        if isinstance(cams, dict):
+            return cams
+    except Exception:
+        pass
+    return {}
+
 app = Quart(__name__)
 # กำหนดเพดานขนาดไฟล์ที่เซิร์ฟเวอร์ยอมรับ (100 MB)
 app.config["MAX_CONTENT_LENGTH"] = 100 * 1024 * 1024
 ALLOWED_ROI_DIR = os.path.realpath("data_sources")
 
+
+async def restore_service_state() -> None:
+    """โหลดสถานะที่บันทึกไว้และเริ่มงาน inference ที่เคยรัน"""
+    cams = load_service_state()
+    for cam_id_str, cfg in cams.items():
+        try:
+            cam_id = int(cam_id_str)
+        except ValueError:
+            continue
+        camera_sources[cam_id] = cfg.get("source")
+        res = cfg.get("resolution") or [None, None]
+        camera_resolutions[cam_id] = (res[0], res[1])
+        active_sources[cam_id] = cfg.get("active_source", "")
+        mod = cfg.get("active_module", "")
+        if mod:
+            active_modules[cam_id] = mod
+        if cfg.get("inference_running"):
+            await perform_start_inference(cam_id, save_state=False)
+    save_service_state()
+
+
+if hasattr(app, "before_serving"):
+    app.before_serving(restore_service_state)
 # ✅ Redirect root ไปหน้า home
 @app.route("/")
 async def index():
@@ -433,6 +501,7 @@ async def set_camera(cam_id: int):
         if not worker.start():
             return jsonify({"status": "error", "cam_id": cam_id}), 400
         camera_workers[cam_id] = worker
+    save_service_state()
     return jsonify({"status": "ok", "cam_id": cam_id})
 
 
@@ -483,14 +552,11 @@ async def create_source():
     return jsonify({"status": "created"})
 
 
-# ✅ เริ่มงาน inference
-@app.route('/start_inference/<int:cam_id>', methods=["POST"])
-async def start_inference(cam_id: int):
+
+# ฟังก์ชันช่วยเริ่มงาน inference เพื่อใช้ซ้ำได้ทั้งจาก route และตอนรีสตาร์ท
+async def perform_start_inference(cam_id: int, rois=None, save_state: bool = True):
     if roi_tasks.get(cam_id) and not roi_tasks[cam_id].done():
-        return jsonify({"status": "roi_running", "cam_id": cam_id}), 400
-    data = await request.get_json() or {}
-    rois = data.get("rois")
-    # เมื่อ rois เป็น None (ไม่ได้ส่งมาจาก client) ให้โหลดจากไฟล์﻿
+        return False
     if rois is None:
         source = active_sources.get(cam_id, "")
         source_dir = os.path.join("data_sources", source)
@@ -518,10 +584,23 @@ async def start_inference(cam_id: int):
     queue = get_roi_result_queue(cam_id)
     while not queue.empty():
         queue.get_nowait()
-    inference_tasks[cam_id], resp, status = await start_camera_task(
+    inference_tasks[cam_id], _, _ = await start_camera_task(
         cam_id, inference_tasks, run_inference_loop
     )
-    return jsonify(resp), status
+    if save_state:
+        save_service_state()
+    return True
+
+# ✅ เริ่มงาน inference
+@app.route('/start_inference/<int:cam_id>', methods=["POST"])
+async def start_inference(cam_id: int):
+    if roi_tasks.get(cam_id) and not roi_tasks[cam_id].done():
+        return jsonify({"status": "roi_running", "cam_id": cam_id}), 400
+    data = await request.get_json() or {}
+    ok = await perform_start_inference(cam_id, data.get("rois"))
+    if ok:
+        return jsonify({"status": "started", "cam_id": cam_id}), 200
+    return jsonify({"status": "error", "cam_id": cam_id}), 400
 
 
 # ✅ หยุดงาน inference
@@ -534,6 +613,7 @@ async def stop_inference(cam_id: int):
     if queue is not None:
         await queue.put(None)
         roi_result_queues.pop(cam_id, None)
+    save_service_state()
     return jsonify(resp), status
 
 
