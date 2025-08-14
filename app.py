@@ -37,7 +37,6 @@ roi_tasks: dict[int, asyncio.Task | None] = {}
 inference_rois: dict[int, list[dict]] = {}
 active_sources: dict[int, str] = {}
 save_roi_flags: dict[int, bool] = {}
-active_modules: dict[int, str] = {}
 
 # ไฟล์สำหรับเก็บสถานะการทำงาน เพื่อให้สามารถกลับมารันต่อหลังรีสตาร์ท service
 STATE_FILE = "service_state.json"
@@ -60,7 +59,6 @@ def save_service_state() -> None:
             "source": camera_sources.get(cam_id),
             "resolution": [w, h],
             "active_source": active_sources.get(cam_id, ""),
-            "active_module": active_modules.get(cam_id, ""),
             "inference_running": running,
         }
     try:
@@ -102,9 +100,6 @@ async def restore_service_state() -> None:
         res = cfg.get("resolution") or [None, None]
         camera_resolutions[cam_id] = (res[0], res[1])
         active_sources[cam_id] = cfg.get("active_source", "")
-        mod = cfg.get("active_module", "")
-        if mod:
-            active_modules[cam_id] = mod
         if cfg.get("inference_running"):
             await perform_start_inference(cam_id, save_state=False)
     save_service_state()
@@ -201,41 +196,11 @@ async def read_and_queue_frame(
 
 
 async def run_inference_loop(cam_id: int):
-    default_module = active_modules.get(cam_id, "")
     module_cache: dict[str, tuple[ModuleType | None, bool, bool]] = {}
 
     async def process_frame(frame):
         rois = inference_rois.get(cam_id, [])
         if not rois:
-            if default_module:
-                module_entry = module_cache.get(default_module)
-                if module_entry is None:
-                    module = load_custom_module(default_module)
-                    takes_source = False
-                    takes_cam_id = False
-                    if module:
-                        proc = getattr(module, "process", None)
-                        if callable(proc):
-                            params = inspect.signature(proc).parameters
-                            takes_source = "source" in params
-                            takes_cam_id = "cam_id" in params
-                    module_cache[default_module] = (module, takes_source, takes_cam_id)
-                else:
-                    module, takes_source, takes_cam_id = module_entry
-                process_fn = getattr(module, "process", None) if module else None
-                if callable(process_fn):
-                    save_flag = bool(save_roi_flags.get(cam_id))
-                    args = [frame, None, save_flag]
-                    if takes_source:
-                        args.append(active_sources.get(cam_id, ""))
-                    if takes_cam_id:
-                        args.append(cam_id)
-                    try:
-                        result = process_fn(*args)
-                        if inspect.isawaitable(result):
-                            await result
-                    except Exception:
-                        pass
             return cv2.resize(frame, (0, 0), fx=0.5, fy=0.5)
 
         save_flag = bool(save_roi_flags.get(cam_id))
@@ -466,11 +431,6 @@ async def ws_roi_result(cam_id: int):
 
 async def apply_camera_settings(cam_id: int, data: dict) -> bool:
     active_sources[cam_id] = data.get("name", "")
-    module_name = data.get("module", "")
-    if module_name:
-        active_modules[cam_id] = module_name
-    else:
-        active_modules.pop(cam_id, None)
     source_val = data.get("source", "")
     width_val = data.get("width")
     height_val = data.get("height")
@@ -574,12 +534,10 @@ async def perform_start_inference(cam_id: int, rois=None, save_state: bool = Tru
             rois = []
     if not isinstance(rois, list):
         rois = []
-    default_module = active_modules.get(cam_id, "")
     processed_rois = []
     for r in rois:
-        mod_name = r.get("module") or default_module
+        mod_name = r.get("module")
         if mod_name:
-            r["module"] = mod_name
             processed_rois.append(r)
     inference_rois[cam_id] = processed_rois
     queue = get_roi_result_queue(cam_id)

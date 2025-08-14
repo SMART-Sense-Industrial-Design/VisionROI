@@ -160,12 +160,11 @@ tg.start_send_text("สวัสดี")
 
 ## API/Endpoints
 
-- **POST `/start_inference/<cam_id>`** – เริ่มอ่านภาพและประมวลผล ROI ที่ส่งมา (หากไม่ส่ง `rois` จะโหลดจากไฟล์ของ source) พร้อมตั้งค่ากล้องจากข้อมูลใน body (`name`, `source`, `width`, `height`, `module`)
+- **POST `/start_inference/<cam_id>`** – เริ่มอ่านภาพและประมวลผล ROI ที่ส่งมา (หากไม่ส่ง `rois` จะโหลดจากไฟล์ของ source) พร้อมตั้งค่ากล้องจากข้อมูลใน body (`name`, `source`, `width`, `height`)
   ```json
   {
     "name": "cam1",
     "source": "0",
-    "module": "yolo",
     "rois": [
       {
         "id": "1",
@@ -269,6 +268,7 @@ data_sources/
 ```
 
 แต่ละ ROI สามารถกำหนด `group` สำหรับเลือก group id ได้ ส่วนค่า `module` จะเริ่มต้นเป็นค่าว่าง
+หากเว้นว่างจะไม่ประมวลผล ROI นั้น
 
 โมดูลสำหรับประมวลผลจะเก็บไว้ในโฟลเดอร์ `inference_modules/<module_name>/custom.py`
 

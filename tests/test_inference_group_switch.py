@@ -78,7 +78,6 @@ def test_inference_switches_module_by_group(monkeypatch):
     monkeypatch.setattr(app, "read_and_queue_frame", fake_read_and_queue_frame)
 
     app.inference_rois[0] = rois_group1
-    app.active_modules[0] = ""
     app.save_roi_flags[0] = False
 
     asyncio.run(app.run_inference_loop(0))
