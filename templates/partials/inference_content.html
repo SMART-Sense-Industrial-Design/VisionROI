@@ -17,23 +17,6 @@
         <div id="cam1-rois" class="roi-grid"></div>
     </div>
 </div>
-<div class="cam-row">
-    <div class="card">
-        <div id="cam2" class="cam-cell">
-            <select id="cam2-sourceSelect" class="form-select mb-2"></select>
-            <button id="cam2-startButton" class="btn btn-primary me-2">Start</button>
-            <button id="cam2-stopButton" class="btn btn-danger" disabled>Stop</button>
-            <p id="cam2-status"></p>
-            <div class="video-wrapper">
-                <img id="cam2-video" width="320" height="240" />
-            </div>
-        </div>
-    </div>
-    <div class="card roi-card">
-        <select id="cam2-groupSelect" class="form-select mb-2"></select>
-        <div id="cam2-rois" class="roi-grid"></div>
-    </div>
-</div>
   <script>
       (function() {
       function createCameraController(cellId) {
@@ -323,8 +306,7 @@
 
   // initialize controllers immediately (DOMContentLoaded already fired in fragments)
   const controllers = [
-      createCameraController('cam1'),
-      createCameraController('cam2')
+      createCameraController('cam1')
   ];
   })();
   </script>
