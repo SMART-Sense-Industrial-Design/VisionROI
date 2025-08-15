@@ -167,7 +167,11 @@
             loadGroupOptions(allRois, selectedGroup);
             rois = roisOverride || (selectedGroup && selectedGroup !== 'all' && selectedGroup !== 'pages'
                 ? allRois.filter(r => r.group === selectedGroup)
-                : selectedGroup === 'all' ? allRois : selectedGroup === 'pages' ? allRois.filter(r => (r.type ?? 'roi') === 'page') : []);
+                : selectedGroup === 'all'
+                    ? allRois
+                    : selectedGroup === 'pages'
+                        ? allRois.filter(r => (r.type ?? 'roi') === 'page' || ((r.type ?? 'roi') === 'roi' && r.group === 'page1'))
+                        : []);
             if (rois.length > 0) {
                 renderRoiPlaceholders();
             } else {
@@ -267,7 +271,13 @@
                 allRois = roiData.rois || [];
                 loadGroupOptions(allRois);
                 const stored = groupSelect.value;
-                rois = stored === 'all' ? allRois : stored === 'pages' ? allRois.filter(r => (r.type ?? 'roi') === 'page') : stored ? allRois.filter(r => r.group === stored) : [];
+                rois = stored === 'all'
+                    ? allRois
+                    : stored === 'pages'
+                        ? allRois.filter(r => (r.type ?? 'roi') === 'page' || ((r.type ?? 'roi') === 'roi' && r.group === 'page1'))
+                        : stored
+                            ? allRois.filter(r => r.group === stored)
+                            : [];
                 await fetchWithStatus(`/start_inference/${cam}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -292,7 +302,11 @@
             const selected = groupSelect.value;
             if (!selected) return;
             localStorage.setItem(`${cellId}-group`, selected);
-            const filtered = selected === 'all' ? allRois : selected === 'pages' ? allRois.filter(r => (r.type ?? 'roi') === 'page') : allRois.filter(r => r.group === selected);
+            const filtered = selected === 'all'
+                ? allRois
+                : selected === 'pages'
+                    ? allRois.filter(r => (r.type ?? 'roi') === 'page' || ((r.type ?? 'roi') === 'roi' && r.group === 'page1'))
+                    : allRois.filter(r => r.group === selected);
             await stopInference();
             await startInference(filtered, selected);
         }
