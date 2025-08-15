@@ -118,13 +118,10 @@
             optAll.value = 'all';
             optAll.textContent = 'All';
             groupSelect.appendChild(optAll);
-            const hasPages = list.some(r => (r.type ?? 'roi') === 'page');
-            if (hasPages) {
-                const optPages = document.createElement('option');
-                optPages.value = 'pages';
-                optPages.textContent = 'Pages';
-                groupSelect.appendChild(optPages);
-            }
+            const optPages = document.createElement('option');
+            optPages.value = 'pages';
+            optPages.textContent = 'Pages';
+            groupSelect.appendChild(optPages);
             const groups = Array.from(
                 new Set(list.map(r => r.group).filter(g => g))
             );
