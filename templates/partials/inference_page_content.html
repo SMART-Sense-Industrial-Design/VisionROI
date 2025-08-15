@@ -43,6 +43,7 @@ function createPageController(cellId){
     const overlayCtx=overlay.getContext('2d');
     let detecting=false;
     let pendingBlob=null;
+
     startButton.onclick=startStream;
     stopButton.onclick=stopInference;
 
@@ -237,6 +238,7 @@ function createPageController(cellId){
             }
             drawPageOverlay(best);
             pageLabel.textContent=best? (best.name||best.page||'') : '';
+
             if(best && best.page!==currentPage){
                 await switchPage(best.page||best.name||'');
             }
@@ -278,6 +280,7 @@ function createPageController(cellId){
         roiGrid.innerHTML='';
         overlayCtx.clearRect(0,0,overlay.width,overlay.height);
         pageLabel.textContent='';
+
         statusEl.innerText='Stopped';
         startButton.innerText='Resume';
         startButton.disabled=false;
