@@ -37,6 +37,7 @@ roi_tasks: dict[int, asyncio.Task | None] = {}
 inference_rois: dict[int, list[dict]] = {}
 active_sources: dict[int, str] = {}
 save_roi_flags: dict[int, bool] = {}
+page_refs: dict[int, list[dict]] = {}
 
 # ไฟล์สำหรับเก็บสถานะการทำงาน เพื่อให้สามารถกลับมารันต่อหลังรีสตาร์ท service
 STATE_FILE = "service_state.json"
@@ -86,6 +87,11 @@ app = Quart(__name__)
 # กำหนดเพดานขนาดไฟล์ที่เซิร์ฟเวอร์ยอมรับ (100 MB)
 app.config["MAX_CONTENT_LENGTH"] = 100 * 1024 * 1024
 ALLOWED_ROI_DIR = os.path.realpath("data_sources")
+
+
+def compare_images(img1_b64: str, img2_b64: str) -> float:
+    """เปรียบเทียบรูปภาพสองรูปแบบง่ายๆ"""
+    return 1.0 if img1_b64 == img2_b64 else 0.0
 
 
 async def restore_service_state() -> None:
@@ -280,7 +286,7 @@ async def run_inference_loop(cam_id: int):
                 await q.put(payload)
             except Exception:
                 pass
-            cv2.polylines(frame, [src.astype(int)], True, (0, 255, 0), 2)
+            cv2.polylines(frame, [src.astype(int)], True, (255, 0, 0), 2)
             label_pt = src[0].astype(int)
             cv2.putText(
                 frame,
@@ -288,7 +294,7 @@ async def run_inference_loop(cam_id: int):
                 (int(label_pt[0]), max(0, int(label_pt[1]) - 5)),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.5,
-                (0, 255, 0),
+                (255, 0, 0),
                 1,
                 cv2.LINE_AA,
             )
@@ -515,7 +521,7 @@ async def create_source():
 
 
 # ฟังก์ชันช่วยเริ่มงาน inference เพื่อใช้ซ้ำได้ทั้งจาก route และตอนรีสตาร์ท
-async def perform_start_inference(cam_id: int, rois=None, save_state: bool = True):
+async def perform_start_inference(cam_id: int, rois=None, pages=None, save_state: bool = True):
     if roi_tasks.get(cam_id) and not roi_tasks[cam_id].done():
         return False
     if rois is None:
@@ -540,6 +546,7 @@ async def perform_start_inference(cam_id: int, rois=None, save_state: bool = Tru
         if mod_name:
             processed_rois.append(r)
     inference_rois[cam_id] = processed_rois
+    page_refs[cam_id] = pages or []
     queue = get_roi_result_queue(cam_id)
     while not queue.empty():
         queue.get_nowait()
@@ -558,11 +565,12 @@ async def start_inference(cam_id: int):
     data = await request.get_json() or {}
     cfg = dict(data)
     rois = cfg.pop("rois", None)
+    pages = cfg.pop("pages", None)
     if cfg:
         cfg_ok = await apply_camera_settings(cam_id, cfg)
         if not cfg_ok:
             return jsonify({"status": "error", "cam_id": cam_id}), 400
-    ok = await perform_start_inference(cam_id, rois)
+    ok = await perform_start_inference(cam_id, rois, pages)
     if ok:
         return jsonify({"status": "started", "cam_id": cam_id}), 200
     return jsonify({"status": "error", "cam_id": cam_id}), 400
@@ -616,6 +624,18 @@ async def inference_status(cam_id: int):
     """คืนค่าความพร้อมของงาน inference"""
     running = inference_tasks.get(cam_id) is not None and not inference_tasks[cam_id].done()
     return jsonify({"running": running, "cam_id": cam_id})
+
+
+@app.route('/detect_page/<int:cam_id>', methods=["POST"])
+async def detect_page(cam_id: int):
+    data = await request.get_json() or {}
+    img = data.get("image", "")
+    best = None
+    for r in page_refs.get(cam_id, []):
+        if compare_images(img, r.get("image", "")) > 0.9:
+            best = r.get("page")
+            break
+    return jsonify({"page": best})
 
 
 # ✅ สถานะงาน ROI stream

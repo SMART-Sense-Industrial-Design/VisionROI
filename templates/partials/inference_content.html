@@ -31,48 +31,14 @@
         let currentPage = null;
         let detectingPage = false;
         let camCfgCache = null;
+        let pageInterval = null;
         const cam = cellId.replace(/\D/g, '');
         const getEl = suffix => document.getElementById(`${cellId}-${suffix}`);
         const video = getEl('video');
         const canvas = getEl('canvas');
         const ctx = canvas.getContext('2d');
-        video.onload = async () => {
+        video.onload = () => {
             URL.revokeObjectURL(video.src);
-            if (detectingPage && pageRois.length > 0 && !currentPage) {
-                ctx.clearRect(0,0,canvas.width,canvas.height);
-                ctx.strokeStyle = 'red';
-                ctx.lineWidth = 2;
-                const tmp = document.createElement('canvas');
-                const tctx = tmp.getContext('2d');
-                for (const pr of pageRois) {
-                    ctx.strokeRect(pr.x, pr.y, pr.width, pr.height);
-                    tmp.width = pr.width;
-                    tmp.height = pr.height;
-                    tctx.drawImage(video, pr.x, pr.y, pr.width, pr.height, 0, 0, pr.width, pr.height);
-                    const sim = await compareImages(tmp.toDataURL('image/jpeg'), pr.image);
-                    if (sim > 0.9) {
-                        currentPage = pr.page;
-                        break;
-                    }
-                }
-                if (currentPage) {
-                    detectingPage = false;
-                    ctx.clearRect(0,0,canvas.width,canvas.height);
-                    const sendRois = roiMap[currentPage] || [];
-                    rois = sendRois;
-                    renderRoiPlaceholders(sendRois);
-                    await fetchWithStatus(`/start_inference/${cam}`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ ...camCfgCache, rois: sendRois })
-                    });
-                    if (sendRois.length > 0) {
-                        openRoiSocket();
-                    }
-                }
-            } else {
-                ctx.clearRect(0,0,canvas.width,canvas.height);
-            }
         };
         const startButton = getEl('startButton');
         const stopButton = getEl('stopButton');
@@ -132,36 +98,6 @@
             }
         }
 
-        async function compareImages(dataUrl1, base64) {
-            return new Promise(resolve => {
-                const img1 = new Image();
-                const img2 = new Image();
-                let loaded = 0;
-                const done = () => {
-                    if (++loaded < 2) return;
-                    const c1 = document.createElement('canvas');
-                    const c2 = document.createElement('canvas');
-                    c1.width = img1.width; c1.height = img1.height;
-                    c2.width = img2.width; c2.height = img2.height;
-                    const ctx1 = c1.getContext('2d');
-                    const ctx2 = c2.getContext('2d');
-                    ctx1.drawImage(img1,0,0); ctx2.drawImage(img2,0,0);
-                    const d1 = ctx1.getImageData(0,0,c1.width,c1.height).data;
-                    const d2 = ctx2.getImageData(0,0,c2.width,c2.height).data;
-                    let diff = 0;
-                    for (let i=0; i<d1.length; i+=4) {
-                        diff += Math.abs(d1[i]-d2[i]) + Math.abs(d1[i+1]-d2[i+1]) + Math.abs(d1[i+2]-d2[i+2]);
-                    }
-                    const max = 255 * 3 * (d1.length/4);
-                    resolve(1 - diff / max);
-                };
-                img1.onload = done;
-                img2.onload = done;
-                img1.src = dataUrl1;
-                img2.src = `data:image/jpeg;base64,${base64}`;
-            });
-        }
-
         function renderRoiPlaceholders(list = rois) {
             roiGrid.innerHTML = '';
             list.forEach(r => {
@@ -181,6 +117,50 @@
                 item.appendChild(p);
                 roiGrid.appendChild(item);
             });
+        }
+
+        async function sendPageCrops() {
+            if (!detectingPage || currentPage) return;
+            ctx.clearRect(0,0,canvas.width,canvas.height);
+            ctx.strokeStyle = 'green';
+            ctx.lineWidth = 2;
+            const tmp = document.createElement('canvas');
+            const tctx = tmp.getContext('2d');
+            for (const pr of pageRois) {
+                ctx.strokeRect(pr.x, pr.y, pr.width, pr.height);
+                tmp.width = pr.width;
+                tmp.height = pr.height;
+                tctx.drawImage(video, pr.x, pr.y, pr.width, pr.height, 0, 0, pr.width, pr.height);
+                const b64 = tmp.toDataURL('image/jpeg').split(',')[1];
+                try {
+                    const res = await fetch(`/detect_page/${cam}`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ image: b64 })
+                    });
+                    const result = await res.json();
+                    if (result.page) {
+                        currentPage = result.page;
+                        detectingPage = false;
+                        clearInterval(pageInterval);
+                        ctx.clearRect(0,0,canvas.width,canvas.height);
+                        const sendRois = roiMap[currentPage] || [];
+                        rois = sendRois;
+                        renderRoiPlaceholders(sendRois);
+                        await fetchWithStatus(`/start_inference/${cam}`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ ...camCfgCache, rois: sendRois })
+                        });
+                        if (sendRois.length > 0) {
+                            openRoiSocket();
+                        }
+                        break;
+                    }
+                } catch (e) {
+                    console.error('detect_page error', e);
+                }
+            }
         }
 
         async function startInference() {
@@ -220,13 +200,14 @@
             const startRes = await fetchWithStatus(`/start_inference/${cam}`, {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ ...camCfg, rois: [] })
+                body: JSON.stringify({ ...camCfg, rois: [], pages: pageRois })
             });
             const startData = await startRes.json();
             if (startData.status === 'started' || startData.status === 'already_running') {
                 openSocket();
                 showAlert('Camera started', 'success');
                 setRunningUI();
+                pageInterval = setInterval(sendPageCrops, 1000);
             } else {
                 running = false;
                 startButton.disabled = false;
@@ -247,6 +228,10 @@
             if (roiSocket) {
                 roiSocket.close();
                 roiSocket = null;
+            }
+            if (pageInterval) {
+                clearInterval(pageInterval);
+                pageInterval = null;
             }
             video.src = '';
             ctx.clearRect(0,0,canvas.width,canvas.height);
