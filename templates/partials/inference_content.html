@@ -129,6 +129,7 @@
                 const w = (Math.max(...xs) - Math.min(...xs)) * scaleX;
                 const h = (Math.max(...ys) - Math.min(...ys)) * scaleY;
                 overlayCtx.strokeStyle = 'green';
+
                 overlayCtx.lineWidth = 2;
                 overlayCtx.strokeRect(x, y, w, h);
             });
@@ -282,6 +283,7 @@
                         `data_sources/${cfg.name}/rois.json`
                     )}`
                 );
+
                 const roiData = await roiRes.json();
                 allRois = (roiData.rois || []).filter(r => r.page);
                 loadPageOptions(allRois);
