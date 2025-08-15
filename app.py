@@ -549,6 +549,7 @@ async def perform_start_inference(
             if mod_name:
                 roi_list.append(r)
     inference_rois[cam_id] = roi_list if page is not None else []
+
     page_rois[cam_id] = page_list
     queue = get_roi_result_queue(cam_id)
     while not queue.empty():
