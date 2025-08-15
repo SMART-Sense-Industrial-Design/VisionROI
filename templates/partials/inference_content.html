@@ -170,7 +170,7 @@
                 : selectedGroup === 'all'
                     ? allRois
                     : selectedGroup === 'pages'
-                        ? allRois.filter(r => (r.type ?? 'roi') === 'page' || ((r.type ?? 'roi') === 'roi' && r.group === 'page1'))
+                        ? allRois.filter(r => (r.type ?? 'roi') === 'page')
                         : []);
             if (rois.length > 0) {
                 renderRoiPlaceholders();
@@ -274,7 +274,7 @@
                 rois = stored === 'all'
                     ? allRois
                     : stored === 'pages'
-                        ? allRois.filter(r => (r.type ?? 'roi') === 'page' || ((r.type ?? 'roi') === 'roi' && r.group === 'page1'))
+                        ? allRois.filter(r => (r.type ?? 'roi') === 'page')
                         : stored
                             ? allRois.filter(r => r.group === stored)
                             : [];
@@ -305,7 +305,7 @@
             const filtered = selected === 'all'
                 ? allRois
                 : selected === 'pages'
-                    ? allRois.filter(r => (r.type ?? 'roi') === 'page' || ((r.type ?? 'roi') === 'roi' && r.group === 'page1'))
+                    ? allRois.filter(r => (r.type ?? 'roi') === 'page')
                     : allRois.filter(r => r.group === selected);
             await stopInference();
             await startInference(filtered, selected);
