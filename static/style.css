@@ -154,3 +154,11 @@ button.delete {
   top: 0;
   z-index: 1;
 }
+
+.roi-canvas {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 1;
+  pointer-events: none;
+}

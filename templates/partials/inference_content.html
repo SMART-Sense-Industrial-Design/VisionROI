@@ -9,6 +9,7 @@
             <p id="cam1-status"></p>
             <div class="video-wrapper">
                 <img id="cam1-video" width="320" height="240" />
+                <canvas id="cam1-canvas" class="roi-canvas"></canvas>
             </div>
         </div>
     </div>
@@ -19,16 +20,25 @@
 </div>
   <script>
       (function() {
-      function createCameraController(cellId) {
+        function createCameraController(cellId) {
         let socket;
         let roiSocket;
         let rois = [];
         let allRois = [];
+        let pageRois = [];
+        let roiRois = [];
+        let camWidth = 0;
+        let camHeight = 0;
         let running = false;
         const cam = cellId.replace(/\D/g, '');
         const getEl = suffix => document.getElementById(`${cellId}-${suffix}`);
         const video = getEl('video');
-        video.onload = () => URL.revokeObjectURL(video.src);
+        video.onload = () => {
+            URL.revokeObjectURL(video.src);
+            drawOverlay();
+        };
+        const canvas = getEl('canvas');
+        const ctx = canvas.getContext('2d');
         const startButton = getEl('startButton');
         const stopButton = getEl('stopButton');
         const statusEl = getEl('status');
@@ -147,6 +157,8 @@
             const cfg = await cfgRes.json();
 
             const { module: _unused, rois: roiPathRaw, ...camCfg } = cfg;
+            camWidth = camCfg.width || video.width || video.clientWidth;
+            camHeight = camCfg.height || video.height || video.clientHeight;
             let roiPath = roiPathRaw;
             if (!roiPath.startsWith('/')) {
                 roiPath = `data_sources/${cfg.name}/${roiPath}`;
@@ -154,21 +166,35 @@
             const res = await fetchWithStatus(`/load_roi_file?path=${encodeURIComponent(roiPath)}`);
             const data = await res.json();
             statusEl.innerText = 'Loaded: ' + data.filename;
-            allRois = data.rois || [];
+            allRois = (data.rois || []).map((r, idx) => {
+                let pts = r.points;
+                if (!pts && 'x' in r && 'y' in r && 'width' in r && 'height' in r) {
+                    pts = [
+                        { x: r.x, y: r.y },
+                        { x: r.x + r.width, y: r.y },
+                        { x: r.x + r.width, y: r.y + r.height },
+                        { x: r.x, y: r.y + r.height }
+                    ];
+                }
+                return { ...r, id: r.id ?? String(idx + 1), points: pts || [] };
+            });
+            pageRois = allRois.filter(r => (r.type ?? 'roi') === 'page');
+            roiRois = allRois.filter(r => (r.type ?? 'roi') === 'roi');
             if (selectedPage) {
                 localStorage.setItem(`${cellId}-page`, selectedPage);
             } else {
                 localStorage.removeItem(`${cellId}-page`);
             }
-            loadPageOptions(allRois, selectedPage);
+            loadPageOptions(pageRois.concat(roiRois), selectedPage);
             rois = roisOverride || (selectedPage && selectedPage !== 'all'
-                ? allRois.filter(r => r.page === selectedPage)
-                : selectedPage === 'all' ? allRois : []);
+                ? roiRois.filter(r => r.page === selectedPage)
+                : selectedPage === 'all' ? roiRois : []);
             if (rois.length > 0) {
                 renderRoiPlaceholders();
             } else {
                 roiGrid.innerHTML = '';
             }
+            drawOverlay();
 
             const startRes = await fetchWithStatus(`/start_inference/${cam}`, {
                 method: 'POST',
@@ -207,6 +233,9 @@
             // clear last frame and update UI
             video.src = '';
             roiGrid.innerHTML = '';
+            pageRois = [];
+            rois = [];
+            drawOverlay();
             statusEl.innerText = 'Stopped';
             startButton.innerText = 'Resume';
             startButton.disabled = false;
@@ -242,6 +271,30 @@
             };
         }
 
+        function drawOverlay() {
+            canvas.width = video.width || video.clientWidth;
+            canvas.height = video.height || video.clientHeight;
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            const sx = camWidth ? canvas.width / camWidth : 1;
+            const sy = camHeight ? canvas.height / camHeight : 1;
+
+            const drawPoly = (pts, color) => {
+                if (!pts || pts.length === 0) return;
+                ctx.beginPath();
+                ctx.moveTo(pts[0].x * sx, pts[0].y * sy);
+                for (let i = 1; i < pts.length; i++) {
+                    ctx.lineTo(pts[i].x * sx, pts[i].y * sy);
+                }
+                ctx.closePath();
+                ctx.strokeStyle = color;
+                ctx.lineWidth = 2;
+                ctx.stroke();
+            };
+
+            pageRois.forEach(r => drawPoly(r.points, 'green'));
+            rois.forEach(r => drawPoly(r.points, 'red'));
+        }
+
         async function checkStatus() {
             const name = sourceSelect.value;
             const res = await fetchWithStatus(`/inference_status/${cam}`);
@@ -250,16 +303,31 @@
                 openSocket();
                 const cfgRes = await fetchWithStatus(`/source_config?name=${encodeURIComponent(name)}`);
                 const cfg = await cfgRes.json();
+                camWidth = cfg.width || video.width || video.clientWidth;
+                camHeight = cfg.height || video.height || video.clientHeight;
                 let roiPath = cfg.rois;
                 if (!roiPath.startsWith('/')) {
                     roiPath = `data_sources/${cfg.name}/${roiPath}`;
                 }
                 const roiRes = await fetchWithStatus(`/load_roi_file?path=${encodeURIComponent(roiPath)}`);
                 const roiData = await roiRes.json();
-                allRois = roiData.rois || [];
-                loadPageOptions(allRois);
+                allRois = (roiData.rois || []).map((r, idx) => {
+                    let pts = r.points;
+                    if (!pts && 'x' in r && 'y' in r && 'width' in r && 'height' in r) {
+                        pts = [
+                            { x: r.x, y: r.y },
+                            { x: r.x + r.width, y: r.y },
+                            { x: r.x + r.width, y: r.y + r.height },
+                            { x: r.x, y: r.y + r.height }
+                        ];
+                    }
+                    return { ...r, id: r.id ?? String(idx + 1), points: pts || [] };
+                });
+                pageRois = allRois.filter(r => (r.type ?? 'roi') === 'page');
+                roiRois = allRois.filter(r => (r.type ?? 'roi') === 'roi');
+                loadPageOptions(pageRois.concat(roiRois));
                 const stored = pageSelect.value;
-                rois = stored === 'all' ? allRois : stored ? allRois.filter(r => r.page === stored) : [];
+                rois = stored === 'all' ? roiRois : stored ? roiRois.filter(r => r.page === stored) : [];
                 await fetchWithStatus(`/start_inference/${cam}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -269,6 +337,7 @@
                     renderRoiPlaceholders();
                     openRoiSocket();
                 }
+                drawOverlay();
                 setRunningUI();
                 running = true;
             } else {
@@ -284,9 +353,8 @@
             const selected = pageSelect.value;
             if (!selected) return;
             localStorage.setItem(`${cellId}-page`, selected);
-            const filtered = selected === 'all' ? allRois : allRois.filter(r => r.page === selected);
             await stopInference();
-            await startInference(filtered, selected);
+            await startInference(null, selected);
         }
 
         function setRunningUI() {
