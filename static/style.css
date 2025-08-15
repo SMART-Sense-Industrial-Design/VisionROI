@@ -111,6 +111,14 @@ main {
   display: inline-block;
 }
 
+.roi-overlay {
+  position: absolute;
+  left: 0;
+  top: 0;
+  pointer-events: none;
+  z-index: 2;
+}
+
 .roi-card {
   display: flex;
   align-items: flex-start;
