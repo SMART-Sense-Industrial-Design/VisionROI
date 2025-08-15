@@ -39,10 +39,43 @@
         const pageSnap = getEl('pageSnap');
         const pageScore = getEl('pageScore');
         let currentPagePoints = null;
+        let currentPageRois = [];
+        function drawPolygon(points, color) {
+            if (!points) return;
+            overlayCtx.strokeStyle = color;
+            overlayCtx.lineWidth = 2;
+            overlayCtx.beginPath();
+            overlayCtx.moveTo(points[0].x, points[0].y);
+            for (let i = 1; i < points.length; i++) {
+                overlayCtx.lineTo(points[i].x, points[i].y);
+            }
+            overlayCtx.closePath();
+            overlayCtx.stroke();
+        }
+        function redrawOverlay() {
+            overlayCtx.clearRect(0, 0, overlay.width, overlay.height);
+            if (currentPagePoints) {
+                drawPolygon(currentPagePoints, 'lime');
+            } else if (currentPageRois.length) {
+                currentPageRois.forEach(r => {
+                    if (r.points) drawPolygon(r.points, 'yellow');
+                });
+            }
+        }
+        function drawPageBox(points) {
+            currentPagePoints = points || null;
+            currentPageRois = [];
+            redrawOverlay();
+        }
+        function drawPageBoxes(list) {
+            currentPagePoints = null;
+            currentPageRois = list || [];
+            redrawOverlay();
+        }
         video.onload = () => {
             overlay.width = video.naturalWidth || video.width;
             overlay.height = video.naturalHeight || video.height;
-            drawPageBox(currentPagePoints);
+            redrawOverlay();
             URL.revokeObjectURL(video.src);
         };
         const startButton = getEl('startButton');
@@ -121,21 +154,6 @@
                 item.appendChild(p);
                 roiGrid.appendChild(item);
             });
-        }
-
-        function drawPageBox(points) {
-            overlayCtx.clearRect(0, 0, overlay.width, overlay.height);
-            currentPagePoints = points || null;
-            if (!points) return;
-            overlayCtx.strokeStyle = 'lime';
-            overlayCtx.lineWidth = 2;
-            overlayCtx.beginPath();
-            overlayCtx.moveTo(points[0].x, points[0].y);
-            for (let i = 1; i < points.length; i++) {
-                overlayCtx.lineTo(points[i].x, points[i].y);
-            }
-            overlayCtx.closePath();
-            overlayCtx.stroke();
         }
 
         function showPageResult(ref, snap, score) {
@@ -234,6 +252,7 @@
             statusEl.innerText = 'Loaded: ' + data.filename;
             allRois = data.rois || [];
             pageRois = allRois.filter(r => (r.type ?? 'roi') === 'page' && r.image);
+            drawPageBoxes(pageRois);
             const roiCandidates = allRois.filter(r => r.module);
             let page = '';
             if (pageRois.length > 0) {
@@ -247,16 +266,16 @@
                         drawPageBox(pageInfo.points);
                         showPageResult(pageInfo.ref, pageInfo.snap, pageInfo.score);
                     } else {
-                        drawPageBox();
+                        drawPageBoxes(pageRois);
                         showPageResult();
                     }
                 } catch (e) {
                     console.error('Page detection failed', e);
-                    drawPageBox();
+                    drawPageBoxes(pageRois);
                     showPageResult();
                 }
             } else {
-                drawPageBox();
+                drawPageBoxes([]);
                 showPageResult();
             }
             rois = roiCandidates.filter(r => !page || r.page === page);
@@ -344,6 +363,7 @@
                 const roiData = await roiRes.json();
                 allRois = roiData.rois || [];
                 pageRois = allRois.filter(r => (r.type ?? 'roi') === 'page' && r.image);
+                drawPageBoxes(pageRois);
                 const roiCandidates = allRois.filter(r => r.module);
                 let page = '';
                 if (pageRois.length > 0) {
@@ -357,16 +377,16 @@
                             drawPageBox(pageInfo.points);
                             showPageResult(pageInfo.ref, pageInfo.snap, pageInfo.score);
                         } else {
-                            drawPageBox();
+                            drawPageBoxes(pageRois);
                             showPageResult();
                         }
                     } catch (e) {
                         console.error('Page detection failed', e);
-                        drawPageBox();
+                        drawPageBoxes(pageRois);
                         showPageResult();
                     }
                 } else {
-                    drawPageBox();
+                    drawPageBoxes([]);
                     showPageResult();
                 }
                 rois = roiCandidates.filter(r => !page || r.page === page);
