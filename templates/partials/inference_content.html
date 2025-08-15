@@ -14,7 +14,6 @@
         </div>
     </div>
     <div class="card roi-card">
-        <select id="cam1-pageSelect" class="form-select mb-2"></select>
         <div id="cam1-rois" class="roi-grid"></div>
     </div>
 </div>
@@ -43,12 +42,10 @@
         const stopButton = getEl('stopButton');
         const statusEl = getEl('status');
         const sourceSelect = getEl('sourceSelect');
-        const pageSelect = getEl('pageSelect');
         const roiGrid = getEl('rois');
 
         startButton.onclick = startInference;
         stopButton.onclick = stopInference;
-        pageSelect.onchange = switchPage;
 
         async function fetchWithStatus(url, options = {}) {
             statusEl.innerText = 'กำลังโหลด...';
@@ -118,30 +115,7 @@
             });
         }
 
-        function loadPageOptions(list, selected = '') {
-            pageSelect.innerHTML = '';
-            const optSelect = document.createElement('option');
-            optSelect.value = '';
-            optSelect.textContent = '-- Select --';
-            pageSelect.appendChild(optSelect);
-            const optAll = document.createElement('option');
-            optAll.value = 'all';
-            optAll.textContent = 'All';
-            pageSelect.appendChild(optAll);
-            const pages = Array.from(
-                new Set(list.map(r => r.page).filter(p => p))
-            );
-            pages.forEach(p => {
-                const opt = document.createElement('option');
-                opt.value = p;
-                opt.textContent = p;
-                pageSelect.appendChild(opt);
-            });
-            const stored = selected || localStorage.getItem(`${cellId}-page`) || '';
-            pageSelect.value = stored;
-        }
-
-        async function startInference(roisOverride = null, selectedPage = '') {
+        async function startInference() {
             if (running) return;
             running = true;
             startButton.disabled = true;
@@ -180,20 +154,8 @@
             });
             pageRois = allRois.filter(r => (r.type ?? 'roi') === 'page');
             roiRois = allRois.filter(r => (r.type ?? 'roi') === 'roi');
-            if (selectedPage) {
-                localStorage.setItem(`${cellId}-page`, selectedPage);
-            } else {
-                localStorage.removeItem(`${cellId}-page`);
-            }
-            loadPageOptions(pageRois.concat(roiRois), selectedPage);
-            rois = roisOverride || (selectedPage && selectedPage !== 'all'
-                ? roiRois.filter(r => r.page === selectedPage)
-                : selectedPage === 'all' ? roiRois : []);
-            if (rois.length > 0) {
-                renderRoiPlaceholders();
-            } else {
-                roiGrid.innerHTML = '';
-            }
+            rois = roiRois;
+            renderRoiPlaceholders();
             drawOverlay();
 
             const startRes = await fetchWithStatus(`/start_inference/${cam}`, {
@@ -234,6 +196,7 @@
             video.src = '';
             roiGrid.innerHTML = '';
             pageRois = [];
+            roiRois = [];
             rois = [];
             drawOverlay();
             statusEl.innerText = 'Stopped';
@@ -292,7 +255,7 @@
             };
 
             pageRois.forEach(r => drawPoly(r.points, 'green'));
-            rois.forEach(r => drawPoly(r.points, 'red'));
+            roiRois.forEach(r => drawPoly(r.points, 'blue'));
         }
 
         async function checkStatus() {
@@ -325,18 +288,14 @@
                 });
                 pageRois = allRois.filter(r => (r.type ?? 'roi') === 'page');
                 roiRois = allRois.filter(r => (r.type ?? 'roi') === 'roi');
-                loadPageOptions(pageRois.concat(roiRois));
-                const stored = pageSelect.value;
-                rois = stored === 'all' ? roiRois : stored ? roiRois.filter(r => r.page === stored) : [];
+                rois = roiRois;
                 await fetchWithStatus(`/start_inference/${cam}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ rois })
                 });
-                if (rois.length > 0) {
-                    renderRoiPlaceholders();
-                    openRoiSocket();
-                }
+                renderRoiPlaceholders();
+                openRoiSocket();
                 drawOverlay();
                 setRunningUI();
                 running = true;
@@ -347,14 +306,6 @@
                 stopButton.disabled = true;
                 running = false;
             }
-        }
-
-        async function switchPage() {
-            const selected = pageSelect.value;
-            if (!selected) return;
-            localStorage.setItem(`${cellId}-page`, selected);
-            await stopInference();
-            await startInference(null, selected);
         }
 
         function setRunningUI() {
