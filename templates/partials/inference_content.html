@@ -13,7 +13,6 @@
         </div>
     </div>
     <div class="card roi-card">
-        <select id="cam1-pageSelect" class="form-select mb-2"></select>
         <div id="cam1-rois" class="roi-grid"></div>
     </div>
 </div>
@@ -33,12 +32,11 @@
         const stopButton = getEl('stopButton');
         const statusEl = getEl('status');
         const sourceSelect = getEl('sourceSelect');
-        const pageSelect = getEl('pageSelect');
         const roiGrid = getEl('rois');
+        let pageRois = [];
 
         startButton.onclick = startInference;
         stopButton.onclick = stopInference;
-        pageSelect.onchange = switchPage;
 
         async function fetchWithStatus(url, options = {}) {
             statusEl.innerText = 'กำลังโหลด...';
@@ -108,30 +106,52 @@
             });
         }
 
-        function loadPageOptions(list, selected = '') {
-            pageSelect.innerHTML = '';
-            const optSelect = document.createElement('option');
-            optSelect.value = '';
-            optSelect.textContent = '-- Select --';
-            pageSelect.appendChild(optSelect);
-            const optAll = document.createElement('option');
-            optAll.value = 'all';
-            optAll.textContent = 'All';
-            pageSelect.appendChild(optAll);
-            const pages = Array.from(
-                new Set(list.map(r => r.page).filter(p => p))
-            );
-            pages.forEach(p => {
-                const opt = document.createElement('option');
-                opt.value = p;
-                opt.textContent = p;
-                pageSelect.appendChild(opt);
-            });
-            const stored = selected || localStorage.getItem(`${cellId}-page`) || '';
-            pageSelect.value = stored;
+        async function detectPage(blob, pages) {
+            if (!pages.length) return '';
+            const img = await createImageBitmap(blob);
+            const canvas = document.createElement('canvas');
+            canvas.width = img.width;
+            canvas.height = img.height;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(img, 0, 0);
+            let bestPage = '';
+            let bestScore = Infinity;
+            for (const p of pages) {
+                const xs = p.points.map(pt => pt.x);
+                const ys = p.points.map(pt => pt.y);
+                const x = Math.min(...xs);
+                const y = Math.min(...ys);
+                const w = Math.max(...xs) - x;
+                const h = Math.max(...ys) - y;
+                if (w <= 0 || h <= 0) continue;
+                const snapData = ctx.getImageData(x, y, w, h);
+                const refImg = new Image();
+                refImg.src = `data:image/jpeg;base64,${p.image}`;
+                await refImg.decode();
+                const refCanvas = document.createElement('canvas');
+                refCanvas.width = w;
+                refCanvas.height = h;
+                const refCtx = refCanvas.getContext('2d');
+                refCtx.drawImage(refImg, 0, 0, w, h);
+                const refData = refCtx.getImageData(0, 0, w, h);
+                let diff = 0;
+                const d1 = snapData.data;
+                const d2 = refData.data;
+                for (let i = 0; i < d1.length; i += 4) {
+                    diff += Math.abs(d1[i] - d2[i]) +
+                            Math.abs(d1[i + 1] - d2[i + 1]) +
+                            Math.abs(d1[i + 2] - d2[i + 2]);
+                }
+                diff = diff / (w * h);
+                if (diff < bestScore) {
+                    bestScore = diff;
+                    bestPage = p.page;
+                }
+            }
+            return bestPage;
         }
 
-        async function startInference(roisOverride = null, selectedPage = '') {
+        async function startInference() {
             if (running) return;
             running = true;
             startButton.disabled = true;
@@ -145,51 +165,49 @@
             }
             const cfgRes = await fetchWithStatus(`/source_config?name=${encodeURIComponent(name)}`);
             const cfg = await cfgRes.json();
-
             const { module: _unused, rois: roiPathRaw, ...camCfg } = cfg;
             let roiPath = roiPathRaw;
             if (!roiPath.startsWith('/')) {
                 roiPath = `data_sources/${cfg.name}/${roiPath}`;
             }
+            await fetchWithStatus(`/start_inference/${cam}`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ ...camCfg, rois: [] })
+            });
+            openSocket();
             const res = await fetchWithStatus(`/load_roi_file?path=${encodeURIComponent(roiPath)}`);
             const data = await res.json();
             statusEl.innerText = 'Loaded: ' + data.filename;
             allRois = data.rois || [];
-            if (selectedPage) {
-                localStorage.setItem(`${cellId}-page`, selectedPage);
-            } else {
-                localStorage.removeItem(`${cellId}-page`);
+            pageRois = allRois.filter(r => (r.type ?? 'roi') === 'page' && r.image);
+            const roiCandidates = allRois.filter(r => r.module);
+            let page = '';
+            if (pageRois.length > 0) {
+                try {
+                    const snapRes = await fetchWithStatus(`/ws_snapshot/${cam}`);
+                    const blob = await snapRes.blob();
+                    page = await detectPage(blob, pageRois);
+                    statusEl.innerText = 'Detected page: ' + page;
+                } catch (e) {
+                    console.error('Page detection failed', e);
+                }
             }
-            loadPageOptions(allRois, selectedPage);
-            rois = roisOverride || (selectedPage && selectedPage !== 'all'
-                ? allRois.filter(r => r.page === selectedPage)
-                : selectedPage === 'all' ? allRois : []);
-            if (rois.length > 0) {
-                renderRoiPlaceholders();
-            } else {
-                roiGrid.innerHTML = '';
-            }
-
-            const startRes = await fetchWithStatus(`/start_inference/${cam}`, {
+            rois = roiCandidates.filter(r => !page || r.page === page);
+            await fetchWithStatus(`/start_inference/${cam}`, {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ ...camCfg, rois })
+                body: JSON.stringify({ rois })
             });
-            const startData = await startRes.json();
-            if (startData.status === 'started' || startData.status === 'already_running') {
-                openSocket();
-                if (rois.length > 0) {
-                    openRoiSocket();
-                    showAlert('Inference started', 'success');
-                } else {
-                    showAlert('Camera started', 'success');
-                }
-                setRunningUI();
+            if (rois.length > 0) {
+                renderRoiPlaceholders();
+                openRoiSocket();
+                showAlert('Inference started', 'success');
             } else {
-                running = false;
-                startButton.disabled = false;
-                showAlert('Failed to start inference', 'error');
+                roiGrid.innerHTML = '';
+                showAlert('Camera started', 'success');
             }
+            setRunningUI();
         }
 
         async function stopInference() {
@@ -257,9 +275,20 @@
                 const roiRes = await fetchWithStatus(`/load_roi_file?path=${encodeURIComponent(roiPath)}`);
                 const roiData = await roiRes.json();
                 allRois = roiData.rois || [];
-                loadPageOptions(allRois);
-                const stored = pageSelect.value;
-                rois = stored === 'all' ? allRois : stored ? allRois.filter(r => r.page === stored) : [];
+                pageRois = allRois.filter(r => (r.type ?? 'roi') === 'page' && r.image);
+                const roiCandidates = allRois.filter(r => r.module);
+                let page = '';
+                if (pageRois.length > 0) {
+                    try {
+                        const snapRes = await fetchWithStatus(`/ws_snapshot/${cam}`);
+                        const blob = await snapRes.blob();
+                        page = await detectPage(blob, pageRois);
+                        statusEl.innerText = 'Detected page: ' + page;
+                    } catch (e) {
+                        console.error('Page detection failed', e);
+                    }
+                }
+                rois = roiCandidates.filter(r => !page || r.page === page);
                 await fetchWithStatus(`/start_inference/${cam}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -278,15 +307,6 @@
                 stopButton.disabled = true;
                 running = false;
             }
-        }
-
-        async function switchPage() {
-            const selected = pageSelect.value;
-            if (!selected) return;
-            localStorage.setItem(`${cellId}-page`, selected);
-            const filtered = selected === 'all' ? allRois : allRois.filter(r => r.page === selected);
-            await stopInference();
-            await startInference(filtered, selected);
         }
 
         function setRunningUI() {
