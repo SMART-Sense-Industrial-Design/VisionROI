@@ -162,3 +162,8 @@ button.delete {
   z-index: 1;
   pointer-events: none;
 }
+
+.page-label {
+  font-weight: bold;
+}
+
