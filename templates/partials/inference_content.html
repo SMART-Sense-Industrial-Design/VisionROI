@@ -118,6 +118,13 @@
             optAll.value = 'all';
             optAll.textContent = 'All';
             groupSelect.appendChild(optAll);
+            const hasPages = list.some(r => (r.type ?? 'roi') === 'page');
+            if (hasPages) {
+                const optPages = document.createElement('option');
+                optPages.value = 'pages';
+                optPages.textContent = 'Pages';
+                groupSelect.appendChild(optPages);
+            }
             const groups = Array.from(
                 new Set(list.map(r => r.group).filter(g => g))
             );
@@ -161,9 +168,9 @@
                 localStorage.removeItem(`${cellId}-group`);
             }
             loadGroupOptions(allRois, selectedGroup);
-            rois = roisOverride || (selectedGroup && selectedGroup !== 'all'
+            rois = roisOverride || (selectedGroup && selectedGroup !== 'all' && selectedGroup !== 'pages'
                 ? allRois.filter(r => r.group === selectedGroup)
-                : selectedGroup === 'all' ? allRois : []);
+                : selectedGroup === 'all' ? allRois : selectedGroup === 'pages' ? allRois.filter(r => (r.type ?? 'roi') === 'page') : []);
             if (rois.length > 0) {
                 renderRoiPlaceholders();
             } else {
@@ -228,6 +235,10 @@
             roiSocket.onmessage = function(event) {
                 try {
                     const data = JSON.parse(event.data);
+                    if (data.id === '__page__' && data.group) {
+                        switchGroupAuto(data.group);
+                        return;
+                    }
                     const imgEl = document.getElementById(`${cellId}-roi-${data.id}`);
                     if (imgEl) {
                         imgEl.src = `data:image/jpeg;base64,${data.image}`;
@@ -259,7 +270,7 @@
                 allRois = roiData.rois || [];
                 loadGroupOptions(allRois);
                 const stored = groupSelect.value;
-                rois = stored === 'all' ? allRois : stored ? allRois.filter(r => r.group === stored) : [];
+                rois = stored === 'all' ? allRois : stored === 'pages' ? allRois.filter(r => (r.type ?? 'roi') === 'page') : stored ? allRois.filter(r => r.group === stored) : [];
                 await fetchWithStatus(`/start_inference/${cam}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -284,9 +295,16 @@
             const selected = groupSelect.value;
             if (!selected) return;
             localStorage.setItem(`${cellId}-group`, selected);
-            const filtered = selected === 'all' ? allRois : allRois.filter(r => r.group === selected);
+            const filtered = selected === 'all' ? allRois : selected === 'pages' ? allRois.filter(r => (r.type ?? 'roi') === 'page') : allRois.filter(r => r.group === selected);
             await stopInference();
             await startInference(filtered, selected);
+        }
+
+        async function switchGroupAuto(name) {
+            const filtered = allRois.filter(r => r.group === name);
+            groupSelect.value = name;
+            await stopInference();
+            await startInference(filtered, name);
         }
 
         function setRunningUI() {

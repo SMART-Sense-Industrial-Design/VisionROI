@@ -197,6 +197,7 @@ async def read_and_queue_frame(
 
 async def run_inference_loop(cam_id: int):
     module_cache: dict[str, tuple[ModuleType | None, bool, bool]] = {}
+    last_page: dict[int, str] = {}
 
     async def process_frame(frame):
         rois = inference_rois.get(cam_id, [])
@@ -204,7 +205,63 @@ async def run_inference_loop(cam_id: int):
             return cv2.resize(frame, (0, 0), fx=0.5, fy=0.5)
 
         save_flag = bool(save_roi_flags.get(cam_id))
-        for i, r in enumerate(rois):
+
+        page_rois = [r for r in rois if r.get("type") == "page"]
+        other_rois = [r for r in rois if r.get("type") != "page"]
+
+        if page_rois and np is not None:
+            best_name = None
+            best_score = None
+            for r in page_rois:
+                pts = r.get("points", [])
+                if len(pts) != 4:
+                    continue
+                src = np.array([[p["x"], p["y"]] for p in pts], dtype=np.float32)
+                width_a = np.linalg.norm(src[0] - src[1])
+                width_b = np.linalg.norm(src[2] - src[3])
+                max_w = int(max(width_a, width_b))
+                height_a = np.linalg.norm(src[0] - src[3])
+                height_b = np.linalg.norm(src[1] - src[2])
+                max_h = int(max(height_a, height_b))
+                dst = np.array(
+                    [[0, 0], [max_w - 1, 0], [max_w - 1, max_h - 1], [0, max_h - 1]],
+                    dtype=np.float32,
+                )
+                matrix = cv2.getPerspectiveTransform(src, dst)
+                roi = cv2.warpPerspective(frame, matrix, (max_w, max_h))
+                img = r.get("_img")
+                if img is None:
+                    img_b64 = r.get("image")
+                    if img_b64:
+                        try:
+                            img_bytes = base64.b64decode(img_b64)
+                            arr = np.frombuffer(img_bytes, dtype=np.uint8)
+                            img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+                            if img is not None:
+                                r["_img"] = img
+                        except Exception:
+                            img = None
+                if img is None:
+                    continue
+                if img.shape[:2] != roi.shape[:2]:
+                    img = cv2.resize(img, (roi.shape[1], roi.shape[0]))
+                diff = float(np.mean((roi.astype(np.float32) - img.astype(np.float32)) ** 2))
+                cv2.polylines(frame, [src.astype(int)], True, (0, 255, 0), 2)
+                if best_score is None or diff < best_score:
+                    best_score = diff
+                    best_name = r.get("page") or r.get("name")
+            if best_name and best_name != last_page.get(cam_id):
+                last_page[cam_id] = best_name
+                try:
+                    q = get_roi_result_queue(cam_id)
+                    payload = json.dumps({"id": "__page__", "group": best_name})
+                    if q.full():
+                        q.get_nowait()
+                    await q.put(payload)
+                except Exception:
+                    pass
+
+        for i, r in enumerate(other_rois):
             if np is None:
                 continue
             pts = r.get("points", [])
@@ -537,7 +594,7 @@ async def perform_start_inference(cam_id: int, rois=None, save_state: bool = Tru
     processed_rois = []
     for r in rois:
         mod_name = r.get("module")
-        if mod_name:
+        if mod_name or r.get("type") == "page":
             processed_rois.append(r)
     inference_rois[cam_id] = processed_rois
     queue = get_roi_result_queue(cam_id)
