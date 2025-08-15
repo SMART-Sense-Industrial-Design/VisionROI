@@ -151,6 +151,8 @@
             socket.onmessage = function(event) {
                 const blob = new Blob([event.data], { type: "image/jpeg" });
                 video.src = URL.createObjectURL(blob);
+                // redraw ROIs so page frames stay visible even when the video updates
+                drawAllRois();
             };
             socket.onclose = function() {
                 socket = null;
