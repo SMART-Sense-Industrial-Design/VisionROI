@@ -127,6 +127,11 @@ async def roi_page():
 async def inference():
     return await render_template("inference.html")
 
+# ✅ หน้า inference page detection
+@app.route("/inference_page")
+async def inference_page():
+    return await render_template("inference_page.html")
+
 
 def load_custom_module(name: str) -> ModuleType | None:
     path = os.path.join("inference_modules", name, "custom.py")
