@@ -119,7 +119,7 @@
             if (ref && snap) {
                 pageRef.src = ref;
                 pageSnap.src = snap;
-                pageScore.textContent = 'Score: ' + score.toFixed(2);
+                pageScore.textContent = 'Similarity: ' + (score * 100).toFixed(2) + '%';
             } else {
                 pageRef.src = '';
                 pageSnap.src = '';
@@ -167,18 +167,19 @@
                             Math.abs(d1[i + 1] - d2[i + 1]) +
                             Math.abs(d1[i + 2] - d2[i + 2]);
                 }
-                diff = diff / (w * h);
-                if (!best || diff < best.score) {
+                const maxDiff = 255 * 3 * w * h;
+                const similarity = 1 - diff / maxDiff;
+                if (!best || similarity > best.score) {
                     best = {
                         page: p.page,
                         points: p.points,
                         ref: `data:image/jpeg;base64,${p.image}`,
                         snap: snapCanvas.toDataURL('image/jpeg'),
-                        score: diff
+                        score: similarity
                     };
                 }
             }
-            return best;
+            return best && best.score >= 0.8 ? best : null;
         }
 
         async function startInference() {
