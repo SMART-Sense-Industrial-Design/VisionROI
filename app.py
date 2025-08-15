@@ -544,12 +544,12 @@ async def perform_start_inference(
         if r_type == "page":
             page_list.append(r)
             continue
-        if page is not None and r.get("page") != page:
-            continue
-        mod_name = r.get("module")
-        if mod_name:
-            roi_list.append(r)
-    inference_rois[cam_id] = roi_list
+        if page is not None and r.get("page") == page:
+            mod_name = r.get("module")
+            if mod_name:
+                roi_list.append(r)
+    inference_rois[cam_id] = roi_list if page is not None else []
+
     page_rois[cam_id] = page_list
     queue = get_roi_result_queue(cam_id)
     while not queue.empty():
@@ -576,7 +576,14 @@ async def start_inference(cam_id: int):
             return jsonify({"status": "error", "cam_id": cam_id}), 400
     ok = await perform_start_inference(cam_id, rois, page)
     if ok:
-        return jsonify({"status": "started", "cam_id": cam_id}), 200
+        return jsonify(
+            {
+                "status": "started",
+                "cam_id": cam_id,
+                "rois": inference_rois.get(cam_id, []),
+                "page_rois": page_rois.get(cam_id, []),
+            }
+        ), 200
     return jsonify({"status": "error", "cam_id": cam_id}), 400
 
 

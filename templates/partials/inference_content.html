@@ -28,7 +28,6 @@
         let socket;
         let roiSocket;
         let rois = [];
-        let allRois = [];
         let running = false;
         const cam = cellId.replace(/\D/g, '');
         const getEl = suffix => document.getElementById(`${cellId}-${suffix}`);
@@ -236,24 +235,16 @@
             }
             const cfgRes = await fetchWithStatus(`/source_config?name=${encodeURIComponent(name)}`);
             const cfg = await cfgRes.json();
-            const { module: _unused, rois: roiPathRaw, ...camCfg } = cfg;
-            let roiPath = roiPathRaw;
-            if (!roiPath.startsWith('/')) {
-                roiPath = `data_sources/${cfg.name}/${roiPath}`;
-            }
-            await fetchWithStatus(`/start_inference/${cam}`, {
+            const { module: _unused, rois: _roiPathRaw, ...camCfg } = cfg;
+            const startRes = await fetchWithStatus(`/start_inference/${cam}`, {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({ ...camCfg })
             });
+            const startData = await startRes.json();
             openSocket();
-            const res = await fetchWithStatus(`/load_roi_file?path=${encodeURIComponent(roiPath)}`);
-            const data = await res.json();
-            statusEl.innerText = 'Loaded: ' + data.filename;
-            allRois = data.rois || [];
-            pageRois = allRois.filter(r => (r.type ?? 'roi') === 'page' && r.image);
+            pageRois = startData.page_rois || [];
             drawPageBoxes(pageRois);
-            const roiCandidates = allRois.filter(r => r.module);
             let page = '';
             if (pageRois.length > 0) {
                 try {
@@ -278,12 +269,13 @@
                 drawPageBoxes([]);
                 showPageResult();
             }
-            rois = roiCandidates.filter(r => !page || r.page === page);
-            await fetchWithStatus(`/start_inference/${cam}`, {
+            const infRes = await fetchWithStatus(`/start_inference/${cam}`, {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({ page })
             });
+            const infData = await infRes.json();
+            rois = infData.rois || [];
             if (rois.length > 0) {
                 renderRoiPlaceholders();
                 openRoiSocket();
@@ -352,19 +344,15 @@
             const res = await fetchWithStatus(`/inference_status/${cam}`);
             const data = await res.json();
             if (data.running && name) {
+                const startRes = await fetchWithStatus(`/start_inference/${cam}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({})
+                });
+                const startData = await startRes.json();
                 openSocket();
-                const cfgRes = await fetchWithStatus(`/source_config?name=${encodeURIComponent(name)}`);
-                const cfg = await cfgRes.json();
-                let roiPath = cfg.rois;
-                if (!roiPath.startsWith('/')) {
-                    roiPath = `data_sources/${cfg.name}/${roiPath}`;
-                }
-                const roiRes = await fetchWithStatus(`/load_roi_file?path=${encodeURIComponent(roiPath)}`);
-                const roiData = await roiRes.json();
-                allRois = roiData.rois || [];
-                pageRois = allRois.filter(r => (r.type ?? 'roi') === 'page' && r.image);
+                pageRois = startData.page_rois || [];
                 drawPageBoxes(pageRois);
-                const roiCandidates = allRois.filter(r => r.module);
                 let page = '';
                 if (pageRois.length > 0) {
                     try {
@@ -389,12 +377,13 @@
                     drawPageBoxes([]);
                     showPageResult();
                 }
-                rois = roiCandidates.filter(r => !page || r.page === page);
-                await fetchWithStatus(`/start_inference/${cam}`, {
+                const infRes = await fetchWithStatus(`/start_inference/${cam}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ page })
                 });
+                const infData = await infRes.json();
+                rois = infData.rois || [];
                 if (rois.length > 0) {
                     renderRoiPlaceholders();
                     openRoiSocket();
