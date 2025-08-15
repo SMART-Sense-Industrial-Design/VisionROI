@@ -9,6 +9,12 @@
             <p id="cam1-status"></p>
             <div class="video-wrapper">
                 <img id="cam1-video" width="320" height="240" />
+                <canvas id="cam1-overlay" class="overlay-canvas" width="320" height="240"></canvas>
+            </div>
+            <div id="cam1-pageResult" class="page-result">
+                <img id="cam1-pageRef" />
+                <img id="cam1-pageSnap" />
+                <p id="cam1-pageScore" class="page-result-score"></p>
             </div>
         </div>
     </div>
@@ -27,7 +33,18 @@
         const cam = cellId.replace(/\D/g, '');
         const getEl = suffix => document.getElementById(`${cellId}-${suffix}`);
         const video = getEl('video');
-        video.onload = () => URL.revokeObjectURL(video.src);
+        const overlay = getEl('overlay');
+        const overlayCtx = overlay.getContext('2d');
+        const pageRef = getEl('pageRef');
+        const pageSnap = getEl('pageSnap');
+        const pageScore = getEl('pageScore');
+        let currentPagePoints = null;
+        video.onload = () => {
+            overlay.width = video.naturalWidth || video.width;
+            overlay.height = video.naturalHeight || video.height;
+            drawPageBox(currentPagePoints);
+            URL.revokeObjectURL(video.src);
+        };
         const startButton = getEl('startButton');
         const stopButton = getEl('stopButton');
         const statusEl = getEl('status');
@@ -106,16 +123,42 @@
             });
         }
 
+        function drawPageBox(points) {
+            overlayCtx.clearRect(0, 0, overlay.width, overlay.height);
+            currentPagePoints = points || null;
+            if (!points) return;
+            overlayCtx.strokeStyle = 'lime';
+            overlayCtx.lineWidth = 2;
+            overlayCtx.beginPath();
+            overlayCtx.moveTo(points[0].x, points[0].y);
+            for (let i = 1; i < points.length; i++) {
+                overlayCtx.lineTo(points[i].x, points[i].y);
+            }
+            overlayCtx.closePath();
+            overlayCtx.stroke();
+        }
+
+        function showPageResult(ref, snap, score) {
+            if (ref && snap) {
+                pageRef.src = ref;
+                pageSnap.src = snap;
+                pageScore.textContent = 'Score: ' + score.toFixed(2);
+            } else {
+                pageRef.src = '';
+                pageSnap.src = '';
+                pageScore.textContent = '';
+            }
+        }
+
         async function detectPage(blob, pages) {
-            if (!pages.length) return '';
+            if (!pages.length) return null;
             const img = await createImageBitmap(blob);
             const canvas = document.createElement('canvas');
             canvas.width = img.width;
             canvas.height = img.height;
             const ctx = canvas.getContext('2d');
             ctx.drawImage(img, 0, 0);
-            let bestPage = '';
-            let bestScore = Infinity;
+            let best = null;
             for (const p of pages) {
                 const xs = p.points.map(pt => pt.x);
                 const ys = p.points.map(pt => pt.y);
@@ -124,7 +167,12 @@
                 const w = Math.max(...xs) - x;
                 const h = Math.max(...ys) - y;
                 if (w <= 0 || h <= 0) continue;
-                const snapData = ctx.getImageData(x, y, w, h);
+                const snapCanvas = document.createElement('canvas');
+                snapCanvas.width = w;
+                snapCanvas.height = h;
+                const snapCtx = snapCanvas.getContext('2d');
+                snapCtx.drawImage(canvas, x, y, w, h, 0, 0, w, h);
+                const snapData = snapCtx.getImageData(0, 0, w, h);
                 const refImg = new Image();
                 refImg.src = `data:image/jpeg;base64,${p.image}`;
                 await refImg.decode();
@@ -143,12 +191,17 @@
                             Math.abs(d1[i + 2] - d2[i + 2]);
                 }
                 diff = diff / (w * h);
-                if (diff < bestScore) {
-                    bestScore = diff;
-                    bestPage = p.page;
+                if (!best || diff < best.score) {
+                    best = {
+                        page: p.page,
+                        points: p.points,
+                        ref: `data:image/jpeg;base64,${p.image}`,
+                        snap: snapCanvas.toDataURL('image/jpeg'),
+                        score: diff
+                    };
                 }
             }
-            return bestPage;
+            return best;
         }
 
         async function startInference() {
@@ -187,11 +240,24 @@
                 try {
                     const snapRes = await fetchWithStatus(`/ws_snapshot/${cam}`);
                     const blob = await snapRes.blob();
-                    page = await detectPage(blob, pageRois);
-                    statusEl.innerText = 'Detected page: ' + page;
+                    const pageInfo = await detectPage(blob, pageRois);
+                    if (pageInfo) {
+                        page = pageInfo.page;
+                        statusEl.innerText = 'Detected page: ' + page;
+                        drawPageBox(pageInfo.points);
+                        showPageResult(pageInfo.ref, pageInfo.snap, pageInfo.score);
+                    } else {
+                        drawPageBox();
+                        showPageResult();
+                    }
                 } catch (e) {
                     console.error('Page detection failed', e);
+                    drawPageBox();
+                    showPageResult();
                 }
+            } else {
+                drawPageBox();
+                showPageResult();
             }
             rois = roiCandidates.filter(r => !page || r.page === page);
             await fetchWithStatus(`/start_inference/${cam}`, {
@@ -225,6 +291,8 @@
             // clear last frame and update UI
             video.src = '';
             roiGrid.innerHTML = '';
+            drawPageBox();
+            showPageResult();
             statusEl.innerText = 'Stopped';
             startButton.innerText = 'Resume';
             startButton.disabled = false;
@@ -282,11 +350,24 @@
                     try {
                         const snapRes = await fetchWithStatus(`/ws_snapshot/${cam}`);
                         const blob = await snapRes.blob();
-                        page = await detectPage(blob, pageRois);
-                        statusEl.innerText = 'Detected page: ' + page;
+                        const pageInfo = await detectPage(blob, pageRois);
+                        if (pageInfo) {
+                            page = pageInfo.page;
+                            statusEl.innerText = 'Detected page: ' + page;
+                            drawPageBox(pageInfo.points);
+                            showPageResult(pageInfo.ref, pageInfo.snap, pageInfo.score);
+                        } else {
+                            drawPageBox();
+                            showPageResult();
+                        }
                     } catch (e) {
                         console.error('Page detection failed', e);
+                        drawPageBox();
+                        showPageResult();
                     }
+                } else {
+                    drawPageBox();
+                    showPageResult();
                 }
                 rois = roiCandidates.filter(r => !page || r.page === page);
                 await fetchWithStatus(`/start_inference/${cam}`, {
