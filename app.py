@@ -35,6 +35,7 @@ roi_frame_queues: dict[int, asyncio.Queue[bytes | None]] = {}
 roi_result_queues: dict[int, asyncio.Queue[str | None]] = {}
 roi_tasks: dict[int, asyncio.Task | None] = {}
 inference_rois: dict[int, list[dict]] = {}
+page_rois: dict[int, list[dict]] = {}
 active_sources: dict[int, str] = {}
 save_roi_flags: dict[int, bool] = {}
 
@@ -515,7 +516,9 @@ async def create_source():
 
 
 # ฟังก์ชันช่วยเริ่มงาน inference เพื่อใช้ซ้ำได้ทั้งจาก route และตอนรีสตาร์ท
-async def perform_start_inference(cam_id: int, rois=None, save_state: bool = True):
+async def perform_start_inference(
+    cam_id: int, rois=None, page: str | None = None, save_state: bool = True
+):
     if roi_tasks.get(cam_id) and not roi_tasks[cam_id].done():
         return False
     if rois is None:
@@ -534,12 +537,20 @@ async def perform_start_inference(cam_id: int, rois=None, save_state: bool = Tru
             rois = []
     if not isinstance(rois, list):
         rois = []
-    processed_rois = []
+    roi_list: list[dict] = []
+    page_list: list[dict] = []
     for r in rois:
+        r_type = r.get("type", "roi")
+        if r_type == "page":
+            page_list.append(r)
+            continue
+        if page is not None and r.get("page") != page:
+            continue
         mod_name = r.get("module")
         if mod_name:
-            processed_rois.append(r)
-    inference_rois[cam_id] = processed_rois
+            roi_list.append(r)
+    inference_rois[cam_id] = roi_list
+    page_rois[cam_id] = page_list
     queue = get_roi_result_queue(cam_id)
     while not queue.empty():
         queue.get_nowait()
@@ -558,11 +569,12 @@ async def start_inference(cam_id: int):
     data = await request.get_json() or {}
     cfg = dict(data)
     rois = cfg.pop("rois", None)
+    page = cfg.pop("page", None)
     if cfg:
         cfg_ok = await apply_camera_settings(cam_id, cfg)
         if not cfg_ok:
             return jsonify({"status": "error", "cam_id": cam_id}), 400
-    ok = await perform_start_inference(cam_id, rois)
+    ok = await perform_start_inference(cam_id, rois, page)
     if ok:
         return jsonify({"status": "started", "cam_id": cam_id}), 200
     return jsonify({"status": "error", "cam_id": cam_id}), 400

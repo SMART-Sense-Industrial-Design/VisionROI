@@ -244,7 +244,7 @@
             await fetchWithStatus(`/start_inference/${cam}`, {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ ...camCfg, rois: [] })
+                body: JSON.stringify({ ...camCfg })
             });
             openSocket();
             const res = await fetchWithStatus(`/load_roi_file?path=${encodeURIComponent(roiPath)}`);
@@ -282,7 +282,7 @@
             await fetchWithStatus(`/start_inference/${cam}`, {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ rois })
+                body: JSON.stringify({ page })
             });
             if (rois.length > 0) {
                 renderRoiPlaceholders();
@@ -393,7 +393,7 @@
                 await fetchWithStatus(`/start_inference/${cam}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ rois })
+                    body: JSON.stringify({ page })
                 });
                 if (rois.length > 0) {
                     renderRoiPlaceholders();
