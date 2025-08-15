@@ -155,13 +155,6 @@ button.delete {
   z-index: 1;
 }
 
-.overlay-canvas {
-  position: absolute;
-  left: 0;
-  top: 0;
-  z-index: 1;
-}
-
 .page-result {
   display: flex;
   align-items: center;

@@ -9,7 +9,6 @@
             <p id="cam1-status"></p>
             <div class="video-wrapper">
                 <img id="cam1-video" width="320" height="240" />
-                <canvas id="cam1-overlay" class="overlay-canvas" width="320" height="240"></canvas>
             </div>
             <div id="cam1-pageResult" class="page-result">
                 <img id="cam1-pageRef" />
@@ -32,49 +31,10 @@
         const cam = cellId.replace(/\D/g, '');
         const getEl = suffix => document.getElementById(`${cellId}-${suffix}`);
         const video = getEl('video');
-        const overlay = getEl('overlay');
-        const overlayCtx = overlay.getContext('2d');
         const pageRef = getEl('pageRef');
         const pageSnap = getEl('pageSnap');
         const pageScore = getEl('pageScore');
-        let currentPagePoints = null;
-        let currentPageRois = [];
-        function drawPolygon(points, color) {
-            if (!points) return;
-            overlayCtx.strokeStyle = color;
-            overlayCtx.lineWidth = 2;
-            overlayCtx.beginPath();
-            overlayCtx.moveTo(points[0].x, points[0].y);
-            for (let i = 1; i < points.length; i++) {
-                overlayCtx.lineTo(points[i].x, points[i].y);
-            }
-            overlayCtx.closePath();
-            overlayCtx.stroke();
-        }
-        function redrawOverlay() {
-            overlayCtx.clearRect(0, 0, overlay.width, overlay.height);
-            if (currentPagePoints) {
-                drawPolygon(currentPagePoints, 'lime');
-            } else if (currentPageRois.length) {
-                currentPageRois.forEach(r => {
-                    if (r.points) drawPolygon(r.points, 'yellow');
-                });
-            }
-        }
-        function drawPageBox(points) {
-            currentPagePoints = points || null;
-            currentPageRois = [];
-            redrawOverlay();
-        }
-        function drawPageBoxes(list) {
-            currentPagePoints = null;
-            currentPageRois = list || [];
-            redrawOverlay();
-        }
         video.onload = () => {
-            overlay.width = video.naturalWidth || video.width;
-            overlay.height = video.naturalHeight || video.height;
-            redrawOverlay();
             URL.revokeObjectURL(video.src);
         };
         const startButton = getEl('startButton');
@@ -244,7 +204,6 @@
             const startData = await startRes.json();
             openSocket();
             pageRois = startData.page_rois || [];
-            drawPageBoxes(pageRois);
             let page = '';
             if (pageRois.length > 0) {
                 try {
@@ -254,19 +213,15 @@
                     if (pageInfo) {
                         page = pageInfo.page;
                         statusEl.innerText = 'Detected page: ' + page;
-                        drawPageBox(pageInfo.points);
                         showPageResult(pageInfo.ref, pageInfo.snap, pageInfo.score);
                     } else {
-                        drawPageBoxes(pageRois);
                         showPageResult();
                     }
                 } catch (e) {
                     console.error('Page detection failed', e);
-                    drawPageBoxes(pageRois);
                     showPageResult();
                 }
             } else {
-                drawPageBoxes([]);
                 showPageResult();
             }
             const infRes = await fetchWithStatus(`/start_inference/${cam}`, {
@@ -302,7 +257,6 @@
             // clear last frame and update UI
             video.src = '';
             roiGrid.innerHTML = '';
-            drawPageBox();
             showPageResult();
             statusEl.innerText = 'Stopped';
             startButton.innerText = 'Resume';
@@ -352,7 +306,6 @@
                 const startData = await startRes.json();
                 openSocket();
                 pageRois = startData.page_rois || [];
-                drawPageBoxes(pageRois);
                 let page = '';
                 if (pageRois.length > 0) {
                     try {
@@ -362,19 +315,15 @@
                         if (pageInfo) {
                             page = pageInfo.page;
                             statusEl.innerText = 'Detected page: ' + page;
-                            drawPageBox(pageInfo.points);
                             showPageResult(pageInfo.ref, pageInfo.snap, pageInfo.score);
                         } else {
-                            drawPageBoxes(pageRois);
                             showPageResult();
                         }
                     } catch (e) {
                         console.error('Page detection failed', e);
-                        drawPageBoxes(pageRois);
                         showPageResult();
                     }
                 } else {
-                    drawPageBoxes([]);
                     showPageResult();
                 }
                 const infRes = await fetchWithStatus(`/start_inference/${cam}`, {
