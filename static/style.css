@@ -82,7 +82,7 @@ main {
   width: 80px;
   height: auto;
   display: block;
-  border: 2px solid red;
+  border: 2px solid green;
 }
 
 .roi-text {
@@ -109,6 +109,14 @@ main {
 .video-wrapper {
   position: relative;
   display: inline-block;
+}
+
+.roi-overlay {
+  position: absolute;
+  left: 0;
+  top: 0;
+  pointer-events: none;
+  z-index: 2;
 }
 
 .roi-card {
