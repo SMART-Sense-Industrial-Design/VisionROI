@@ -10,7 +10,7 @@ cv2_stub = stub_cv2()
 import app
 
 
-def test_inference_switches_module_by_group(monkeypatch):
+def test_inference_switches_module_by_page(monkeypatch):
     calls = []
 
     def make_mod(name):
@@ -54,12 +54,12 @@ def test_inference_switches_module_by_group(monkeypatch):
 
     dummy_frame = object()
 
-    rois_group1 = [{
+    rois_page1 = [{
         "id": "1",
         "module": "A",
         "points": [{"x":0,"y":0},{"x":1,"y":0},{"x":1,"y":1},{"x":0,"y":1}],
     }]
-    rois_group2 = [{
+    rois_page2 = [{
         "id": "1",
         "module": "B",
         "points": [{"x":0,"y":0},{"x":1,"y":0},{"x":1,"y":1},{"x":0,"y":1}],
@@ -68,7 +68,7 @@ def test_inference_switches_module_by_group(monkeypatch):
     async def fake_read_and_queue_frame(cam_id, queue, frame_processor=None):
         if fake_read_and_queue_frame.count == 0:
             await frame_processor(dummy_frame)
-            app.inference_rois[cam_id] = rois_group2
+            app.inference_rois[cam_id] = rois_page2
             fake_read_and_queue_frame.count += 1
         else:
             await frame_processor(dummy_frame)
@@ -77,7 +77,7 @@ def test_inference_switches_module_by_group(monkeypatch):
 
     monkeypatch.setattr(app, "read_and_queue_frame", fake_read_and_queue_frame)
 
-    app.inference_rois[0] = rois_group1
+    app.inference_rois[0] = rois_page1
     app.save_roi_flags[0] = False
 
     asyncio.run(app.run_inference_loop(0))

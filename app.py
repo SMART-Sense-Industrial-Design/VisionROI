@@ -647,10 +647,10 @@ async def list_inference_modules():
     return jsonify(names)
 
 
-@app.route("/groups")
-async def list_groups():
+@app.route("/pages")
+async def list_pages():
     base_dir = Path(__file__).resolve().parent / "data_sources"
-    groups: set[str] = set()
+    pages: set[str] = set()
     try:
         for d in base_dir.iterdir():
             if not d.is_dir():
@@ -661,14 +661,14 @@ async def list_groups():
             try:
                 data = json.loads(roi_path.read_text())
                 for r in data:
-                    g = r.get("group")
-                    if g:
-                        groups.add(str(g))
+                    p = r.get("page")
+                    if p:
+                        pages.add(str(p))
             except Exception:
                 continue
     except FileNotFoundError:
         pass
-    return jsonify(sorted(groups))
+    return jsonify(sorted(pages))
 
 
 @app.route("/source_list", methods=["GET"])

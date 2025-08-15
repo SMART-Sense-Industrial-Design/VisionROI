@@ -47,10 +47,10 @@ def test_click_creates_polygon_and_saves():
     assert pts[2] == {'x': 50, 'y': 50}
     assert pts[3] == {'x': 10, 'y': 50}
     assert data['rois'][0]['id'] == 'roi_123'
-    assert data['rois'][0]['group'] == 'main'
+    assert data['rois'][0]['page'] == 'main'
     assert data['rois'][0]['module'] == ''
     payload = json.loads(data['fetchBody'])
     assert payload['rois'][0]['points'] == pts
     assert payload['rois'][0]['id'] == 'roi_123'
-    assert payload['rois'][0]['group'] == 'main'
+    assert payload['rois'][0]['page'] == 'main'
     assert payload['rois'][0]['module'] == ''
