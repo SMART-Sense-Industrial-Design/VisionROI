@@ -201,8 +201,17 @@ async def run_inference_loop(cam_id: int):
 
     async def process_frame(frame):
         rois = inference_rois.get(cam_id, [])
-        if not rois:
+        pages = page_rois.get(cam_id, [])
+        if not rois and not pages:
             return cv2.resize(frame, (0, 0), fx=0.5, fy=0.5)
+
+        if np is not None:
+            for p in pages:
+                pts = p.get("points", [])
+                if len(pts) != 4:
+                    continue
+                src_page = np.array([[pt["x"], pt["y"]] for pt in pts], dtype=np.float32)
+                cv2.polylines(frame, [src_page.astype(int)], True, (0, 255, 0), 2)
 
         save_flag = bool(save_roi_flags.get(cam_id))
         for i, r in enumerate(rois):
@@ -281,7 +290,7 @@ async def run_inference_loop(cam_id: int):
                 await q.put(payload)
             except Exception:
                 pass
-            cv2.polylines(frame, [src.astype(int)], True, (0, 255, 0), 2)
+            cv2.polylines(frame, [src.astype(int)], True, (255, 0, 0), 2)
             label_pt = src[0].astype(int)
             cv2.putText(
                 frame,
@@ -289,7 +298,7 @@ async def run_inference_loop(cam_id: int):
                 (int(label_pt[0]), max(0, int(label_pt[1]) - 5)),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.5,
-                (0, 255, 0),
+                (255, 0, 0),
                 1,
                 cv2.LINE_AA,
             )
