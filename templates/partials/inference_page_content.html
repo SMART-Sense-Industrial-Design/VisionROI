@@ -9,6 +9,7 @@
             <p id="cam1-status"></p>
             <div class="video-wrapper">
                 <img id="cam1-video" width="320" height="240" />
+                <canvas id="cam1-canvas" class="overlay"></canvas>
             </div>
         </div>
     </div>
@@ -36,6 +37,8 @@ function createPageController(cellId){
     const roiGrid=getEl('rois');
     const frameCanvas=document.createElement('canvas');
     const frameCtx=frameCanvas.getContext('2d');
+    const overlay=getEl('canvas');
+    const overlayCtx=overlay.getContext('2d');
     startButton.onclick=startStream;
     stopButton.onclick=stopInference;
 
@@ -103,6 +106,21 @@ function createPageController(cellId){
             item.appendChild(img);
             item.appendChild(p);
             roiGrid.appendChild(item);
+        });
+    }
+
+    function drawPageOverlay(active){
+        overlayCtx.clearRect(0,0,overlay.width,overlay.height);
+        pageRois.forEach(r=>{
+            overlayCtx.beginPath();
+            r.points.forEach((p,i)=>{
+                if(i===0) overlayCtx.moveTo(p.x,p.y);
+                else overlayCtx.lineTo(p.x,p.y);
+            });
+            overlayCtx.closePath();
+            overlayCtx.lineWidth=2;
+            overlayCtx.strokeStyle=r===active?'red':'lime';
+            overlayCtx.stroke();
         });
     }
 
@@ -184,6 +202,10 @@ function createPageController(cellId){
             frameCanvas.width=bitmap.width;
             frameCanvas.height=bitmap.height;
             frameCtx.drawImage(bitmap,0,0);
+            overlay.width=bitmap.width;
+            overlay.height=bitmap.height;
+            overlay.style.width=video.width+'px';
+            overlay.style.height=video.height+'px';
             let best=null;let bestScore=Infinity;
             for(const r of pageRois){
                 const {x,y,w,h}=r.bounds;
@@ -197,6 +219,7 @@ function createPageController(cellId){
                 diff/=w*h;
                 if(diff<bestScore){bestScore=diff;best=r;}
             }
+            drawPageOverlay(best);
             if(best && best.page!==currentPage){
                 await switchPage(best.page||best.name||'');
             }
@@ -236,6 +259,7 @@ function createPageController(cellId){
         if(roiSocket){roiSocket.close();roiSocket=null;}
         video.src='';
         roiGrid.innerHTML='';
+        overlayCtx.clearRect(0,0,overlay.width,overlay.height);
         statusEl.innerText='Stopped';
         startButton.innerText='Resume';
         startButton.disabled=false;
