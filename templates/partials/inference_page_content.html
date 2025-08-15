@@ -7,8 +7,10 @@
             <button id="cam1-startButton" class="btn btn-primary me-2">Start</button>
             <button id="cam1-stopButton" class="btn btn-danger" disabled>Stop</button>
             <p id="cam1-status"></p>
+            <p id="cam1-pageLabel" class="page-label"></p>
             <div class="video-wrapper">
                 <img id="cam1-video" width="320" height="240" />
+                <canvas id="cam1-canvas" class="overlay"></canvas>
             </div>
         </div>
     </div>
@@ -32,10 +34,15 @@ function createPageController(cellId){
     const startButton=getEl('startButton');
     const stopButton=getEl('stopButton');
     const statusEl=getEl('status');
+    const pageLabel=getEl('pageLabel');
     const sourceSelect=getEl('sourceSelect');
     const roiGrid=getEl('rois');
     const frameCanvas=document.createElement('canvas');
     const frameCtx=frameCanvas.getContext('2d');
+    const overlay=getEl('canvas');
+    const overlayCtx=overlay.getContext('2d');
+    let detecting=false;
+    let pendingBlob=null;
     startButton.onclick=startStream;
     stopButton.onclick=stopInference;
 
@@ -103,6 +110,21 @@ function createPageController(cellId){
             item.appendChild(img);
             item.appendChild(p);
             roiGrid.appendChild(item);
+        });
+    }
+
+    function drawPageOverlay(active){
+        overlayCtx.clearRect(0,0,overlay.width,overlay.height);
+        pageRois.forEach(r=>{
+            overlayCtx.beginPath();
+            r.points.forEach((p,i)=>{
+                if(i===0) overlayCtx.moveTo(p.x,p.y);
+                else overlayCtx.lineTo(p.x,p.y);
+            });
+            overlayCtx.closePath();
+            overlayCtx.lineWidth=2;
+            overlayCtx.strokeStyle=r===active?'red':'lime';
+            overlayCtx.stroke();
         });
     }
 
@@ -174,8 +196,20 @@ function createPageController(cellId){
         socket.onmessage=event=>{
             const blob=new Blob([event.data],{type:'image/jpeg'});
             video.src=URL.createObjectURL(blob);
-            if(pageRois.length>0) detectPage(blob);
+            if(pageRois.length>0){
+                if(detecting) pendingBlob=blob;
+                else runDetect(blob);
+            }
         };
+    }
+
+    async function runDetect(blob){
+        detecting=true;
+        await detectPage(blob);
+        detecting=false;
+        if(pendingBlob){
+            const next=pendingBlob;pendingBlob=null;runDetect(next);
+        }
     }
 
     async function detectPage(blob){
@@ -184,6 +218,10 @@ function createPageController(cellId){
             frameCanvas.width=bitmap.width;
             frameCanvas.height=bitmap.height;
             frameCtx.drawImage(bitmap,0,0);
+            overlay.width=bitmap.width;
+            overlay.height=bitmap.height;
+            overlay.style.width=video.width+'px';
+            overlay.style.height=video.height+'px';
             let best=null;let bestScore=Infinity;
             for(const r of pageRois){
                 const {x,y,w,h}=r.bounds;
@@ -197,6 +235,8 @@ function createPageController(cellId){
                 diff/=w*h;
                 if(diff<bestScore){bestScore=diff;best=r;}
             }
+            drawPageOverlay(best);
+            pageLabel.textContent=best? (best.name||best.page||'') : '';
             if(best && best.page!==currentPage){
                 await switchPage(best.page||best.name||'');
             }
@@ -236,6 +276,8 @@ function createPageController(cellId){
         if(roiSocket){roiSocket.close();roiSocket=null;}
         video.src='';
         roiGrid.innerHTML='';
+        overlayCtx.clearRect(0,0,overlay.width,overlay.height);
+        pageLabel.textContent='';
         statusEl.innerText='Stopped';
         startButton.innerText='Resume';
         startButton.disabled=false;
