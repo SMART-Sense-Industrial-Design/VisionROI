@@ -2,25 +2,43 @@
 {% block title %}ROI Selection{% endblock %}
 {% block content %}
 
-<select id="sourceSelect"></select>
-<button id="startBtn">Start</button>
-<button id="stopBtn" disabled>Stop</button>
-<button id="clearBtn">Clear All</button>
-
-<br><br>
-<div class="d-flex">
-    <div id="roiToolbar" class="btn-group-vertical me-2">
-        <button id="pickBtn" class="btn btn-primary">Pick Points</button>
-        <button id="rectBtn" class="btn btn-secondary">Rectangle</button>
-        <button id="pageBtn" class="btn btn-secondary">Page Rect</button>
-    </div>
-    <div id="frameContainer" style="position: relative; display: inline-block;">
-        <img id="video" />
-        <canvas id="canvas"></canvas>
+<div class="container my-3">
+    <div class="row g-2 align-items-center">
+        <div class="col-12 col-md-auto">
+            <select id="sourceSelect" class="form-select"></select>
+        </div>
+        <div class="col-12 col-md-auto">
+            <button id="startBtn" class="btn btn-primary w-100">Start</button>
+        </div>
+        <div class="col-12 col-md-auto">
+            <button id="stopBtn" class="btn btn-danger w-100" disabled>Stop</button>
+        </div>
+        <div class="col-12 col-md-auto">
+            <button id="clearBtn" class="btn btn-secondary w-100">Clear All</button>
+        </div>
     </div>
 </div>
 
-<div id="roiList"></div>
+<div class="container">
+    <div class="row">
+        <div class="col-12 col-lg-8">
+            <div class="d-flex mb-3">
+                <div id="roiToolbar" class="btn-group-vertical me-2">
+                    <button id="pickBtn" class="btn btn-primary">Pick Points</button>
+                    <button id="rectBtn" class="btn btn-secondary">Rectangle</button>
+                    <button id="pageBtn" class="btn btn-secondary">Page Rect</button>
+                </div>
+                <div id="frameContainer" class="position-relative d-inline-block">
+                    <img id="video" class="img-fluid" />
+                    <canvas id="canvas"></canvas>
+                </div>
+            </div>
+        </div>
+        <div class="col-12 col-lg-4">
+            <div id="roiList"></div>
+        </div>
+    </div>
+</div>
 
 <script>
     (function() {
@@ -97,8 +115,6 @@
                 canvas.height = video.naturalHeight;
                 canvas.style.width = video.naturalWidth + 'px';
                 canvas.style.height = video.naturalHeight + 'px';
-                frameContainer.style.width = video.naturalWidth + 'px';
-                frameContainer.style.height = video.naturalHeight + 'px';
                 initialized = true;
             }
             drawAllRois();

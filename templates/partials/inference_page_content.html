@@ -1,20 +1,24 @@
 <h2>Inference Page</h2>
 <p>Stream camera with ROI overlay.</p>
-<div class="cam-row">
-    <div class="card">
-        <div id="cam1" class="cam-cell">
-            <select id="cam1-sourceSelect" class="form-select mb-2"></select>
-            <button id="cam1-startButton" class="btn btn-primary me-2">Start</button>
-            <button id="cam1-stopButton" class="btn btn-danger" disabled>Stop</button>
-            <p id="cam1-status"></p>
-            <div class="video-wrapper">
-                <img id="cam1-video" width="320" height="240" />
-                <p>page: <span id="cam1-pageName"></span></p>
+<div class="row g-3">
+    <div class="col-12 col-md-6">
+        <div class="card">
+            <div id="cam1" class="cam-cell">
+                <select id="cam1-sourceSelect" class="form-select mb-2"></select>
+                <button id="cam1-startButton" class="btn btn-primary me-2">Start</button>
+                <button id="cam1-stopButton" class="btn btn-danger" disabled>Stop</button>
+                <p id="cam1-status"></p>
+                <div class="video-wrapper">
+                    <img id="cam1-video" class="img-fluid" />
+                    <p>page: <span id="cam1-pageName"></span></p>
+                </div>
             </div>
         </div>
     </div>
-    <div class="card roi-card">
-        <div id="cam1-rois" class="roi-grid"></div>
+    <div class="col-12 col-md-6">
+        <div class="card">
+            <div id="cam1-rois" class="row row-cols-2 row-cols-sm-3 g-2"></div>
+        </div>
     </div>
 </div>
 <script>
@@ -167,6 +171,8 @@ function createController(cellId){
     function renderRoiPlaceholders(list=rois){
         roiGrid.innerHTML='';
         list.forEach(r=>{
+            const col=document.createElement('div');
+            col.className='col';
             const item=document.createElement('div');
             item.className='roi-item';
             const title=document.createElement('h4');
@@ -181,7 +187,8 @@ function createController(cellId){
             item.appendChild(title);
             item.appendChild(img);
             item.appendChild(p);
-            roiGrid.appendChild(item);
+            col.appendChild(item);
+            roiGrid.appendChild(col);
         });
     }
 
