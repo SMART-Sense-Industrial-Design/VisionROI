@@ -2,12 +2,13 @@
 {% block title %}ROI Selection{% endblock %}
 {% block content %}
 
-<select id="sourceSelect"></select>
-<button id="startBtn">Start</button>
-<button id="stopBtn" disabled>Stop</button>
-<button id="clearBtn">Clear All</button>
+<div class="mb-3 d-flex align-items-center gap-2">
+  <select id="sourceSelect" class="form-select w-auto"></select>
+  <button id="startBtn" class="btn btn-success">Start</button>
+  <button id="stopBtn" class="btn btn-danger" disabled>Stop</button>
+  <button id="clearBtn" class="btn btn-warning">Clear All</button>
+</div>
 
-<br><br>
 <div class="d-flex">
     <div id="roiToolbar" class="btn-group-vertical me-2">
         <button id="pickBtn" class="btn btn-primary">Pick Points</button>
