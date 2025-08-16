@@ -243,10 +243,11 @@ function createPageController(cellId){
             overlay.style.height=video.height+'px';
             let best=null;let bestScore=Infinity;
             for(const r of pageRois){
+                if(!r.bounds||!r.imageData) continue;
                 const {x,y,w,h}=r.bounds;
                 const cur=frameCtx.getImageData(x,y,w,h);
                 const ref=r.imageData;
-                if(!ref||ref.width!==w||ref.height!==h) continue;
+                if(ref.width!==w||ref.height!==h) continue;
                 let diff=0;const da=cur.data,db=ref.data;
                 for(let i=0;i<da.length;i+=4){
                     diff+=Math.abs(da[i]-db[i])+Math.abs(da[i+1]-db[i+1])+Math.abs(da[i+2]-db[i+2]);
@@ -263,7 +264,12 @@ function createPageController(cellId){
             if(best && bestPage!==currentPage){
                 await switchPage(bestPage);
             }
-        }catch(e){console.error('detectPage failed',e);}
+        }catch(e){
+            console.error('detectPage failed',e);
+            pageLabel.textContent='';
+            refImage.src='';
+            scoreLabel.textContent='';
+        }
     }
 
     async function switchPage(pageId){
