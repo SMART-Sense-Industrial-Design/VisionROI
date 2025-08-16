@@ -7,7 +7,7 @@
             <button id="cam1-startButton" class="btn btn-primary me-2">Start</button>
             <button id="cam1-stopButton" class="btn btn-danger" disabled>Stop</button>
             <p id="cam1-status"></p>
-            <p id="cam1-pageLabel" class="page-label"></p>
+            <p class="page-score">Page: <span id="cam1-pageLabel" class="page-label"></span> | Score: <span id="cam1-score" class="score-label"></span></p>
             <div class="compare-row">
                 <div class="video-wrapper">
                     <img id="cam1-video" width="320" height="240" />
@@ -15,7 +15,6 @@
                 </div>
                 <img id="cam1-refImage" class="ref-image" width="320" height="240" />
             </div>
-            <p id="cam1-score" class="score-label"></p>
         </div>
     </div>
     <div class="card roi-card">
@@ -180,6 +179,9 @@ function createPageController(cellId){
             openSocket();
             showAlert('Stream started','success');
             setRunningUI();
+            pageLabel.textContent='N/A';
+            scoreLabel.textContent='0%';
+            refImage.src='';
             await loadRoiFile(roiPath);
         }else{
             running=false;startButton.disabled=false;
@@ -258,11 +260,13 @@ function createPageController(cellId){
                 if(sim>bestScore){bestScore=sim;best=r;}
             }
             drawPageOverlay(best);
-            const bestPage = best ? (best.page_name||best.page||best.name||'') : '';
-            pageLabel.textContent=bestPage;
+            const bestPage = best ? (best.page_name||best.page||best.name||'') : 'N/A';
+            pageLabel.textContent = bestPage;
             refImage.src = best ? best.imageSrc : '';
-            // แปลงคะแนนเป็นเปอร์เซ็นต์เพื่อให้อ่านง่าย
-            scoreLabel.textContent = best ? (bestScore*100).toFixed(2) : '';
+            // แปลงคะแนนเป็นเปอร์เซ็นต์และแสดงผลเสมอ
+            const percent = best ? (bestScore*100).toFixed(2) : '0';
+            scoreLabel.textContent = `${percent}%`;
+
 
             if(best && bestPage!==currentPage){
                 await switchPage(bestPage);
