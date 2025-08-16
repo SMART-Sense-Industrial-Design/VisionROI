@@ -1,5 +1,5 @@
-<h2>Inference Page Detection</h2>
-<p>Automatically switch ROIs based on page matching.</p>
+<h2>Inference Page</h2>
+<p>Stream camera with ROI overlay.</p>
 <div class="cam-row">
     <div class="card">
         <div id="cam1" class="cam-cell">
@@ -7,61 +7,38 @@
             <button id="cam1-startButton" class="btn btn-primary me-2">Start</button>
             <button id="cam1-stopButton" class="btn btn-danger" disabled>Stop</button>
             <p id="cam1-status"></p>
-            <p class="page-score">Page: <span id="cam1-pageLabel" class="page-label"></span> | Score: <span id="cam1-score" class="score-label"></span></p>
-            <div class="compare-row">
-                <div class="video-wrapper">
-                    <img id="cam1-video" width="320" height="240" />
-                    <canvas id="cam1-canvas" class="overlay"></canvas>
-                </div>
-                <img id="cam1-refImage" class="ref-image" width="320" height="240" />
+            <div class="video-wrapper">
+                <img id="cam1-video" width="320" height="240" />
             </div>
         </div>
-    </div>
-    <div class="card roi-card">
-        <div id="cam1-rois" class="roi-grid"></div>
     </div>
 </div>
 <script>
 (function(){
-function createPageController(cellId){
+function createController(cellId){
     let socket;
-    let roiSocket;
     let running=false;
-    let pageRois=[];
-    let roiPages={};
-    let currentPage=null;
-    const cam = cellId.replace(/\D/g,'');
-    const getEl = suffix => document.getElementById(`${cellId}-${suffix}`);
-    const video = getEl('video');
-    video.onload=()=>URL.revokeObjectURL(video.src);
+    const cam=cellId.replace(/\D/g,'');
+    const getEl=suffix=>document.getElementById(`${cellId}-${suffix}`);
+    const video=getEl('video');
     const startButton=getEl('startButton');
     const stopButton=getEl('stopButton');
     const statusEl=getEl('status');
-    const pageLabel=getEl('pageLabel');
-    const refImage=getEl('refImage');
-    const scoreLabel=getEl('score');
     const sourceSelect=getEl('sourceSelect');
-    const roiGrid=getEl('rois');
-    const frameCanvas=document.createElement('canvas');
-    const frameCtx=frameCanvas.getContext('2d');
-    const overlay=getEl('canvas');
-    const overlayCtx=overlay.getContext('2d');
-    let detecting=false;
-    let pendingBlob=null;
 
     startButton.onclick=startStream;
-    stopButton.onclick=stopInference;
+    stopButton.onclick=stopStream;
 
     async function fetchWithStatus(url,options={}){
         statusEl.innerText='กำลังโหลด...';
         try{
             const res=await fetch(url,options);
-            if(!res.ok) throw new Error('network');
+            if(!res.ok)throw new Error('network');
             statusEl.innerText='สำเร็จ';
             return res;
-        }catch(e){
+        }catch(err){
             statusEl.innerText='เกิดข้อผิดพลาด';
-            throw e;
+            throw err;
         }
     }
 
@@ -86,8 +63,8 @@ function createPageController(cellId){
                 });
                 showAlert('Sources loaded','success');
             }
-        }catch(err){
-            console.error('Failed to load sources',err);
+        }catch(e){
+            console.error('Failed to load sources',e);
             sourceSelect.innerHTML='';
             const opt=document.createElement('option');
             opt.value='';
@@ -98,116 +75,44 @@ function createPageController(cellId){
         }
     }
 
-    function renderRoiPlaceholders(list){
-        roiGrid.innerHTML='';
-        list.forEach(r=>{
-            const item=document.createElement('div');
-            item.className='roi-item';
-            const title=document.createElement('h4');
-            title.className='roi-title';
-            title.textContent=r.name || `ROI ${r.id}`;
-            const img=document.createElement('img');
-            img.id=`${cellId}-roi-${r.id}`;
-            img.className='roi-image';
-            const p=document.createElement('p');
-            p.id=`${cellId}-text-${r.id}`;
-            p.className='roi-text';
-            item.appendChild(title);
-            item.appendChild(img);
-            item.appendChild(p);
-            roiGrid.appendChild(item);
-        });
-    }
-
-    function drawPageOverlay(active){
-        overlayCtx.clearRect(0,0,overlay.width,overlay.height);
-        pageRois.forEach(r=>{
-            overlayCtx.beginPath();
-            r.points.forEach((p,i)=>{
-                if(i===0) overlayCtx.moveTo(p.x,p.y);
-                else overlayCtx.lineTo(p.x,p.y);
-            });
-            overlayCtx.closePath();
-            overlayCtx.lineWidth=2;
-            overlayCtx.strokeStyle=r===active?'red':'lime';
-            overlayCtx.stroke();
-        });
-    }
-
-    async function preparePageImages(){
-        for(const r of pageRois){
-            try{
-                const img=new Image();
-                img.src=`data:image/jpeg;base64,${r.image}`;
-                r.imageSrc=img.src;
-                await img.decode();
-                const xs=r.points.map(p=>p.x);
-                const ys=r.points.map(p=>p.y);
-                const x=Math.min(...xs),y=Math.min(...ys);
-                const w=Math.max(...xs)-x,h=Math.max(...ys)-y;
-                const canvas=document.createElement('canvas');
-                canvas.width=w;canvas.height=h;
-                const ctx=canvas.getContext('2d');
-                ctx.drawImage(img,0,0,w,h);
-                r.imageData=ctx.getImageData(0,0,w,h);
-                r.bounds={x,y,w,h};
-            }catch(e){console.error('prepare image failed',e);}
-        }
-    }
-
     async function startStream(){
-        if(running) return;
+        if(running)return;
         running=true;
         startButton.disabled=true;
         const name=sourceSelect.value;
         if(!name){
             statusEl.innerText='Select source first';
-            running=false;startButton.disabled=false;
+            running=false;
+            startButton.disabled=false;
             showAlert('Select source first','error');
             return;
         }
         const cfgRes=await fetchWithStatus(`/source_config?name=${encodeURIComponent(name)}`);
         const cfg=await cfgRes.json();
         let roiPath=cfg.rois;
-        if(!roiPath.startsWith('/')) roiPath=`data_sources/${cfg.name}/${roiPath}`;
+        if(!roiPath.startsWith('/'))roiPath=`data_sources/${cfg.name}/${roiPath}`;
+        let roiList=[];
+        try{
+            const roiRes=await fetchWithStatus(`/load_roi_file?path=${encodeURIComponent(roiPath)}`);
+            const data=await roiRes.json();
+            roiList=data.rois||[];
+        }catch(e){
+            console.error('Failed to load ROI file',e);
+            showAlert('Failed to load ROI file','error');
+        }
         const startRes=await fetchWithStatus(`/start_inference/${cam}`,{
             method:'POST',headers:{'Content-Type':'application/json'},
-            body:JSON.stringify({...cfg,rois:[]})
+            body:JSON.stringify({...cfg,rois:roiList})
         });
         const startData=await startRes.json();
         if(startData.status==='started'||startData.status==='already_running'){
             openSocket();
-            showAlert('Stream started','success');
             setRunningUI();
-            pageLabel.textContent='N/A';
-            scoreLabel.textContent='0%';
-            refImage.src='';
-            await loadRoiFile(roiPath);
+            showAlert('Stream started','success');
         }else{
-            running=false;startButton.disabled=false;
+            running=false;
+            startButton.disabled=false;
             showAlert('Failed to start stream','error');
-        }
-    }
-
-    async function loadRoiFile(roiPath){
-        try{
-            const roiRes=await fetchWithStatus(`/load_roi_file?path=${encodeURIComponent(roiPath)}`);
-            const data=await roiRes.json();
-            statusEl.innerText='Loaded: '+data.filename;
-            const all=data.rois||[];
-            pageRois=all.filter(r=>(r.type??'roi')==='page').map(r=>({
-                ...r,
-                page_name: r.page_name || r.page || r.name || ''
-            }));
-            roiPages={};
-            all.filter(r=>(r.type??'roi')==='roi').forEach(r=>{
-                const p=r.page||'';
-                (roiPages[p]||(roiPages[p]=[])).push(r);
-            });
-            await preparePageImages();
-            renderRoiPlaceholders([]);
-        }catch(err){
-            console.error('loadRoiFile failed',err);
         }
     }
 
@@ -217,125 +122,30 @@ function createPageController(cellId){
         socket.onmessage=event=>{
             const blob=new Blob([event.data],{type:'image/jpeg'});
             video.src=URL.createObjectURL(blob);
-            if(pageRois.length>0){
-                if(detecting) pendingBlob=blob;
-                else runDetect(blob);
-            }
         };
     }
 
-    async function runDetect(blob){
-        detecting=true;
-        await detectPage(blob);
-        detecting=false;
-        if(pendingBlob){
-            const next=pendingBlob;pendingBlob=null;runDetect(next);
-        }
-    }
-
-    async function detectPage(blob){
-        try{
-            const bitmap=await createImageBitmap(blob);
-            frameCanvas.width=bitmap.width;
-            frameCanvas.height=bitmap.height;
-            frameCtx.drawImage(bitmap,0,0);
-            overlay.width=bitmap.width;
-            overlay.height=bitmap.height;
-            overlay.style.width=video.width+'px';
-            overlay.style.height=video.height+'px';
-            // ค้นหา ROI หน้า (page) ที่มีความเหมือนกับภาพปัจจุบันมากที่สุด
-            let best=null;let bestScore=-Infinity;
-            for(const r of pageRois){
-                if(!r.bounds||!r.imageData) continue;
-                const {x,y,w,h}=r.bounds;
-                const cur=frameCtx.getImageData(x,y,w,h);
-                const ref=r.imageData;
-                if(ref.width!==w||ref.height!==h) continue;
-                let diff=0;const da=cur.data,db=ref.data;
-                for(let i=0;i<da.length;i+=4){
-                    diff+=Math.abs(da[i]-db[i])+Math.abs(da[i+1]-db[i+1])+Math.abs(da[i+2]-db[i+2]);
-                }
-                // ทำให้เป็นค่าความเหมือน 0..1 (1 = เหมือนมากที่สุด)
-                const sim = 1 - diff/(w*h*3*255);
-                if(sim>bestScore){bestScore=sim;best=r;}
-            }
-            drawPageOverlay(best);
-            const bestPage = best ? (best.page_name||best.page||best.name||'') : 'N/A';
-            pageLabel.textContent = bestPage;
-            refImage.src = best ? best.imageSrc : '';
-            // แปลงคะแนนเป็นเปอร์เซ็นต์และแสดงผลเสมอ
-            const percent = best ? (bestScore*100).toFixed(2) : '0';
-            scoreLabel.textContent = `${percent}%`;
-
-
-            if(best && bestPage!==currentPage){
-                await switchPage(bestPage);
-            }
-        }catch(e){
-            console.error('detectPage failed',e);
-            pageLabel.textContent='';
-            refImage.src='';
-            scoreLabel.textContent='';
-        }
-    }
-
-    async function switchPage(pageId){
-        currentPage=pageId;
-        const rois=roiPages[pageId]||[];
-        renderRoiPlaceholders(rois);
-        if(roiSocket){roiSocket.close();roiSocket=null;}
-        await fetchWithStatus(`/start_inference/${cam}`,{
-            method:'POST',headers:{'Content-Type':'application/json'},
-            body:JSON.stringify({rois})
-        });
-        if(rois.length>0) openRoiSocket();
-    }
-
-    function openRoiSocket(){
-        roiSocket=new WebSocket(`ws://${location.host}/ws_roi_result/${cam}`);
-        roiSocket.onmessage=event=>{
-            try{
-                const data=JSON.parse(event.data);
-                const imgEl=document.getElementById(`${cellId}-roi-${data.id}`);
-                if(imgEl){imgEl.src=`data:image/jpeg;base64,${data.image}`;}
-                const textEl=document.getElementById(`${cellId}-text-${data.id}`);
-                if(textEl){textEl.textContent=data.text||'';}
-            }catch(e){console.error('ROI message error',e);}
-        };
-    }
-
-    async function stopInference(){
-        if(!running) return;
+    async function stopStream(){
+        if(!running)return;
         running=false;
         await fetchWithStatus(`/stop_inference/${cam}`,{method:'POST'});
         if(socket){socket.close();socket=null;}
-        if(roiSocket){roiSocket.close();roiSocket=null;}
         video.src='';
-        roiGrid.innerHTML='';
-        overlayCtx.clearRect(0,0,overlay.width,overlay.height);
-        pageLabel.textContent='';
-        refImage.src='';
-        scoreLabel.textContent='';
-
-        statusEl.innerText='Stopped';
-        startButton.innerText='Resume';
         startButton.disabled=false;
         stopButton.disabled=true;
-        showAlert('Inference stopped','info');
+        statusEl.innerText='Stopped';
+        showAlert('Stream stopped','info');
     }
 
     function setRunningUI(){
-        statusEl.innerText='Running';
         startButton.disabled=true;
         stopButton.disabled=false;
-        startButton.innerText='Start';
+        statusEl.innerText='Running';
     }
 
-    (async()=>{
-        await loadSources();
-    })();
+    loadSources();
 }
-
-createPageController('cam1');
+document.addEventListener('DOMContentLoaded',()=>createController('cam1'));
 })();
 </script>
+
