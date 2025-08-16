@@ -231,6 +231,9 @@
                 const blob = new Blob([event.data], { type: 'image/jpeg' });
                 video.src = URL.createObjectURL(blob);
             };
+            socket.onclose = function() {
+                video.src = '';
+            };
         }
 
         function openRoiSocket() {
@@ -249,6 +252,14 @@
                 } catch (e) {
                     console.error('ROI message error', e);
                 }
+            };
+            roiSocket.onclose = function() {
+                roiGrid.querySelectorAll('img').forEach(img => {
+                    img.src = '';
+                });
+                roiGrid.querySelectorAll('p').forEach(p => {
+                    p.textContent = '';
+                });
             };
         }
 

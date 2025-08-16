@@ -46,6 +46,7 @@
         const cam = 1;
 
         const video = document.getElementById("video");
+        video.onload = () => URL.revokeObjectURL(video.src);
         const canvas = document.getElementById("canvas");
         const frameContainer = document.getElementById("frameContainer");
         const ctx = canvas.getContext("2d");
@@ -154,6 +155,8 @@
             };
             socket.onclose = function() {
                 socket = null;
+                video.src = '';
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
                 isStreaming = false;
                 stopBtn.disabled = true;
                 startBtn.disabled = false;
@@ -227,6 +230,8 @@
             } catch (err) {
                 console.error('Failed to stop ROI stream', err);
             }
+            video.src = '';
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
             isStreaming = false;
             hasStarted = false;
             stopBtn.disabled = true;

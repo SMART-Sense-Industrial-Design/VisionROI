@@ -26,6 +26,7 @@ function createController(cellId){
     const cam=`page_${cellId}`;
     const getEl=suffix=>document.getElementById(`${cellId}-${suffix}`);
     const video=getEl('video');
+    video.onload=()=>URL.revokeObjectURL(video.src);
     const pageNameEl=getEl('pageName');
     const roiGrid=getEl('rois');
     let rois=[];
@@ -144,6 +145,9 @@ function createController(cellId){
             const blob=new Blob([event.data],{type:'image/jpeg'});
             video.src=URL.createObjectURL(blob);
         };
+        socket.onclose=()=>{
+            video.src='';
+        };
     }
 
     function openRoiSocket(){
@@ -161,6 +165,11 @@ function createController(cellId){
 
                 }
             }catch(e){}
+        };
+        roiSocket.onclose=()=>{
+            pageNameEl.innerText='';
+            roiGrid.querySelectorAll('img').forEach(img=>{img.src='';});
+            roiGrid.querySelectorAll('p').forEach(p=>{p.textContent='';});
         };
     }
 
@@ -193,6 +202,7 @@ function createController(cellId){
         if(roiSocket){roiSocket.close();roiSocket=null;}
         video.src='';
         pageNameEl.innerText='';
+        roiGrid.innerHTML='';
         startButton.disabled=false;
         stopButton.disabled=true;
         statusEl.innerText='Stopped';
