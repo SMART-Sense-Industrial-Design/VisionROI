@@ -667,7 +667,7 @@ async def list_pages():
             try:
                 data = json.loads(roi_path.read_text())
                 for r in data:
-                    p = r.get("page")
+                    p = r.get("page_name") or r.get("page") or r.get("name")
                     if p:
                         pages.add(str(p))
             except Exception:

@@ -168,7 +168,10 @@ function createPageController(cellId){
         const data=await roiRes.json();
         statusEl.innerText='Loaded: '+data.filename;
         const all=data.rois||[];
-        pageRois=all.filter(r=>(r.type??'roi')==='page');
+        pageRois=all.filter(r=>(r.type??'roi')==='page').map(r=>({
+            ...r,
+            page_name: r.page_name || r.page || r.name || ''
+        }));
         roiPages={};
         all.filter(r=>(r.type??'roi')==='roi').forEach(r=>{
             const p=r.page||'';
@@ -237,10 +240,11 @@ function createPageController(cellId){
                 if(diff<bestScore){bestScore=diff;best=r;}
             }
             drawPageOverlay(best);
-            pageLabel.textContent=best? (best.name||best.page||'') : '';
+            const bestPage = best ? (best.page_name||best.page||best.name||'') : '';
+            pageLabel.textContent=bestPage;
 
-            if(best && best.page!==currentPage){
-                await switchPage(best.page||best.name||'');
+            if(best && bestPage!==currentPage){
+                await switchPage(bestPage);
             }
         }catch(e){console.error('detectPage failed',e);}
     }
