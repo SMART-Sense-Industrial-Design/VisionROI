@@ -57,11 +57,13 @@ def test_inference_switches_module_by_page(monkeypatch):
     rois_page1 = [{
         "id": "1",
         "module": "A",
+        "type": "roi",
         "points": [{"x":0,"y":0},{"x":1,"y":0},{"x":1,"y":1},{"x":0,"y":1}],
     }]
     rois_page2 = [{
         "id": "1",
         "module": "B",
+        "type": "roi",
         "points": [{"x":0,"y":0},{"x":1,"y":0},{"x":1,"y":1},{"x":0,"y":1}],
     }]
 

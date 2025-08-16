@@ -215,6 +215,8 @@ async def run_inference_loop(cam_id: int):
             pts = r.get("points", [])
             if len(pts) != 4:
                 continue
+            if r.get("type") != "roi":
+                continue
             mod_name = r.get("module")
             if not mod_name:
                 print(f"module missing for ROI {r.get('id', i)}")
@@ -541,8 +543,7 @@ async def perform_start_inference(cam_id: int, rois=None, save_state: bool = Tru
         rois = []
     processed_rois = []
     for r in rois:
-        mod_name = r.get("module")
-        if mod_name:
+        if r.get("type") == "roi" and r.get("module"):
             processed_rois.append(r)
     inference_rois[cam_id] = processed_rois
     queue = get_roi_result_queue(cam_id)
