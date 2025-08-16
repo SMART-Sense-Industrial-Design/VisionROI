@@ -125,6 +125,7 @@
                         .map(r => r.group ?? r.page ?? r.name)
                         .filter(p => p)
                 )
+
             );
             groups.forEach(p => {
                 const opt = document.createElement('option');
@@ -171,6 +172,7 @@
                 ? roiList.filter(r => (r.group ?? r.page ?? r.name) === selectedGroup)
                 : selectedGroup === 'all'
                     ? roiList
+
                     : []);
             if (rois.length > 0) {
                 renderRoiPlaceholders();
@@ -272,6 +274,7 @@
                     ? roiList
                     : stored
                         ? roiList.filter(r => (r.group ?? r.page ?? r.name) === stored)
+
                         : [];
                 await fetchWithStatus(`/start_inference/${cam}`, {
                     method: 'POST',
@@ -301,6 +304,7 @@
             const filtered = selected === 'all'
                 ? roiList
                 : roiList.filter(r => (r.group ?? r.page ?? r.name) === selected);
+
             await stopInference();
             await startInference(filtered, selected);
         }
