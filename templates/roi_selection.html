@@ -706,6 +706,7 @@
         }
 
         function deletePageRoi(i) {
+            if (!confirm('Delete this Page ROI?')) return;
             pageRois.splice(i, 1);
             drawAllRois();
             renderRoiList();

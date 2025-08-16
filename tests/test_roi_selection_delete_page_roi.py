@@ -19,10 +19,12 @@ def test_delete_page_roi_removes_and_saves():
         function drawAllRois(){};
         function renderRoiList(){};
         let fetchOpts;
+        let confirmCalls = [];
+        global.confirm = msg => { confirmCalls.push(msg); return true; };
         global.fetch = (url, opts) => { fetchOpts = opts; return Promise.resolve({json: () => Promise.resolve({filename:'f'})}); };
         __FUNC_TEXT__
         deletePageRoi(0);
-        console.log(JSON.stringify({pageRois, fetchOpts}));
+        console.log(JSON.stringify({pageRois, fetchOpts, confirmCalls}));
         """).replace('__FUNC_TEXT__', func_text)
 
     result = subprocess.run(['node', '-e', script], capture_output=True, text=True, check=True)
@@ -31,4 +33,5 @@ def test_delete_page_roi_removes_and_saves():
     body = json.loads(data['fetchOpts']['body'])
     assert body['rois'] == []
     assert body['source'] == 'src'
+    assert data['confirmCalls'] == ['Delete this Page ROI?']
 
