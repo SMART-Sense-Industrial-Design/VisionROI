@@ -305,9 +305,19 @@ async def run_inference_loop(cam_id: str):
                         except Exception:
                             pass
 
-            cv2.polylines(frame, [src.astype(int)], True, color, 2)
-            label_pt = src[0].astype(int)
-            cv2.putText(frame, str(r.get('id', i + 1)), (int(label_pt[0]), max(0, int(label_pt[1]) - 5)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1, cv2.LINE_AA)
+            if typ == 'page':
+                cv2.polylines(frame, [src.astype(int)], True, color, 2)
+                label_pt = src[0].astype(int)
+                cv2.putText(
+                    frame,
+                    str(r.get('id', i + 1)),
+                    (int(label_pt[0]), max(0, int(label_pt[1]) - 5)),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.5,
+                    color,
+                    1,
+                    cv2.LINE_AA,
+                )
         if best_name:
             try:
                 q = get_roi_result_queue(cam_id)
@@ -317,6 +327,24 @@ async def run_inference_loop(cam_id: str):
                 await q.put(payload)
             except Exception:
                 pass
+            for i, r in enumerate(rois):
+                if r.get('type') == 'roi' and r.get('page') == best_name:
+                    pts = r.get('points', [])
+                    if len(pts) != 4:
+                        continue
+                    src = np.array([[p['x'], p['y']] for p in pts], dtype=np.int32)
+                    cv2.polylines(frame, [src], True, (255, 0, 0), 2)
+                    label_pt = src[0]
+                    cv2.putText(
+                        frame,
+                        str(r.get('id', i + 1)),
+                        (int(label_pt[0]), max(0, int(label_pt[1]) - 5)),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.5,
+                        (255, 0, 0),
+                        1,
+                        cv2.LINE_AA,
+                    )
         return cv2.resize(frame, (0, 0), fx=0.5, fy=0.5)
 
     queue = get_frame_queue(cam_id)
