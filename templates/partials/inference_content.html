@@ -13,7 +13,7 @@
         </div>
     </div>
     <div class="card roi-card">
-        <select id="cam1-pageSelect" class="form-select mb-2"></select>
+        <select id="cam1-groupSelect" class="form-select mb-2"></select>
         <div id="cam1-rois" class="roi-grid"></div>
     </div>
 </div>
@@ -33,12 +33,12 @@
         const stopButton = getEl('stopButton');
         const statusEl = getEl('status');
         const sourceSelect = getEl('sourceSelect');
-        const pageSelect = getEl('pageSelect');
+        const groupSelect = getEl('groupSelect');
         const roiGrid = getEl('rois');
 
         startButton.onclick = startInference;
         stopButton.onclick = stopInference;
-        pageSelect.onchange = switchPage;
+        groupSelect.onchange = switchGroup;
 
         async function fetchWithStatus(url, options = {}) {
             statusEl.innerText = 'กำลังโหลด...';
@@ -108,30 +108,30 @@
             });
         }
 
-        function loadPageOptions(list, selected = '') {
-            pageSelect.innerHTML = '';
+        function loadGroupOptions(list, selected = '') {
+            groupSelect.innerHTML = '';
             const optSelect = document.createElement('option');
             optSelect.value = '';
             optSelect.textContent = '-- Select --';
-            pageSelect.appendChild(optSelect);
+            groupSelect.appendChild(optSelect);
             const optAll = document.createElement('option');
             optAll.value = 'all';
             optAll.textContent = 'All';
-            pageSelect.appendChild(optAll);
-            const pages = Array.from(
-                new Set(list.map(r => r.page).filter(p => p))
+            groupSelect.appendChild(optAll);
+            const groups = Array.from(
+                new Set(list.map(r => r.group).filter(p => p))
             );
-            pages.forEach(p => {
+            groups.forEach(p => {
                 const opt = document.createElement('option');
                 opt.value = p;
                 opt.textContent = p;
-                pageSelect.appendChild(opt);
+                groupSelect.appendChild(opt);
             });
-            const stored = selected || localStorage.getItem(`${cellId}-page`) || '';
-            pageSelect.value = stored;
+            const stored = selected || localStorage.getItem(`${cellId}-group`) || '';
+            groupSelect.value = stored;
         }
 
-        async function startInference(roisOverride = null, selectedPage = '') {
+        async function startInference(roisOverride = null, selectedGroup = '') {
             if (running) return;
             running = true;
             startButton.disabled = true;
@@ -155,15 +155,15 @@
             const data = await res.json();
             statusEl.innerText = 'Loaded: ' + data.filename;
             allRois = data.rois || [];
-            if (selectedPage) {
-                localStorage.setItem(`${cellId}-page`, selectedPage);
+            if (selectedGroup) {
+                localStorage.setItem(`${cellId}-group`, selectedGroup);
             } else {
-                localStorage.removeItem(`${cellId}-page`);
+                localStorage.removeItem(`${cellId}-group`);
             }
-            loadPageOptions(allRois, selectedPage);
-            rois = roisOverride || (selectedPage && selectedPage !== 'all'
-                ? allRois.filter(r => r.page === selectedPage)
-                : selectedPage === 'all' ? allRois : []);
+            loadGroupOptions(allRois, selectedGroup);
+            rois = roisOverride || (selectedGroup && selectedGroup !== 'all'
+                ? allRois.filter(r => r.group === selectedGroup)
+                : selectedGroup === 'all' ? allRois : []);
             if (rois.length > 0) {
                 renderRoiPlaceholders();
             } else {
@@ -257,9 +257,9 @@
                 const roiRes = await fetchWithStatus(`/load_roi_file?path=${encodeURIComponent(roiPath)}`);
                 const roiData = await roiRes.json();
                 allRois = roiData.rois || [];
-                loadPageOptions(allRois);
-                const stored = pageSelect.value;
-                rois = stored === 'all' ? allRois : stored ? allRois.filter(r => r.page === stored) : [];
+                loadGroupOptions(allRois);
+                const stored = groupSelect.value;
+                rois = stored === 'all' ? allRois : stored ? allRois.filter(r => r.group === stored) : [];
                 await fetchWithStatus(`/start_inference/${cam}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -280,11 +280,11 @@
             }
         }
 
-        async function switchPage() {
-            const selected = pageSelect.value;
+        async function switchGroup() {
+            const selected = groupSelect.value;
             if (!selected) return;
-            localStorage.setItem(`${cellId}-page`, selected);
-            const filtered = selected === 'all' ? allRois : allRois.filter(r => r.page === selected);
+            localStorage.setItem(`${cellId}-group`, selected);
+            const filtered = selected === 'all' ? allRois : allRois.filter(r => r.group === selected);
             await stopInference();
             await startInference(filtered, selected);
         }

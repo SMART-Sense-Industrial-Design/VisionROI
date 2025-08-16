@@ -38,7 +38,7 @@
         let currentType = 'roi';
 
         let currentSource = "";
-        let pages = [];
+        let groups = [];
         let modules = [];
         let initialized = false;
         let isStreaming = false;
@@ -119,15 +119,15 @@
             });
         }
 
-        // Load available pages from server (if any)
-        async function loadPages() {
+        // Load available groups from server (if any)
+        async function loadGroups() {
             try {
-                const res = await fetch('/pages');
+                const res = await fetch('/groups');
                 if (!res.ok) throw new Error('Bad response');
-                pages = await res.json();
+                groups = await res.json();
             } catch (err) {
-                console.error('Failed to load pages', err);
-                pages = [];
+                console.error('Failed to load groups', err);
+                groups = [];
             }
             renderRoiList();
         }
@@ -244,10 +244,10 @@
                 currentPoints.push({ x, y });
                 if (currentPoints.length === 4) {
                     const roiId = `roi_${Date.now()}`;
-                    const pageId = 'main';
+                    const groupId = 'main';
                     rois.push({
                         id: roiId,
-                        page: pageId,
+                        group: groupId,
                         module: "",
                         points: currentPoints.slice(),
                         type: 'roi'
@@ -277,12 +277,12 @@
                         { x: x1, y: y2 }
                     ];
                     const roiId = `roi_${Date.now()}`;
-                    const pageId = 'main';
+                    const groupId = 'main';
                     if (currentType === 'page') {
                         pageRois.push({ id: roiId, points, type: 'page', page_name: '', image: null });
 
                     } else {
-                        rois.push({ id: roiId, page: pageId, module: "", points, type: 'roi' });
+                        rois.push({ id: roiId, group: groupId, module: "", points, type: 'roi' });
                     }
                     renderRoiList();
                     fetch('/save_roi', {
@@ -434,7 +434,7 @@
                 table.className = 'table table-striped table-sm';
                 const thead = document.createElement('thead');
                 const headerRow = document.createElement('tr');
-                ['ID', 'x', 'y', 'w', 'h', 'Page', 'Inference Module', 'Delete'].forEach(col => {
+                ['ID', 'x', 'y', 'w', 'h', 'Group', 'Inference Module', 'Delete'].forEach(col => {
                     const th = document.createElement('th');
                     th.textContent = col;
                     headerRow.appendChild(th);
@@ -459,13 +459,13 @@
                         td.textContent = Math.round(val);
                         tr.appendChild(td);
                     });
-                    const tdPage = document.createElement('td');
+                    const tdGroup = document.createElement('td');
                     const input = document.createElement('input');
                     input.className = 'form-control form-control-sm';
-                    input.value = r.page || '';
-                    input.addEventListener('change', e => updateRoiPage(idx, e.target.value));
-                    tdPage.appendChild(input);
-                    tr.appendChild(tdPage);
+                    input.value = r.group || '';
+                    input.addEventListener('change', e => updateRoiGroup(idx, e.target.value));
+                    tdGroup.appendChild(input);
+                    tr.appendChild(tdGroup);
 
                     const tdModule = document.createElement('td');
                     const select = document.createElement('select');
@@ -597,7 +597,7 @@
                             { x: r.x, y: r.y + r.height }
                         ];
                     }
-                    const pg = r.page_name ?? r.page ?? r.name ?? '';
+                    const pg = r.page_name ?? r.group ?? r.name ?? '';
                     return {
                         id: r.id ?? String(idx + 1),
                         page_name: pg,
@@ -622,7 +622,7 @@
                     }
                     return {
                         id: r.id ?? String(idx + 1),
-                        page: r.page ?? null,
+                        group: r.group ?? null,
                         module: r.module ?? "",
                         points: pts || [],
                         type: 'roi'
@@ -658,8 +658,8 @@
             });
         }
 
-        function updateRoiPage(i, page) {
-            rois[i].page = page;
+        function updateRoiGroup(i, group) {
+            rois[i].group = group;
             fetch('/save_roi', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -759,7 +759,7 @@
         window.startStream = startStream;
         window.stopStream = stopStream;
         window.clearAllRois = clearAllRois;
-        window.updateRoiPage = updateRoiPage;
+        window.updateRoiGroup = updateRoiGroup;
         window.updateRoiModule = updateRoiModule;
         window.deleteRoi = deleteRoi;
         window.deletePageRoi = deletePageRoi;
@@ -772,7 +772,7 @@
 
         (async () => {
             await loadSources();
-            await loadPages();
+            await loadGroups();
             await loadModules();
             await checkStatus();
             if (typeof showAlert === 'function') showAlert('ROI selection ready', 'success');
