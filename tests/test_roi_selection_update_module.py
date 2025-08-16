@@ -13,7 +13,7 @@ def test_update_roi_module_triggers_save():
 
     script = textwrap.dedent(
         f"""
-        let rois = [{{id:'1', page:'g', module:'old', points:[{{x:1,y:2}}]}}];
+        let rois = [{{id:'1', group:'g', module:'old', points:[{{x:1,y:2}}]}}];
         let pageRois = [];
         let otherRois = [];
         let currentSource = 'src';
