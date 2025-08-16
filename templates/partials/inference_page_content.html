@@ -139,8 +139,8 @@ function createController(cellId){
         roiSocket.onmessage=event=>{
             try{
                 const data=JSON.parse(event.data);
-                if(data.page){
-                    pageNameEl.innerText=data.page;
+                if(data.group){
+                    pageNameEl.innerText=data.group;
                 }
             }catch(e){}
         };

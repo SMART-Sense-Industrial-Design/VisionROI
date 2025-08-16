@@ -205,7 +205,7 @@ async def run_inference_loop(cam_id: str):
             return cv2.resize(frame, (0, 0), fx=0.5, fy=0.5)
 
         save_flag = bool(save_roi_flags.get(cam_id))
-        best_name = None
+        output = None
         best_score = -1.0
         for i, r in enumerate(rois):
             if np is None:
@@ -301,7 +301,7 @@ async def run_inference_loop(cam_id: str):
                             score = float(res[0][0])
                             if score > best_score:
                                 best_score = score
-                                best_name = r.get('page', '')
+                                output = r.get('page', '')
                         except Exception:
                             pass
 
@@ -318,17 +318,19 @@ async def run_inference_loop(cam_id: str):
                     1,
                     cv2.LINE_AA,
                 )
-        if best_name:
+        if output:
+
             try:
                 q = get_roi_result_queue(cam_id)
-                payload = json.dumps({'page': best_name})
+                payload = json.dumps({'group': output})
                 if q.full():
                     q.get_nowait()
                 await q.put(payload)
             except Exception:
                 pass
             for i, r in enumerate(rois):
-                if r.get('type') == 'roi' and r.get('page') == best_name:
+                if r.get('type') == 'roi' and r.get('group') == output:
+
                     pts = r.get('points', [])
                     if len(pts) != 4:
                         continue
