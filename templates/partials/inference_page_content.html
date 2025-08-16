@@ -9,6 +9,7 @@
             <p id="cam1-status"></p>
             <div class="video-wrapper">
                 <img id="cam1-video" width="320" height="240" />
+
             </div>
         </div>
     </div>
@@ -21,10 +22,12 @@ function createController(cellId){
     const cam=cellId.replace(/\D/g,'');
     const getEl=suffix=>document.getElementById(`${cellId}-${suffix}`);
     const video=getEl('video');
+
     const startButton=getEl('startButton');
     const stopButton=getEl('stopButton');
     const statusEl=getEl('status');
     const sourceSelect=getEl('sourceSelect');
+
 
     startButton.onclick=startStream;
     stopButton.onclick=stopStream;
@@ -100,6 +103,7 @@ function createController(cellId){
             console.error('Failed to load ROI file',e);
             showAlert('Failed to load ROI file','error');
         }
+
         const startRes=await fetchWithStatus(`/start_inference/${cam}`,{
             method:'POST',headers:{'Content-Type':'application/json'},
             body:JSON.stringify({...cfg,rois:roiList})
@@ -107,6 +111,7 @@ function createController(cellId){
         const startData=await startRes.json();
         if(startData.status==='started'||startData.status==='already_running'){
             openSocket();
+
             setRunningUI();
             showAlert('Stream started','success');
         }else{
@@ -115,6 +120,7 @@ function createController(cellId){
             showAlert('Failed to start stream','error');
         }
     }
+
 
     function openSocket(){
         socket=new WebSocket(`ws://${location.host}/ws/${cam}`);
@@ -130,6 +136,7 @@ function createController(cellId){
         running=false;
         await fetchWithStatus(`/stop_inference/${cam}`,{method:'POST'});
         if(socket){socket.close();socket=null;}
+
         video.src='';
         startButton.disabled=false;
         stopButton.disabled=true;
