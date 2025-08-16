@@ -182,6 +182,7 @@ button.delete {
 }
 
 #alert-box {
-  z-index: 2000;
+  z-index: 9999 !important;
+
 }
 
