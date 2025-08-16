@@ -44,10 +44,10 @@ def test_click_creates_page_rect_and_saves():
     assert pts[2] == {'x': 50, 'y': 60}
     assert pts[3] == {'x': 10, 'y': 60}
     assert data['pageRois'][0]['id'] == 'roi_123'
-    assert data['pageRois'][0]['page_name'] == ''
+    assert data['pageRois'][0]['page'] == ''
     assert data['pageRois'][0]['image'] is None
     payload = json.loads(data['fetchBody'])
     assert payload['rois'][0]['points'] == pts
     assert payload['rois'][0]['id'] == 'roi_123'
-    assert payload['rois'][0]['page_name'] == ''
+    assert payload['rois'][0]['page'] == ''
     assert payload['rois'][0]['type'] == 'page'

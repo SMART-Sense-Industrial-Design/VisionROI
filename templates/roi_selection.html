@@ -279,7 +279,7 @@
                     const roiId = `roi_${Date.now()}`;
                     const groupId = 'main';
                     if (currentType === 'page') {
-                        pageRois.push({ id: roiId, points, type: 'page', page_name: '', image: null });
+                        pageRois.push({ id: roiId, points, type: 'page', page: '', image: null });
 
                     } else {
                         rois.push({ id: roiId, group: groupId, module: "", points, type: 'roi' });
@@ -538,7 +538,7 @@
                     const input = document.createElement('input');
                     input.className = 'form-control form-control-sm';
                     input.id = `page_${idx}`;
-                    input.value = r.page_name || '';
+                    input.value = r.page || '';
                     if (r.image) input.disabled = true;
                     tdPage.appendChild(input);
                     tr.appendChild(tdPage);
@@ -597,10 +597,11 @@
                             { x: r.x, y: r.y + r.height }
                         ];
                     }
-                    const pg = r.page_name ?? r.group ?? r.name ?? '';
+                    const pg = r.page ?? r.group ?? r.name ?? '';
+
                     return {
                         id: r.id ?? String(idx + 1),
-                        page_name: pg,
+                        page: pg,
                         name: pg,
                         image: r.image ?? null,
 
@@ -738,7 +739,7 @@
             cctx.drawImage(tmp, x, y, w, h, 0, 0, w, h);
             const base64 = crop.toDataURL('image/jpeg').split(',')[1];
 
-            r.page_name = pageName;
+            r.page = pageName;
             r.name = pageName;
             r.image = base64;
 

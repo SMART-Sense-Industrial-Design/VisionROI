@@ -305,7 +305,7 @@ async def run_inference_loop(cam_id: int):
                             score = float(res[0][0])
                             if score > best_score:
                                 best_score = score
-                                best_name = r.get('page_name', '')
+                                best_name = r.get('page', '')
                         except Exception:
                             pass
 
@@ -315,7 +315,7 @@ async def run_inference_loop(cam_id: int):
         if best_name:
             try:
                 q = get_roi_result_queue(cam_id)
-                payload = json.dumps({'page_name': best_name})
+                payload = json.dumps({'page': best_name})
                 if q.full():
                     q.get_nowait()
                 await q.put(payload)
@@ -697,7 +697,8 @@ async def list_groups():
             try:
                 data = json.loads(roi_path.read_text())
                 for r in data:
-                    p = r.get("group") or r.get("page_name") or r.get("page") or r.get("name")
+                    p = r.get("group") or r.get("page") or r.get("name")
+
                     if p:
                         groups.add(str(p))
             except Exception:
