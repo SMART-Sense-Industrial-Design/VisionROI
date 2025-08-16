@@ -29,6 +29,8 @@ function createController(cellId){
     const pageNameEl=getEl('pageName');
     const roiGrid=getEl('rois');
     let rois=[];
+    const roiLastUpdate={};
+    let roiCheckInterval=null;
 
     const startButton=getEl('startButton');
     const stopButton=getEl('stopButton');
@@ -117,6 +119,7 @@ function createController(cellId){
         }else{
             roiGrid.innerHTML='';
         }
+        Object.keys(roiLastUpdate).forEach(k=>delete roiLastUpdate[k]);
 
         const startRes=await fetchWithStatus(`/start_inference/${cam}`,{
             method:'POST',headers:{'Content-Type':'application/json'},
@@ -126,6 +129,8 @@ function createController(cellId){
         if(startData.status==='started'||startData.status==='already_running'){
             openSocket();
             openRoiSocket();
+            if(roiCheckInterval)clearInterval(roiCheckInterval);
+            roiCheckInterval=setInterval(clearStaleRois,1000);
 
             setRunningUI();
             showAlert('Stream started','success');
@@ -155,13 +160,33 @@ function createController(cellId){
                     pageNameEl.innerText=data.group;
                 }else if(data.id){
                     const imgEl=document.getElementById(`${cellId}-roi-${data.id}`);
-                    if(imgEl){imgEl.src=`data:image/jpeg;base64,${data.image}`;}
                     const textEl=document.getElementById(`${cellId}-text-${data.id}`);
+                    roiLastUpdate[data.id]=Date.now();
+                    if(imgEl){
+                        if(data.image){
+                            imgEl.src=`data:image/jpeg;base64,${data.image}`;
+                        }else{
+                            imgEl.src='';
+                        }
+                    }
                     if(textEl){textEl.textContent=data.text||'';}
-
+                    
                 }
             }catch(e){}
         };
+    }
+
+    function clearStaleRois(){
+        const now=Date.now();
+        rois.forEach(r=>{
+            const last=roiLastUpdate[r.id];
+            if(!last||now-last>2000){
+                const imgEl=document.getElementById(`${cellId}-roi-${r.id}`);
+                if(imgEl&&imgEl.src)imgEl.src='';
+                const textEl=document.getElementById(`${cellId}-text-${r.id}`);
+                if(textEl&&textEl.textContent)textEl.textContent='';
+            }
+        });
     }
 
     function renderRoiPlaceholders(list=rois){
@@ -191,6 +216,15 @@ function createController(cellId){
         await fetchWithStatus(`/stop_inference/${cam}`,{method:'POST'});
         if(socket){socket.close();socket=null;}
         if(roiSocket){roiSocket.close();roiSocket=null;}
+        if(roiCheckInterval){clearInterval(roiCheckInterval);roiCheckInterval=null;}
+        rois.forEach(r=>{
+            const imgEl=document.getElementById(`${cellId}-roi-${r.id}`);
+            if(imgEl)imgEl.src='';
+            const textEl=document.getElementById(`${cellId}-text-${r.id}`);
+            if(textEl)textEl.textContent='';
+        });
+        rois=[];
+        Object.keys(roiLastUpdate).forEach(k=>delete roiLastUpdate[k]);
         video.src='';
         pageNameEl.innerText='';
         startButton.disabled=false;
@@ -228,8 +262,13 @@ function createController(cellId){
                     const roiRes=await fetchWithStatus(`/load_roi_file?path=${encodeURIComponent(roiPath)}`);
                     const roiData=await roiRes.json();
                     rois=(roiData.rois||[]).filter(r=>r.type==='roi');
-                    if(rois.length>0)renderRoiPlaceholders();
+                    if(rois.length>0){
+                        renderRoiPlaceholders();
+                        Object.keys(roiLastUpdate).forEach(k=>delete roiLastUpdate[k]);
+                    }
                 }
+                if(roiCheckInterval)clearInterval(roiCheckInterval);
+                roiCheckInterval=setInterval(clearStaleRois,1000);
                 setRunningUI();
                 running=true;
                 showAlert('Stream resumed','info');
