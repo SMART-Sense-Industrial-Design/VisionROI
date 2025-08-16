@@ -209,6 +209,8 @@ async def run_inference_loop(cam_id: int):
             return cv2.resize(frame, (0, 0), fx=0.5, fy=0.5)
 
         save_flag = bool(save_roi_flags.get(cam_id))
+        best_name = None
+        best_score = -1.0
         for i, r in enumerate(rois):
             if np is None:
                 continue
@@ -279,10 +281,46 @@ async def run_inference_loop(cam_id: int):
                             pass
             elif typ == 'roi' and not r.get('module'):
                 print(f"module missing for ROI {r.get('id', i)}")
+            elif typ == 'page':
+                width_a = np.linalg.norm(src[0] - src[1])
+                width_b = np.linalg.norm(src[2] - src[3])
+                max_w = int(max(width_a, width_b))
+                height_a = np.linalg.norm(src[0] - src[3])
+                height_b = np.linalg.norm(src[1] - src[2])
+                max_h = int(max(height_a, height_b))
+                dst = np.array([[0, 0], [max_w - 1, 0], [max_w - 1, max_h - 1], [0, max_h - 1]], dtype=np.float32)
+                matrix = cv2.getPerspectiveTransform(src, dst)
+                roi = cv2.warpPerspective(frame, matrix, (max_w, max_h))
+                template = r.get('_template')
+                if template is not None:
+                    try:
+                        roi_gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+                    except Exception:
+                        roi_gray = None
+                    if roi_gray is not None:
+                        if roi_gray.shape != template.shape:
+                            roi_gray = cv2.resize(roi_gray, (template.shape[1], template.shape[0]))
+                        try:
+                            res = cv2.matchTemplate(roi_gray, template, cv2.TM_CCOEFF_NORMED)
+                            score = float(res[0][0])
+                            if score > best_score:
+                                best_score = score
+                                best_name = r.get('page_name', '')
+                        except Exception:
+                            pass
 
             cv2.polylines(frame, [src.astype(int)], True, color, 2)
             label_pt = src[0].astype(int)
             cv2.putText(frame, str(r.get('id', i + 1)), (int(label_pt[0]), max(0, int(label_pt[1]) - 5)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1, cv2.LINE_AA)
+        if best_name:
+            try:
+                q = get_roi_result_queue(cam_id)
+                payload = json.dumps({'page_name': best_name})
+                if q.full():
+                    q.get_nowait()
+                await q.put(payload)
+            except Exception:
+                pass
         return cv2.resize(frame, (0, 0), fx=0.5, fy=0.5)
 
     queue = get_frame_queue(cam_id)
@@ -525,6 +563,17 @@ async def perform_start_inference(cam_id: int, rois=None, save_state: bool = Tru
             rois = []
     if not isinstance(rois, list):
         rois = []
+    if np is not None:
+        for r in rois:
+            if isinstance(r, dict) and r.get("type") == "page":
+                img_b64 = r.get("image")
+                if img_b64:
+                    try:
+                        arr = np.frombuffer(base64.b64decode(img_b64), np.uint8)
+                        tmpl = cv2.imdecode(arr, cv2.IMREAD_GRAYSCALE)
+                    except Exception:
+                        tmpl = None
+                    r["_template"] = tmpl
     # เก็บ ROI ทั้งหมดไว้เพื่อใช้วาดกรอบและประมวลผลเฉพาะที่จำเป็น
     inference_rois[cam_id] = rois
     queue = get_roi_result_queue(cam_id)
