@@ -8,10 +8,14 @@
             <button id="cam1-stopButton" class="btn btn-danger" disabled>Stop</button>
             <p id="cam1-status"></p>
             <p id="cam1-pageLabel" class="page-label"></p>
-            <div class="video-wrapper">
-                <img id="cam1-video" width="320" height="240" />
-                <canvas id="cam1-canvas" class="overlay"></canvas>
+            <div class="compare-row">
+                <div class="video-wrapper">
+                    <img id="cam1-video" width="320" height="240" />
+                    <canvas id="cam1-canvas" class="overlay"></canvas>
+                </div>
+                <img id="cam1-refImage" class="ref-image" width="320" height="240" />
             </div>
+            <p id="cam1-score" class="score-label"></p>
         </div>
     </div>
     <div class="card roi-card">
@@ -35,6 +39,8 @@ function createPageController(cellId){
     const stopButton=getEl('stopButton');
     const statusEl=getEl('status');
     const pageLabel=getEl('pageLabel');
+    const refImage=getEl('refImage');
+    const scoreLabel=getEl('score');
     const sourceSelect=getEl('sourceSelect');
     const roiGrid=getEl('rois');
     const frameCanvas=document.createElement('canvas');
@@ -134,6 +140,7 @@ function createPageController(cellId){
             try{
                 const img=new Image();
                 img.src=`data:image/jpeg;base64,${r.image}`;
+                r.imageSrc=img.src;
                 await img.decode();
                 const xs=r.points.map(p=>p.x);
                 const ys=r.points.map(p=>p.y);
@@ -242,6 +249,8 @@ function createPageController(cellId){
             drawPageOverlay(best);
             const bestPage = best ? (best.page_name||best.page||best.name||'') : '';
             pageLabel.textContent=bestPage;
+            refImage.src = best ? best.imageSrc : '';
+            scoreLabel.textContent = best ? bestScore.toFixed(2) : '';
 
             if(best && bestPage!==currentPage){
                 await switchPage(bestPage);
@@ -284,6 +293,8 @@ function createPageController(cellId){
         roiGrid.innerHTML='';
         overlayCtx.clearRect(0,0,overlay.width,overlay.height);
         pageLabel.textContent='';
+        refImage.src='';
+        scoreLabel.textContent='';
 
         statusEl.innerText='Stopped';
         startButton.innerText='Resume';
