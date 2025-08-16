@@ -166,7 +166,35 @@ function createController(cellId){
         statusEl.innerText='Running';
     }
 
-    loadSources();
+    async function checkStatus(){
+        try{
+            const res=await fetchWithStatus(`/inference_status/${cam}`);
+            const data=await res.json();
+            try{
+                const srcRes=await fetch(`/roi_stream_status/${cam}`);
+                if(srcRes.ok){
+                    const srcData=await srcRes.json();
+                    if(srcData.source)sourceSelect.value=srcData.source;
+                }
+            }catch(e){}
+            if(data.running){
+                openSocket();
+                openRoiSocket();
+                setRunningUI();
+                running=true;
+                showAlert('Stream resumed','info');
+            }else{
+                statusEl.innerText='Idle';
+            }
+        }catch(e){
+            statusEl.innerText='Error checking status';
+        }
+    }
+
+    (async()=>{
+        await loadSources();
+        await checkStatus();
+    })();
 }
 document.addEventListener('DOMContentLoaded',()=>createController('cam1'));
 })();
