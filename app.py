@@ -305,7 +305,7 @@ async def run_inference_loop(cam_id: int):
                             score = float(res[0][0])
                             if score > best_score:
                                 best_score = score
-                                best_name = r.get('page_name', '')
+                                best_name = r.get('page', '')
                         except Exception:
                             pass
 
@@ -315,7 +315,7 @@ async def run_inference_loop(cam_id: int):
         if best_name:
             try:
                 q = get_roi_result_queue(cam_id)
-                payload = json.dumps({'page_name': best_name})
+                payload = json.dumps({'page': best_name})
                 if q.full():
                     q.get_nowait()
                 await q.put(payload)
@@ -683,10 +683,10 @@ async def list_inference_modules():
     return jsonify(names)
 
 
-@app.route("/pages")
-async def list_pages():
+@app.route("/groups")
+async def list_groups():
     base_dir = Path(__file__).resolve().parent / "data_sources"
-    pages: set[str] = set()
+    groups: set[str] = set()
     try:
         for d in base_dir.iterdir():
             if not d.is_dir():
@@ -697,14 +697,14 @@ async def list_pages():
             try:
                 data = json.loads(roi_path.read_text())
                 for r in data:
-                    p = r.get("page_name") or r.get("page") or r.get("name")
+                    p = r.get("group") or r.get("page") or r.get("name")
                     if p:
-                        pages.add(str(p))
+                        groups.add(str(p))
             except Exception:
                 continue
     except FileNotFoundError:
         pass
-    return jsonify(sorted(pages))
+    return jsonify(sorted(groups))
 
 
 @app.route("/source_list", methods=["GET"])
