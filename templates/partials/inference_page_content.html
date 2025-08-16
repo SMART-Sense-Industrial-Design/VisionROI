@@ -29,6 +29,7 @@ function createController(cellId){
     const pageNameEl=getEl('pageName');
     const roiGrid=getEl('rois');
     let rois=[];
+    let allRois=[];
 
     const startButton=getEl('startButton');
     const stopButton=getEl('stopButton');
@@ -111,12 +112,9 @@ function createController(cellId){
             showAlert('Failed to load ROI file','error');
         }
 
-        rois=roiList.filter(r=>r.type==='roi');
-        if(rois.length>0){
-            renderRoiPlaceholders();
-        }else{
-            roiGrid.innerHTML='';
-        }
+        allRois=roiList.filter(r=>r.type==='roi');
+        rois=[];
+        renderRoiPlaceholders();
 
         const startRes=await fetchWithStatus(`/start_inference/${cam}`,{
             method:'POST',headers:{'Content-Type':'application/json'},
@@ -153,6 +151,8 @@ function createController(cellId){
                 const data=JSON.parse(event.data);
                 if(data.group){
                     pageNameEl.innerText=data.group;
+                    rois=allRois.filter(r=>r.group===data.group);
+                    renderRoiPlaceholders();
                 }else if(data.id){
                     const imgEl=document.getElementById(`${cellId}-roi-${data.id}`);
                     if(imgEl){imgEl.src=`data:image/jpeg;base64,${data.image}`;}
@@ -193,6 +193,9 @@ function createController(cellId){
         if(roiSocket){roiSocket.close();roiSocket=null;}
         video.src='';
         pageNameEl.innerText='';
+        roiGrid.innerHTML='';
+        rois=[];
+        allRois=[];
         startButton.disabled=false;
         stopButton.disabled=true;
         statusEl.innerText='Stopped';
@@ -227,8 +230,9 @@ function createController(cellId){
                     if(!roiPath.startsWith('/'))roiPath=`data_sources/${cfg.name}/${roiPath}`;
                     const roiRes=await fetchWithStatus(`/load_roi_file?path=${encodeURIComponent(roiPath)}`);
                     const roiData=await roiRes.json();
-                    rois=(roiData.rois||[]).filter(r=>r.type==='roi');
-                    if(rois.length>0)renderRoiPlaceholders();
+                    allRois=(roiData.rois||[]).filter(r=>r.type==='roi');
+                    rois=[];
+                    renderRoiPlaceholders();
                 }
                 setRunningUI();
                 running=true;
