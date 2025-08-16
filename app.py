@@ -698,6 +698,7 @@ async def list_groups():
                 data = json.loads(roi_path.read_text())
                 for r in data:
                     p = r.get("group") or r.get("page") or r.get("name")
+
                     if p:
                         groups.add(str(p))
             except Exception:
