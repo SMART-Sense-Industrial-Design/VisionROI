@@ -171,21 +171,6 @@ function createPageController(cellId){
         const cfg=await cfgRes.json();
         let roiPath=cfg.rois;
         if(!roiPath.startsWith('/')) roiPath=`data_sources/${cfg.name}/${roiPath}`;
-        const roiRes=await fetchWithStatus(`/load_roi_file?path=${encodeURIComponent(roiPath)}`);
-        const data=await roiRes.json();
-        statusEl.innerText='Loaded: '+data.filename;
-        const all=data.rois||[];
-        pageRois=all.filter(r=>(r.type??'roi')==='page').map(r=>({
-            ...r,
-            page_name: r.page_name || r.page || r.name || ''
-        }));
-        roiPages={};
-        all.filter(r=>(r.type??'roi')==='roi').forEach(r=>{
-            const p=r.page||'';
-            (roiPages[p]||(roiPages[p]=[])).push(r);
-        });
-        await preparePageImages();
-        renderRoiPlaceholders([]);
         const startRes=await fetchWithStatus(`/start_inference/${cam}`,{
             method:'POST',headers:{'Content-Type':'application/json'},
             body:JSON.stringify({...cfg,rois:[]})
@@ -195,9 +180,32 @@ function createPageController(cellId){
             openSocket();
             showAlert('Stream started','success');
             setRunningUI();
+            await loadRoiFile(roiPath);
         }else{
             running=false;startButton.disabled=false;
             showAlert('Failed to start stream','error');
+        }
+    }
+
+    async function loadRoiFile(roiPath){
+        try{
+            const roiRes=await fetchWithStatus(`/load_roi_file?path=${encodeURIComponent(roiPath)}`);
+            const data=await roiRes.json();
+            statusEl.innerText='Loaded: '+data.filename;
+            const all=data.rois||[];
+            pageRois=all.filter(r=>(r.type??'roi')==='page').map(r=>({
+                ...r,
+                page_name: r.page_name || r.page || r.name || ''
+            }));
+            roiPages={};
+            all.filter(r=>(r.type??'roi')==='roi').forEach(r=>{
+                const p=r.page||'';
+                (roiPages[p]||(roiPages[p]=[])).push(r);
+            });
+            await preparePageImages();
+            renderRoiPlaceholders([]);
+        }catch(err){
+            console.error('loadRoiFile failed',err);
         }
     }
 
