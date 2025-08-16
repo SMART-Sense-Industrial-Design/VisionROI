@@ -279,7 +279,7 @@
                     const roiId = `roi_${Date.now()}`;
                     const pageId = 'main';
                     if (currentType === 'page') {
-                        pageRois.push({ id: roiId, points, type: 'page', page: '', image: null });
+                        pageRois.push({ id: roiId, points, type: 'page', page_name: '', image: null });
 
                     } else {
                         rois.push({ id: roiId, page: pageId, module: "", points, type: 'roi' });
@@ -509,7 +509,7 @@
                 table.className = 'table table-striped table-sm';
                 const thead = document.createElement('thead');
                 const headerRow = document.createElement('tr');
-                ['ID', 'x', 'y', 'w', 'h', 'Page', 'Crop Image', 'Action'].forEach(col => {
+                ['ID', 'x', 'y', 'w', 'h', 'Page Name', 'Crop Image', 'Action'].forEach(col => {
                     const th = document.createElement('th');
                     th.textContent = col;
                     headerRow.appendChild(th);
@@ -538,7 +538,7 @@
                     const input = document.createElement('input');
                     input.className = 'form-control form-control-sm';
                     input.id = `page_${idx}`;
-                    input.value = r.page || '';
+                    input.value = r.page_name || '';
                     if (r.image) input.disabled = true;
                     tdPage.appendChild(input);
                     tr.appendChild(tdPage);
@@ -597,9 +597,11 @@
                             { x: r.x, y: r.y + r.height }
                         ];
                     }
+                    const pg = r.page_name ?? r.page ?? r.name ?? '';
                     return {
                         id: r.id ?? String(idx + 1),
-                        page: r.page ?? r.name ?? '',
+                        page_name: pg,
+                        name: pg,
                         image: r.image ?? null,
 
                         points: pts || [],
@@ -736,7 +738,8 @@
             cctx.drawImage(tmp, x, y, w, h, 0, 0, w, h);
             const base64 = crop.toDataURL('image/jpeg').split(',')[1];
 
-            r.page = pageName;
+            r.page_name = pageName;
+            r.name = pageName;
             r.image = base64;
 
             await fetch('/save_roi', {
