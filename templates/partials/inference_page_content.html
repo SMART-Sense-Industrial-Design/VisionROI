@@ -158,6 +158,7 @@ function createController(cellId){
                     if(imgEl){imgEl.src=`data:image/jpeg;base64,${data.image}`;}
                     const textEl=document.getElementById(`${cellId}-text-${data.id}`);
                     if(textEl){textEl.textContent=data.text||'';}
+
                 }
             }catch(e){}
         };

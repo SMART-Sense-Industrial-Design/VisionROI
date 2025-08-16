@@ -352,6 +352,7 @@ async def run_inference_loop(cam_id: str):
                 cv2.LINE_AA,
             )
 
+
         return cv2.resize(frame, (0, 0), fx=0.5, fy=0.5)
 
     queue = get_frame_queue(cam_id)
