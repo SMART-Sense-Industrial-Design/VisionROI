@@ -241,7 +241,8 @@ function createPageController(cellId){
             overlay.height=bitmap.height;
             overlay.style.width=video.width+'px';
             overlay.style.height=video.height+'px';
-            let best=null;let bestScore=Infinity;
+            // ค้นหา ROI หน้า (page) ที่มีความเหมือนกับภาพปัจจุบันมากที่สุด
+            let best=null;let bestScore=-Infinity;
             for(const r of pageRois){
                 if(!r.bounds||!r.imageData) continue;
                 const {x,y,w,h}=r.bounds;
@@ -252,14 +253,16 @@ function createPageController(cellId){
                 for(let i=0;i<da.length;i+=4){
                     diff+=Math.abs(da[i]-db[i])+Math.abs(da[i+1]-db[i+1])+Math.abs(da[i+2]-db[i+2]);
                 }
-                diff/=w*h;
-                if(diff<bestScore){bestScore=diff;best=r;}
+                // ทำให้เป็นค่าความเหมือน 0..1 (1 = เหมือนมากที่สุด)
+                const sim = 1 - diff/(w*h*3*255);
+                if(sim>bestScore){bestScore=sim;best=r;}
             }
             drawPageOverlay(best);
             const bestPage = best ? (best.page_name||best.page||best.name||'') : '';
             pageLabel.textContent=bestPage;
             refImage.src = best ? best.imageSrc : '';
-            scoreLabel.textContent = best ? bestScore.toFixed(2) : '';
+            // แปลงคะแนนเป็นเปอร์เซ็นต์เพื่อให้อ่านง่าย
+            scoreLabel.textContent = best ? (bestScore*100).toFixed(2) : '';
 
             if(best && bestPage!==currentPage){
                 await switchPage(bestPage);
