@@ -181,3 +181,7 @@ button.delete {
   font-weight: bold;
 }
 
+#alert-box {
+  z-index: 9999 !important;
+}
+
