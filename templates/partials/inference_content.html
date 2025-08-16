@@ -119,7 +119,7 @@
             optAll.textContent = 'All';
             groupSelect.appendChild(optAll);
             const groups = Array.from(
-                new Set(list.map(r => r.group).filter(p => p))
+                new Set(list.map(r => r.group ?? r.page ?? r.name).filter(p => p))
             );
             groups.forEach(p => {
                 const opt = document.createElement('option');
@@ -162,8 +162,10 @@
             }
             loadGroupOptions(allRois, selectedGroup);
             rois = roisOverride || (selectedGroup && selectedGroup !== 'all'
-                ? allRois.filter(r => r.group === selectedGroup)
-                : selectedGroup === 'all' ? allRois : []);
+                ? allRois.filter(r => (r.group ?? r.page ?? r.name) === selectedGroup)
+                : selectedGroup === 'all'
+                    ? allRois
+                    : []);
             if (rois.length > 0) {
                 renderRoiPlaceholders();
             } else {
@@ -259,7 +261,11 @@
                 allRois = roiData.rois || [];
                 loadGroupOptions(allRois);
                 const stored = groupSelect.value;
-                rois = stored === 'all' ? allRois : stored ? allRois.filter(r => r.group === stored) : [];
+                rois = stored === 'all'
+                    ? allRois
+                    : stored
+                        ? allRois.filter(r => (r.group ?? r.page ?? r.name) === stored)
+                        : [];
                 await fetchWithStatus(`/start_inference/${cam}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -284,7 +290,9 @@
             const selected = groupSelect.value;
             if (!selected) return;
             localStorage.setItem(`${cellId}-group`, selected);
-            const filtered = selected === 'all' ? allRois : allRois.filter(r => r.group === selected);
+            const filtered = selected === 'all'
+                ? allRois
+                : allRois.filter(r => (r.group ?? r.page ?? r.name) === selected);
             await stopInference();
             await startInference(filtered, selected);
         }
