@@ -1,21 +1,25 @@
 <h2>Inference with Saved ROI</h2>
 <p>Modules are defined in the ROI file.</p>
-<div class="cam-row">
+<div class="row g-3">
+  <div class="col-12 col-lg-8">
     <div class="card">
-        <div id="cam1" class="cam-cell">
-            <select id="cam1-sourceSelect" class="form-select mb-2"></select>
-            <button id="cam1-startButton" class="btn btn-primary me-2">Start</button>
-            <button id="cam1-stopButton" class="btn btn-danger" disabled>Stop</button>
-            <p id="cam1-status"></p>
-            <div class="video-wrapper">
-                <img id="cam1-video" width="320" height="240" />
-            </div>
+      <div id="cam1" class="cam-cell">
+        <select id="cam1-sourceSelect" class="form-select mb-2"></select>
+        <button id="cam1-startButton" class="btn btn-primary me-2">Start</button>
+        <button id="cam1-stopButton" class="btn btn-danger" disabled>Stop</button>
+        <p id="cam1-status"></p>
+        <div class="video-wrapper">
+          <img id="cam1-video" class="img-fluid" width="320" height="240" />
         </div>
+      </div>
     </div>
-    <div class="card roi-card">
-        <select id="cam1-groupSelect" class="form-select mb-2"></select>
-        <div id="cam1-rois" class="roi-grid"></div>
+  </div>
+  <div class="col-12 col-lg-4">
+    <div class="card h-100">
+      <select id="cam1-groupSelect" class="form-select mb-2"></select>
+      <div id="cam1-rois" class="roi-grid"></div>
     </div>
+  </div>
 </div>
   <script>
       (function() {

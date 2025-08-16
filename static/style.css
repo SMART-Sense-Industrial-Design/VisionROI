@@ -41,13 +41,7 @@ main {
   background-color: #f9f9f9;
 }
 
-.camera-grid {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 20px;
-}
-
-.camera-cell {
+.cam-cell {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -56,9 +50,8 @@ main {
 
 .roi-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, 80px);
+  grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
   gap: 8px;
-  margin-left: 10px;
   padding: 10px;
 }
 
@@ -99,24 +92,9 @@ main {
   margin-bottom: 20px;
 }
 
-.cam-row {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  margin-bottom: 20px;
-}
-
 .video-wrapper {
   position: relative;
   display: inline-block;
-}
-
-.roi-card {
-  display: flex;
-  align-items: flex-start;
-  /* Ensure ROI card is visible even before ROIs load and prevent wrapping under the video */
-  min-width: 200px;
-  flex-shrink: 0;
 }
 
 /* Table styling for source list and generic tables */

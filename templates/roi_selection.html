@@ -2,25 +2,34 @@
 {% block title %}ROI Selection{% endblock %}
 {% block content %}
 
-<select id="sourceSelect"></select>
-<button id="startBtn">Start</button>
-<button id="stopBtn" disabled>Stop</button>
-<button id="clearBtn">Clear All</button>
-
-<br><br>
-<div class="d-flex">
-    <div id="roiToolbar" class="btn-group-vertical me-2">
-        <button id="pickBtn" class="btn btn-primary">Pick Points</button>
-        <button id="rectBtn" class="btn btn-secondary">Rectangle</button>
-        <button id="pageBtn" class="btn btn-secondary">Page Rect</button>
-    </div>
-    <div id="frameContainer" style="position: relative; display: inline-block;">
-        <img id="video" />
-        <canvas id="canvas"></canvas>
-    </div>
+<div class="row g-2 mb-3 align-items-center">
+  <div class="col-auto">
+    <select id="sourceSelect" class="form-select"></select>
+  </div>
+  <div class="col-auto">
+    <button id="startBtn" class="btn btn-primary">Start</button>
+  </div>
+  <div class="col-auto">
+    <button id="stopBtn" class="btn btn-danger" disabled>Stop</button>
+  </div>
+  <div class="col-auto">
+    <button id="clearBtn" class="btn btn-secondary">Clear All</button>
+  </div>
 </div>
 
-<div id="roiList"></div>
+<div class="d-flex flex-wrap">
+  <div id="roiToolbar" class="btn-group-vertical me-2 mb-2">
+    <button id="pickBtn" class="btn btn-primary">Pick Points</button>
+    <button id="rectBtn" class="btn btn-secondary">Rectangle</button>
+    <button id="pageBtn" class="btn btn-secondary">Page Rect</button>
+  </div>
+  <div id="frameContainer" class="mb-2" style="position: relative; display: inline-block;">
+    <img id="video" />
+    <canvas id="canvas"></canvas>
+  </div>
+</div>
+
+<div id="roiList" class="mt-3"></div>
 
 <script>
     (function() {
