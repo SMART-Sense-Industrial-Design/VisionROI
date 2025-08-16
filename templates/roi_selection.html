@@ -539,7 +539,7 @@
                     input.className = 'form-control form-control-sm';
                     input.id = `page_${idx}`;
                     input.value = r.page || '';
-                    if (r.image) input.disabled = true;
+                    input.addEventListener('change', e => updatePageRoiName(idx, e.target.value));
                     tdPage.appendChild(input);
                     tr.appendChild(tdPage);
 
@@ -677,6 +677,16 @@
             });
         }
 
+        function updatePageRoiName(i, name) {
+            pageRois[i].page = name;
+            pageRois[i].name = name;
+            fetch('/save_roi', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ rois: rois.concat(pageRois).concat(typeof otherRois !== 'undefined' ? otherRois : []), source: currentSource })
+            });
+        }
+
         function deleteRoi(i) {
             if (!confirm('Delete this ROI?')) return;
             rois.splice(i, 1);
@@ -763,6 +773,7 @@
         window.updateRoiGroup = updateRoiGroup;
         window.updateRoiModule = updateRoiModule;
         window.deleteRoi = deleteRoi;
+        window.updatePageRoiName = updatePageRoiName;
         window.deletePageRoi = deletePageRoi;
 
         window.addEventListener('beforeunload', () => {
