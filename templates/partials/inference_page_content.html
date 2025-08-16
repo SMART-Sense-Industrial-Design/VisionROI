@@ -9,7 +9,7 @@
             <p id="cam1-status"></p>
             <div class="video-wrapper">
                 <img id="cam1-video" width="320" height="240" />
-
+                <p id="cam1-pageName"></p>
             </div>
         </div>
     </div>
@@ -18,10 +18,12 @@
 (function(){
 function createController(cellId){
     let socket;
+    let roiSocket;
     let running=false;
     const cam=cellId.replace(/\D/g,'');
     const getEl=suffix=>document.getElementById(`${cellId}-${suffix}`);
     const video=getEl('video');
+    const pageNameEl=getEl('pageName');
 
     const startButton=getEl('startButton');
     const stopButton=getEl('stopButton');
@@ -111,6 +113,7 @@ function createController(cellId){
         const startData=await startRes.json();
         if(startData.status==='started'||startData.status==='already_running'){
             openSocket();
+            openRoiSocket();
 
             setRunningUI();
             showAlert('Stream started','success');
@@ -131,13 +134,26 @@ function createController(cellId){
         };
     }
 
+    function openRoiSocket(){
+        roiSocket=new WebSocket(`ws://${location.host}/ws_roi_result/${cam}`);
+        roiSocket.onmessage=event=>{
+            try{
+                const data=JSON.parse(event.data);
+                if(data.page_name){
+                    pageNameEl.innerText=data.page_name;
+                }
+            }catch(e){}
+        };
+    }
+
     async function stopStream(){
         if(!running)return;
         running=false;
         await fetchWithStatus(`/stop_inference/${cam}`,{method:'POST'});
         if(socket){socket.close();socket=null;}
-
+        if(roiSocket){roiSocket.close();roiSocket=null;}
         video.src='';
+        pageNameEl.innerText='';
         startButton.disabled=false;
         stopButton.disabled=true;
         statusEl.innerText='Stopped';
