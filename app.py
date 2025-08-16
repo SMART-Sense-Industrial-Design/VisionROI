@@ -212,93 +212,77 @@ async def run_inference_loop(cam_id: int):
         for i, r in enumerate(rois):
             if np is None:
                 continue
-            pts = r.get("points", [])
+            pts = r.get('points', [])
             if len(pts) != 4:
                 continue
-            if r.get("type") != "roi":
-                continue
-            mod_name = r.get("module")
-            if not mod_name:
+            src = np.array([[p['x'], p['y']] for p in pts], dtype=np.float32)
+            typ = r.get('type')
+            color = (255, 0, 0) if typ == 'roi' else (0, 255, 0)
+
+            if typ == 'roi' and r.get('module'):
+                mod_name = r.get('module')
+                module_entry = module_cache.get(mod_name)
+                if module_entry is None:
+                    module = load_custom_module(mod_name)
+                    takes_source = False
+                    takes_cam_id = False
+                    if module:
+                        proc = getattr(module, 'process', None)
+                        if callable(proc):
+                            params = inspect.signature(proc).parameters
+                            takes_source = 'source' in params
+                            takes_cam_id = 'cam_id' in params
+                    module_cache[mod_name] = (module, takes_source, takes_cam_id)
+                else:
+                    module, takes_source, takes_cam_id = module_entry
+                if module is None:
+                    print(f"module '{mod_name}' not found for ROI {r.get('id', i)}")
+                else:
+                    process_fn = getattr(module, 'process', None)
+                    if not callable(process_fn):
+                        print(f"process function not found in module '{mod_name}' for ROI {r.get('id', i)}")
+                    else:
+                        width_a = np.linalg.norm(src[0] - src[1])
+                        width_b = np.linalg.norm(src[2] - src[3])
+                        max_w = int(max(width_a, width_b))
+                        height_a = np.linalg.norm(src[0] - src[3])
+                        height_b = np.linalg.norm(src[1] - src[2])
+                        max_h = int(max(height_a, height_b))
+                        dst = np.array([[0, 0], [max_w - 1, 0], [max_w - 1, max_h - 1], [0, max_h - 1]], dtype=np.float32)
+                        matrix = cv2.getPerspectiveTransform(src, dst)
+                        roi = cv2.warpPerspective(frame, matrix, (max_w, max_h))
+                        result_text = ''
+                        try:
+                            args = [roi, r.get('id', str(i)), save_flag]
+                            if takes_source:
+                                args.append(active_sources.get(cam_id, ''))
+                            if takes_cam_id:
+                                args.append(cam_id)
+                            result = process_fn(*args)
+                            if inspect.isawaitable(result):
+                                result = await result
+                            if isinstance(result, str):
+                                result_text = result
+                            elif isinstance(result, dict) and 'text' in result:
+                                result_text = str(result['text'])
+                        except Exception:
+                            pass
+                        try:
+                            _, roi_buf = cv2.imencode('.jpg', roi)
+                            roi_b64 = base64.b64encode(roi_buf).decode('ascii')
+                            q = get_roi_result_queue(cam_id)
+                            payload = json.dumps({'id': r.get('id', i), 'image': roi_b64, 'text': result_text})
+                            if q.full():
+                                q.get_nowait()
+                            await q.put(payload)
+                        except Exception:
+                            pass
+            elif typ == 'roi' and not r.get('module'):
                 print(f"module missing for ROI {r.get('id', i)}")
-                continue
-            module_entry = module_cache.get(mod_name)
-            if module_entry is None:
-                module = load_custom_module(mod_name)
-                takes_source = False
-                takes_cam_id = False
-                if module:
-                    proc = getattr(module, "process", None)
-                    if callable(proc):
-                        params = inspect.signature(proc).parameters
-                        takes_source = "source" in params
-                        takes_cam_id = "cam_id" in params
-                module_cache[mod_name] = (module, takes_source, takes_cam_id)
-            else:
-                module, takes_source, takes_cam_id = module_entry
-            if module is None:
-                print(f"module '{mod_name}' not found for ROI {r.get('id', i)}")
-                continue
-            process_fn = getattr(module, "process", None)
-            if not callable(process_fn):
-                print(
-                    f"process function not found in module '{mod_name}' for ROI {r.get('id', i)}"
-                )
-                continue
-            src = np.array([[p["x"], p["y"]] for p in pts], dtype=np.float32)
-            width_a = np.linalg.norm(src[0] - src[1])
-            width_b = np.linalg.norm(src[2] - src[3])
-            max_w = int(max(width_a, width_b))
-            height_a = np.linalg.norm(src[0] - src[3])
-            height_b = np.linalg.norm(src[1] - src[2])
-            max_h = int(max(height_a, height_b))
-            dst = np.array(
-                [[0, 0], [max_w - 1, 0], [max_w - 1, max_h - 1], [0, max_h - 1]],
-                dtype=np.float32,
-            )
-            matrix = cv2.getPerspectiveTransform(src, dst)
-            roi = cv2.warpPerspective(frame, matrix, (max_w, max_h))
-            result_text = ""
-            try:
-                args = [roi, r.get("id", str(i)), save_flag]
-                if takes_source:
-                    args.append(active_sources.get(cam_id, ""))
-                if takes_cam_id:
-                    args.append(cam_id)
-                result = process_fn(*args)
-                if inspect.isawaitable(result):
-                    result = await result
-                if isinstance(result, str):
-                    result_text = result
-                elif isinstance(result, dict) and "text" in result:
-                    result_text = str(result["text"])
-            except Exception:
-                pass
-            try:
-                _, roi_buf = cv2.imencode('.jpg', roi)
-                roi_b64 = base64.b64encode(roi_buf).decode('ascii')
-                q = get_roi_result_queue(cam_id)
-                payload = json.dumps({
-                    "id": r.get("id", i),
-                    "image": roi_b64,
-                    "text": result_text,
-                })
-                if q.full():
-                    q.get_nowait()
-                await q.put(payload)
-            except Exception:
-                pass
-            cv2.polylines(frame, [src.astype(int)], True, (0, 255, 0), 2)
+
+            cv2.polylines(frame, [src.astype(int)], True, color, 2)
             label_pt = src[0].astype(int)
-            cv2.putText(
-                frame,
-                str(r.get("id", i + 1)),
-                (int(label_pt[0]), max(0, int(label_pt[1]) - 5)),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.5,
-                (0, 255, 0),
-                1,
-                cv2.LINE_AA,
-            )
+            cv2.putText(frame, str(r.get('id', i + 1)), (int(label_pt[0]), max(0, int(label_pt[1]) - 5)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1, cv2.LINE_AA)
         return cv2.resize(frame, (0, 0), fx=0.5, fy=0.5)
 
     queue = get_frame_queue(cam_id)
@@ -541,11 +525,8 @@ async def perform_start_inference(cam_id: int, rois=None, save_state: bool = Tru
             rois = []
     if not isinstance(rois, list):
         rois = []
-    processed_rois = []
-    for r in rois:
-        if r.get("type") == "roi" and r.get("module"):
-            processed_rois.append(r)
-    inference_rois[cam_id] = processed_rois
+    # เก็บ ROI ทั้งหมดไว้เพื่อใช้วาดกรอบและประมวลผลเฉพาะที่จำเป็น
+    inference_rois[cam_id] = rois
     queue = get_roi_result_queue(cam_id)
     while not queue.empty():
         queue.get_nowait()

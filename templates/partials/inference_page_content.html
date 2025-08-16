@@ -9,7 +9,7 @@
             <p id="cam1-status"></p>
             <div class="video-wrapper">
                 <img id="cam1-video" width="320" height="240" />
-                <canvas id="cam1-overlay" class="overlay"></canvas>
+
             </div>
         </div>
     </div>
@@ -19,17 +19,15 @@
 function createController(cellId){
     let socket;
     let running=false;
-    let rois=[];
     const cam=cellId.replace(/\D/g,'');
     const getEl=suffix=>document.getElementById(`${cellId}-${suffix}`);
     const video=getEl('video');
-    video.onload=()=>{URL.revokeObjectURL(video.src);if(rois.length)drawOverlay();};
+
     const startButton=getEl('startButton');
     const stopButton=getEl('stopButton');
     const statusEl=getEl('status');
     const sourceSelect=getEl('sourceSelect');
-    const overlay=getEl('overlay');
-    const overlayCtx=overlay.getContext('2d');
+
 
     startButton.onclick=startStream;
     stopButton.onclick=stopStream;
@@ -96,14 +94,24 @@ function createController(cellId){
         const cfg=await cfgRes.json();
         let roiPath=cfg.rois;
         if(!roiPath.startsWith('/'))roiPath=`data_sources/${cfg.name}/${roiPath}`;
+        let roiList=[];
+        try{
+            const roiRes=await fetchWithStatus(`/load_roi_file?path=${encodeURIComponent(roiPath)}`);
+            const data=await roiRes.json();
+            roiList=data.rois||[];
+        }catch(e){
+            console.error('Failed to load ROI file',e);
+            showAlert('Failed to load ROI file','error');
+        }
+
         const startRes=await fetchWithStatus(`/start_inference/${cam}`,{
             method:'POST',headers:{'Content-Type':'application/json'},
-            body:JSON.stringify({...cfg,rois:[]})
+            body:JSON.stringify({...cfg,rois:roiList})
         });
         const startData=await startRes.json();
         if(startData.status==='started'||startData.status==='already_running'){
             openSocket();
-            await loadRoiFile(roiPath);
+
             setRunningUI();
             showAlert('Stream started','success');
         }else{
@@ -113,37 +121,6 @@ function createController(cellId){
         }
     }
 
-    async function loadRoiFile(path){
-        try{
-            const roiRes=await fetchWithStatus(`/load_roi_file?path=${encodeURIComponent(path)}`);
-            const data=await roiRes.json();
-            rois=data.rois||[];
-            drawOverlay();
-        }catch(e){
-            console.error('Failed to load ROI file',e);
-            showAlert('Failed to load ROI file','error');
-        }
-    }
-
-    function drawOverlay(){
-        overlay.width=video.naturalWidth||video.width;
-        overlay.height=video.naturalHeight||video.height;
-        overlay.style.width=video.width+'px';
-        overlay.style.height=video.height+'px';
-        overlayCtx.clearRect(0,0,overlay.width,overlay.height);
-        rois.forEach(r=>{
-            if(!r.points)return;
-            overlayCtx.beginPath();
-            r.points.forEach((p,i)=>{
-                if(i===0)overlayCtx.moveTo(p.x,p.y);
-                else overlayCtx.lineTo(p.x,p.y);
-            });
-            overlayCtx.closePath();
-            overlayCtx.lineWidth=2;
-            overlayCtx.strokeStyle='lime';
-            overlayCtx.stroke();
-        });
-    }
 
     function openSocket(){
         socket=new WebSocket(`ws://${location.host}/ws/${cam}`);
@@ -159,7 +136,7 @@ function createController(cellId){
         running=false;
         await fetchWithStatus(`/stop_inference/${cam}`,{method:'POST'});
         if(socket){socket.close();socket=null;}
-        overlayCtx.clearRect(0,0,overlay.width,overlay.height);
+
         video.src='';
         startButton.disabled=false;
         stopButton.disabled=true;
