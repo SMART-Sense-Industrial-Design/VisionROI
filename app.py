@@ -319,6 +319,7 @@ async def run_inference_loop(cam_id: str):
                     cv2.LINE_AA,
                 )
         if output:
+
             try:
                 q = get_roi_result_queue(cam_id)
                 payload = json.dumps({'group': output})
@@ -329,6 +330,7 @@ async def run_inference_loop(cam_id: str):
                 pass
             for i, r in enumerate(rois):
                 if r.get('type') == 'roi' and r.get('group') == output:
+
                     pts = r.get('points', [])
                     if len(pts) != 4:
                         continue
