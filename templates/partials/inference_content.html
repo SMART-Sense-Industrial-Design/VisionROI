@@ -25,7 +25,7 @@
         let rois = [];
         let allRois = [];
         let running = false;
-        const cam = cellId.replace(/\D/g, '');
+        const cam = `inf_${cellId}`;
         const getEl = suffix => document.getElementById(`${cellId}-${suffix}`);
         const video = getEl('video');
         video.onload = () => URL.revokeObjectURL(video.src);

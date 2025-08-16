@@ -20,7 +20,7 @@ function createController(cellId){
     let socket;
     let roiSocket;
     let running=false;
-    const cam=cellId.replace(/\D/g,'');
+    const cam=`page_${cellId}`;
     const getEl=suffix=>document.getElementById(`${cellId}-${suffix}`);
     const video=getEl('video');
     const pageNameEl=getEl('pageName');
