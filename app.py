@@ -207,17 +207,77 @@ async def run_inference_loop(cam_id: str):
         save_flag = bool(save_roi_flags.get(cam_id))
         output = None
         best_score = -1.0
+
+        # pass 1: evaluate page ROIs to determine best group and draw them
         for i, r in enumerate(rois):
+            if np is None or r.get('type') != 'page':
+                continue
+            pts = r.get('points', [])
+            if len(pts) != 4:
+                continue
+            src = np.array([[p['x'], p['y']] for p in pts], dtype=np.float32)
+            color = (0, 255, 0)
+            width_a = np.linalg.norm(src[0] - src[1])
+            width_b = np.linalg.norm(src[2] - src[3])
+            max_w = int(max(width_a, width_b))
+            height_a = np.linalg.norm(src[0] - src[3])
+            height_b = np.linalg.norm(src[1] - src[2])
+            max_h = int(max(height_a, height_b))
+            dst = np.array([[0, 0], [max_w - 1, 0], [max_w - 1, max_h - 1], [0, max_h - 1]], dtype=np.float32)
+            matrix = cv2.getPerspectiveTransform(src, dst)
+            roi = cv2.warpPerspective(frame, matrix, (max_w, max_h))
+            template = r.get('_template')
+            if template is not None:
+                try:
+                    roi_gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+                except Exception:
+                    roi_gray = None
+                if roi_gray is not None:
+                    if roi_gray.shape != template.shape:
+                        roi_gray = cv2.resize(roi_gray, (template.shape[1], template.shape[0]))
+                    try:
+                        res = cv2.matchTemplate(roi_gray, template, cv2.TM_CCOEFF_NORMED)
+                        score = float(res[0][0])
+                        if score > best_score:
+                            best_score = score
+                            output = r.get('page', '')
+                    except Exception:
+                        pass
+            cv2.polylines(frame, [src.astype(int)], True, color, 2)
+            label_pt = src[0].astype(int)
+            cv2.putText(
+                frame,
+                str(r.get('id', i + 1)),
+                (int(label_pt[0]), max(0, int(label_pt[1]) - 5)),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.5,
+                color,
+                1,
+                cv2.LINE_AA,
+            )
+
+        # pass 2: process ROI items that belong to detected group
+        if output:
+            try:
+                q = get_roi_result_queue(cam_id)
+                payload = json.dumps({'group': output})
+                if q.full():
+                    q.get_nowait()
+                await q.put(payload)
+            except Exception:
+                pass
+
+        for i, r in enumerate(rois):
+            if r.get('type') != 'roi' or r.get('group') != output:
+                continue
             if np is None:
                 continue
             pts = r.get('points', [])
             if len(pts) != 4:
                 continue
             src = np.array([[p['x'], p['y']] for p in pts], dtype=np.float32)
-            typ = r.get('type')
-            color = (255, 0, 0) if typ == 'roi' else (0, 255, 0)
 
-            if typ == 'roi' and r.get('module'):
+            if r.get('module'):
                 mod_name = r.get('module')
                 module_entry = module_cache.get(mod_name)
                 if module_entry is None:
@@ -275,78 +335,24 @@ async def run_inference_loop(cam_id: str):
                             await q.put(payload)
                         except Exception:
                             pass
-            elif typ == 'roi' and not r.get('module'):
+            else:
                 print(f"module missing for ROI {r.get('id', i)}")
-            elif typ == 'page':
-                width_a = np.linalg.norm(src[0] - src[1])
-                width_b = np.linalg.norm(src[2] - src[3])
-                max_w = int(max(width_a, width_b))
-                height_a = np.linalg.norm(src[0] - src[3])
-                height_b = np.linalg.norm(src[1] - src[2])
-                max_h = int(max(height_a, height_b))
-                dst = np.array([[0, 0], [max_w - 1, 0], [max_w - 1, max_h - 1], [0, max_h - 1]], dtype=np.float32)
-                matrix = cv2.getPerspectiveTransform(src, dst)
-                roi = cv2.warpPerspective(frame, matrix, (max_w, max_h))
-                template = r.get('_template')
-                if template is not None:
-                    try:
-                        roi_gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
-                    except Exception:
-                        roi_gray = None
-                    if roi_gray is not None:
-                        if roi_gray.shape != template.shape:
-                            roi_gray = cv2.resize(roi_gray, (template.shape[1], template.shape[0]))
-                        try:
-                            res = cv2.matchTemplate(roi_gray, template, cv2.TM_CCOEFF_NORMED)
-                            score = float(res[0][0])
-                            if score > best_score:
-                                best_score = score
-                                output = r.get('page', '')
-                        except Exception:
-                            pass
 
-            if typ == 'page':
-                cv2.polylines(frame, [src.astype(int)], True, color, 2)
-                label_pt = src[0].astype(int)
-                cv2.putText(
-                    frame,
-                    str(r.get('id', i + 1)),
-                    (int(label_pt[0]), max(0, int(label_pt[1]) - 5)),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.5,
-                    color,
-                    1,
-                    cv2.LINE_AA,
-                )
-        if output:
+            src_int = src.astype(int)
+            cv2.polylines(frame, [src_int], True, (255, 0, 0), 2)
+            label_pt = src_int[0]
+            cv2.putText(
+                frame,
+                str(r.get('id', i + 1)),
+                (int(label_pt[0]), max(0, int(label_pt[1]) - 5)),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.5,
+                (255, 0, 0),
+                1,
+                cv2.LINE_AA,
+            )
 
-            try:
-                q = get_roi_result_queue(cam_id)
-                payload = json.dumps({'group': output})
-                if q.full():
-                    q.get_nowait()
-                await q.put(payload)
-            except Exception:
-                pass
-            for i, r in enumerate(rois):
-                if r.get('type') == 'roi' and r.get('group') == output:
 
-                    pts = r.get('points', [])
-                    if len(pts) != 4:
-                        continue
-                    src = np.array([[p['x'], p['y']] for p in pts], dtype=np.int32)
-                    cv2.polylines(frame, [src], True, (255, 0, 0), 2)
-                    label_pt = src[0]
-                    cv2.putText(
-                        frame,
-                        str(r.get('id', i + 1)),
-                        (int(label_pt[0]), max(0, int(label_pt[1]) - 5)),
-                        cv2.FONT_HERSHEY_SIMPLEX,
-                        0.5,
-                        (255, 0, 0),
-                        1,
-                        cv2.LINE_AA,
-                    )
         return cv2.resize(frame, (0, 0), fx=0.5, fy=0.5)
 
     queue = get_frame_queue(cam_id)

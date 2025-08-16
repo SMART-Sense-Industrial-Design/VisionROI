@@ -13,6 +13,9 @@
             </div>
         </div>
     </div>
+    <div class="card roi-card">
+        <div id="cam1-rois" class="roi-grid"></div>
+    </div>
 </div>
 <script>
 (function(){
@@ -24,6 +27,8 @@ function createController(cellId){
     const getEl=suffix=>document.getElementById(`${cellId}-${suffix}`);
     const video=getEl('video');
     const pageNameEl=getEl('pageName');
+    const roiGrid=getEl('rois');
+    let rois=[];
 
     const startButton=getEl('startButton');
     const stopButton=getEl('stopButton');
@@ -106,6 +111,13 @@ function createController(cellId){
             showAlert('Failed to load ROI file','error');
         }
 
+        rois=roiList.filter(r=>r.type==='roi');
+        if(rois.length>0){
+            renderRoiPlaceholders();
+        }else{
+            roiGrid.innerHTML='';
+        }
+
         const startRes=await fetchWithStatus(`/start_inference/${cam}`,{
             method:'POST',headers:{'Content-Type':'application/json'},
             body:JSON.stringify({...cfg,rois:roiList})
@@ -141,9 +153,36 @@ function createController(cellId){
                 const data=JSON.parse(event.data);
                 if(data.group){
                     pageNameEl.innerText=data.group;
+                }else if(data.id){
+                    const imgEl=document.getElementById(`${cellId}-roi-${data.id}`);
+                    if(imgEl){imgEl.src=`data:image/jpeg;base64,${data.image}`;}
+                    const textEl=document.getElementById(`${cellId}-text-${data.id}`);
+                    if(textEl){textEl.textContent=data.text||'';}
+
                 }
             }catch(e){}
         };
+    }
+
+    function renderRoiPlaceholders(list=rois){
+        roiGrid.innerHTML='';
+        list.forEach(r=>{
+            const item=document.createElement('div');
+            item.className='roi-item';
+            const title=document.createElement('h4');
+            title.className='roi-title';
+            title.textContent=r.name||`ROI ${r.id}`;
+            const img=document.createElement('img');
+            img.id=`${cellId}-roi-${r.id}`;
+            img.className='roi-image';
+            const p=document.createElement('p');
+            p.id=`${cellId}-text-${r.id}`;
+            p.className='roi-text';
+            item.appendChild(title);
+            item.appendChild(img);
+            item.appendChild(p);
+            roiGrid.appendChild(item);
+        });
     }
 
     async function stopStream(){
@@ -178,8 +217,19 @@ function createController(cellId){
                 }
             }catch(e){}
             if(data.running){
+                const name=sourceSelect.value;
                 openSocket();
                 openRoiSocket();
+                if(name){
+                    const cfgRes=await fetchWithStatus(`/source_config?name=${encodeURIComponent(name)}`);
+                    const cfg=await cfgRes.json();
+                    let roiPath=cfg.rois;
+                    if(!roiPath.startsWith('/'))roiPath=`data_sources/${cfg.name}/${roiPath}`;
+                    const roiRes=await fetchWithStatus(`/load_roi_file?path=${encodeURIComponent(roiPath)}`);
+                    const roiData=await roiRes.json();
+                    rois=(roiData.rois||[]).filter(r=>r.type==='roi');
+                    if(rois.length>0)renderRoiPlaceholders();
+                }
                 setRunningUI();
                 running=true;
                 showAlert('Stream resumed','info');
