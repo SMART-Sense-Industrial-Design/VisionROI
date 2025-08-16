@@ -267,6 +267,7 @@ function createPageController(cellId){
             const percent = best ? (bestScore*100).toFixed(2) : '0';
             scoreLabel.textContent = `${percent}%`;
 
+
             if(best && bestPage!==currentPage){
                 await switchPage(bestPage);
             }
