@@ -10,14 +10,14 @@ import app
 
 
 def test_read_and_queue_frame_skip_on_none():
-    q = app.get_frame_queue(0)
+    q = app.get_frame_queue("0")
     while not q.empty():
         q.get_nowait()
     class DummyWorker:
         async def read(self):
             return b"frame"
 
-    app.camera_workers[0] = DummyWorker()
+    app.camera_workers["0"] = DummyWorker()
 
     def fake_imencode(ext, frame):
         raise AssertionError("imencode should not be called")
@@ -27,7 +27,7 @@ def test_read_and_queue_frame_skip_on_none():
     async def processor(frame):
         return None
 
-    asyncio.run(app.read_and_queue_frame(0, q, processor))
+    asyncio.run(app.read_and_queue_frame("0", q, processor))
 
     assert q.empty()
-    app.camera_workers[0] = None
+    app.camera_workers["0"] = None

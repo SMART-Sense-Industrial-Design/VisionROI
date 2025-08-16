@@ -49,12 +49,12 @@ def test_event_loop_responsive():
     async def main():
         worker = app.CameraWorker(0, asyncio.get_running_loop())
         assert worker.start()
-        app.camera_workers[0] = worker
-        app.inference_rois[0] = []
-        app.active_sources[0] = ""
+        app.camera_workers["0"] = worker
+        app.inference_rois["0"] = []
+        app.active_sources["0"] = ""
         app.cv2.imencode = lambda ext, frame: (True, b"data")
 
-        loop_task = asyncio.create_task(app.run_inference_loop(0))
+        loop_task = asyncio.create_task(app.run_inference_loop("0"))
         tick_task = asyncio.create_task(ticker())
 
         ticks = await tick_task
@@ -64,7 +64,7 @@ def test_event_loop_responsive():
 
         frames = worker.cap.frames_read
         await worker.stop()
-        app.camera_workers[0] = None
+        app.camera_workers["0"] = None
         return ticks, frames
 
     ticks, frames = asyncio.run(main())

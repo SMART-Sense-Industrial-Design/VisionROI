@@ -25,18 +25,18 @@ except Exception:  # websockets not installed
     ConnectionClosed = Exception        
 
 # เก็บ worker ของกล้องแต่ละตัวในรูปแบบ dict
-camera_workers: dict[int, CameraWorker | None] = {}
-camera_sources: dict[int, int | str] = {}
-camera_resolutions: dict[int, tuple[int | None, int | None]] = {}
-camera_locks: dict[int, asyncio.Lock] = {}
-frame_queues: dict[int, asyncio.Queue[bytes]] = {}
-inference_tasks: dict[int, asyncio.Task | None] = {}
-roi_frame_queues: dict[int, asyncio.Queue[bytes | None]] = {}
-roi_result_queues: dict[int, asyncio.Queue[str | None]] = {}
-roi_tasks: dict[int, asyncio.Task | None] = {}
-inference_rois: dict[int, list[dict]] = {}
-active_sources: dict[int, str] = {}
-save_roi_flags: dict[int, bool] = {}
+camera_workers: dict[str, CameraWorker | None] = {}
+camera_sources: dict[str, int | str] = {}
+camera_resolutions: dict[str, tuple[int | None, int | None]] = {}
+camera_locks: dict[str, asyncio.Lock] = {}
+frame_queues: dict[str, asyncio.Queue[bytes]] = {}
+inference_tasks: dict[str, asyncio.Task | None] = {}
+roi_frame_queues: dict[str, asyncio.Queue[bytes | None]] = {}
+roi_result_queues: dict[str, asyncio.Queue[str | None]] = {}
+roi_tasks: dict[str, asyncio.Task | None] = {}
+inference_rois: dict[str, list[dict]] = {}
+active_sources: dict[str, str] = {}
+save_roi_flags: dict[str, bool] = {}
 
 # ไฟล์สำหรับเก็บสถานะการทำงาน เพื่อให้สามารถกลับมารันต่อหลังรีสตาร์ท service
 STATE_FILE = "service_state.json"
@@ -91,11 +91,7 @@ ALLOWED_ROI_DIR = os.path.realpath("data_sources")
 async def restore_service_state() -> None:
     """โหลดสถานะที่บันทึกไว้และเริ่มงาน inference ที่เคยรัน"""
     cams = load_service_state()
-    for cam_id_str, cfg in cams.items():
-        try:
-            cam_id = int(cam_id_str)
-        except ValueError:
-            continue
+    for cam_id, cfg in cams.items():
         camera_sources[cam_id] = cfg.get("source")
         res = cfg.get("resolution") or [None, None]
         camera_resolutions[cam_id] = (res[0], res[1])
@@ -152,20 +148,20 @@ def load_custom_module(name: str) -> ModuleType | None:
     return module
 
 
-def get_frame_queue(cam_id: int) -> asyncio.Queue[bytes]:
+def get_frame_queue(cam_id: str) -> asyncio.Queue[bytes]:
     return frame_queues.setdefault(cam_id, asyncio.Queue(maxsize=1))
 
 
-def get_roi_frame_queue(cam_id: int) -> asyncio.Queue[bytes | None]:
+def get_roi_frame_queue(cam_id: str) -> asyncio.Queue[bytes | None]:
     return roi_frame_queues.setdefault(cam_id, asyncio.Queue(maxsize=1))
 
 
-def get_roi_result_queue(cam_id: int) -> asyncio.Queue[str | None]:
+def get_roi_result_queue(cam_id: str) -> asyncio.Queue[str | None]:
     return roi_result_queues.setdefault(cam_id, asyncio.Queue(maxsize=10))
 
 
 async def read_and_queue_frame(
-    cam_id: int, queue: asyncio.Queue[bytes], frame_processor=None
+    cam_id: str, queue: asyncio.Queue[bytes], frame_processor=None
 ) -> None:
     worker = camera_workers.get(cam_id)
     if worker is None:
@@ -200,7 +196,7 @@ async def read_and_queue_frame(
     await asyncio.sleep(0.04)
 
 
-async def run_inference_loop(cam_id: int):
+async def run_inference_loop(cam_id: str):
     module_cache: dict[str, tuple[ModuleType | None, bool, bool]] = {}
 
     async def process_frame(frame):
@@ -332,7 +328,7 @@ async def run_inference_loop(cam_id: int):
         pass
 
 
-async def run_roi_loop(cam_id: int):
+async def run_roi_loop(cam_id: str):
     queue = get_roi_frame_queue(cam_id)
     try:
         while True:
@@ -344,9 +340,9 @@ async def run_roi_loop(cam_id: int):
 
 # ฟังก์ชัน generic สำหรับเริ่มและหยุดงานที่ใช้กล้อง
 async def start_camera_task(
-    cam_id: int,
-    task_dict: dict[int, asyncio.Task | None],
-    loop_func: Callable[[int], Awaitable[Any]],
+    cam_id: str,
+    task_dict: dict[str, asyncio.Task | None],
+    loop_func: Callable[[str], Awaitable[Any]],
 ):
     """เริ่มงานแบบ asynchronous สำหรับกล้องที่ระบุ"""
     task = task_dict.get(cam_id)
@@ -371,9 +367,9 @@ async def start_camera_task(
 
 
 async def stop_camera_task(
-    cam_id: int,
-    task_dict: dict[int, asyncio.Task | None],
-    queue_dict: dict[int, asyncio.Queue[bytes | None]] | None = None,
+    cam_id: str,
+    task_dict: dict[str, asyncio.Task | None],
+    queue_dict: dict[str, asyncio.Queue[bytes | None]] | None = None,
 ):
     """หยุดงานที่ใช้กล้องตาม cam_id"""
     task = task_dict.get(cam_id)
@@ -419,8 +415,8 @@ async def stop_camera_task(
 
 
 # ✅ WebSocket video stream
-@app.websocket('/ws/<int:cam_id>')
-async def ws(cam_id: int):
+@app.websocket('/ws/<string:cam_id>')
+async def ws(cam_id: str):
     queue = get_frame_queue(cam_id)
     while True:
         frame_bytes = await queue.get()
@@ -430,8 +426,8 @@ async def ws(cam_id: int):
 
 
 # ✅ WebSocket ROI stream
-@app.websocket('/ws_roi/<int:cam_id>')
-async def ws_roi(cam_id: int):
+@app.websocket('/ws_roi/<string:cam_id>')
+async def ws_roi(cam_id: str):
     queue = get_roi_frame_queue(cam_id)
     try:
         while True:
@@ -444,8 +440,8 @@ async def ws_roi(cam_id: int):
         pass
 
 
-@app.websocket('/ws_roi_result/<int:cam_id>')
-async def ws_roi_result(cam_id: int):
+@app.websocket('/ws_roi_result/<string:cam_id>')
+async def ws_roi_result(cam_id: str):
     queue = get_roi_result_queue(cam_id)
     try:
         while True:
@@ -458,7 +454,7 @@ async def ws_roi_result(cam_id: int):
         pass
 
 
-async def apply_camera_settings(cam_id: int, data: dict) -> bool:
+async def apply_camera_settings(cam_id: str, data: dict) -> bool:
     active_sources[cam_id] = data.get("name", "")
     source_val = data.get("source", "")
     width_val = data.get("width")
@@ -544,7 +540,7 @@ async def create_source():
 
 
 # ฟังก์ชันช่วยเริ่มงาน inference เพื่อใช้ซ้ำได้ทั้งจาก route และตอนรีสตาร์ท
-async def perform_start_inference(cam_id: int, rois=None, save_state: bool = True):
+async def perform_start_inference(cam_id: str, rois=None, save_state: bool = True):
     if roi_tasks.get(cam_id) and not roi_tasks[cam_id].done():
         return False
     if rois is None:
@@ -587,8 +583,8 @@ async def perform_start_inference(cam_id: int, rois=None, save_state: bool = Tru
     return True
 
 # ✅ เริ่มงาน inference
-@app.route('/start_inference/<int:cam_id>', methods=["POST"])
-async def start_inference(cam_id: int):
+@app.route('/start_inference/<string:cam_id>', methods=["POST"])
+async def start_inference(cam_id: str):
     if roi_tasks.get(cam_id) and not roi_tasks[cam_id].done():
         return jsonify({"status": "roi_running", "cam_id": cam_id}), 400
     data = await request.get_json() or {}
@@ -605,8 +601,8 @@ async def start_inference(cam_id: int):
 
 
 # ✅ หยุดงาน inference
-@app.route('/stop_inference/<int:cam_id>', methods=["POST"])
-async def stop_inference(cam_id: int):
+@app.route('/stop_inference/<string:cam_id>', methods=["POST"])
+async def stop_inference(cam_id: str):
     inference_tasks[cam_id], resp, status = await stop_camera_task(
         cam_id, inference_tasks, frame_queues
     )
@@ -619,8 +615,8 @@ async def stop_inference(cam_id: int):
 
 
 # ✅ เริ่มงาน ROI stream
-@app.route('/start_roi_stream/<int:cam_id>', methods=["POST"])
-async def start_roi_stream(cam_id: int):
+@app.route('/start_roi_stream/<string:cam_id>', methods=["POST"])
+async def start_roi_stream(cam_id: str):
     if inference_tasks.get(cam_id) and not inference_tasks[cam_id].done():
         return jsonify({"status": "inference_running", "cam_id": cam_id}), 400
     data = await request.get_json() or {}
@@ -638,8 +634,8 @@ async def start_roi_stream(cam_id: int):
 
 
 # ✅ หยุดงาน ROI stream
-@app.route('/stop_roi_stream/<int:cam_id>', methods=["POST"])
-async def stop_roi_stream(cam_id: int):
+@app.route('/stop_roi_stream/<string:cam_id>', methods=["POST"])
+async def stop_roi_stream(cam_id: str):
     roi_tasks[cam_id], resp, status = await stop_camera_task(
         cam_id, roi_tasks, roi_frame_queues
     )
@@ -647,16 +643,16 @@ async def stop_roi_stream(cam_id: int):
 
 # ✅ สถานะงาน inference
 # เพิ่ม endpoint สำหรับตรวจสอบว่างาน inference กำลังทำงานอยู่หรือไม่
-@app.route('/inference_status/<int:cam_id>', methods=["GET"])
-async def inference_status(cam_id: int):
+@app.route('/inference_status/<string:cam_id>', methods=["GET"])
+async def inference_status(cam_id: str):
     """คืนค่าความพร้อมของงาน inference"""
     running = inference_tasks.get(cam_id) is not None and not inference_tasks[cam_id].done()
     return jsonify({"running": running, "cam_id": cam_id})
 
 
 # ✅ สถานะงาน ROI stream
-@app.route('/roi_stream_status/<int:cam_id>', methods=["GET"])
-async def roi_stream_status(cam_id: int):
+@app.route('/roi_stream_status/<string:cam_id>', methods=["GET"])
+async def roi_stream_status(cam_id: str):
     """เช็คว่างาน ROI stream กำลังทำงานอยู่หรือไม่"""
     running = roi_tasks.get(cam_id) is not None and not roi_tasks[cam_id].done()
     source = active_sources.get(cam_id, "")
@@ -850,8 +846,8 @@ async def load_roi_file():
     return jsonify({"rois": rois, "filename": os.path.basename(path)})
 
 # ✅ ส่ง snapshot 1 เฟรม (ใช้ในหน้า inference)
-@app.route("/ws_snapshot/<int:cam_id>")
-async def ws_snapshot(cam_id: int):
+@app.route("/ws_snapshot/<string:cam_id>")
+async def ws_snapshot(cam_id: str):
     worker = camera_workers.get(cam_id)
     if worker is None:
         return "Camera not initialized", 400
