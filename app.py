@@ -120,13 +120,16 @@ async def roi_page():
 
 # ✅ หน้า inference
 @app.route("/inference")
-async def inference():
+async def inference() -> str:
+    """แสดงหน้า Inference สำหรับรันโมดูลตาม ROI ที่บันทึกไว้"""
     return await render_template("inference.html")
 
 # ✅ หน้า inference page detection
 @app.route("/inference_page")
-async def inference_page():
+async def inference_page() -> str:
+    """แสดงหน้า Inference Page สำหรับตรวจจับหน้ากระดาษ"""
     return await render_template("inference_page.html")
+
 
 
 def load_custom_module(name: str) -> ModuleType | None:
