@@ -268,7 +268,9 @@ async def run_inference_loop(cam_id: str):
                 pass
 
         for i, r in enumerate(rois):
-            if r.get('type') != 'roi' or r.get('group') != output:
+            if r.get('type') != 'roi':
+                continue
+            if output and r.get('group') != output:
                 continue
             if np is None:
                 continue
