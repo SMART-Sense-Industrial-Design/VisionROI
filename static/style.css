@@ -167,3 +167,17 @@ button.delete {
   font-weight: bold;
 }
 
+.compare-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.ref-image {
+  border: 1px solid #ccc;
+}
+
+.score-label {
+  font-weight: bold;
+}
+
