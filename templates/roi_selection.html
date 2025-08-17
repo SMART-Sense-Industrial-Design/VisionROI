@@ -427,9 +427,16 @@
             container.innerHTML = '';
 
             if (rois.length > 0) {
-                const roiTitle = document.createElement('h5');
-                roiTitle.textContent = 'ROI List';
-                container.appendChild(roiTitle);
+                const card = document.createElement('div');
+                card.className = 'card';
+
+                const header = document.createElement('div');
+                header.className = 'card-header';
+                header.textContent = 'ROI List';
+                card.appendChild(header);
+
+                const body = document.createElement('div');
+                body.className = 'card-body';
 
                 const table = document.createElement('table');
                 table.className = 'table table-striped table-sm';
@@ -497,14 +504,22 @@
                 });
 
                 table.appendChild(tbody);
-                container.appendChild(table);
+                body.appendChild(table);
+                card.appendChild(body);
+                container.appendChild(card);
             }
 
             if (pageRois.length > 0) {
-                const pageTitle = document.createElement('h5');
-                pageTitle.textContent = 'Page ROI List';
-                pageTitle.className = 'mt-3';
-                container.appendChild(pageTitle);
+                const card = document.createElement('div');
+                card.className = 'card mt-3';
+
+                const header = document.createElement('div');
+                header.className = 'card-header';
+                header.textContent = 'Page ROI List';
+                card.appendChild(header);
+
+                const body = document.createElement('div');
+                body.className = 'card-body';
 
                 const table = document.createElement('table');
                 table.className = 'table table-striped table-sm';
@@ -572,7 +587,9 @@
                 });
 
                 table.appendChild(tbody);
-                container.appendChild(table);
+                body.appendChild(table);
+                card.appendChild(body);
+                container.appendChild(card);
             }
         }
 
