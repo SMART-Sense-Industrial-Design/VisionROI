@@ -27,7 +27,7 @@ main {
 }
 
 /* Standard table styling */
-.roi-table {
+/* .roi-table {
   border-collapse: collapse;
   width: 100%;
   margin-top: 10px;
@@ -43,7 +43,7 @@ main {
 }
 .roi-table tr:nth-child(even) {
   background-color: #f9f9f9;
-}
+} */
 
 .camera-grid {
   display: grid;
@@ -122,7 +122,7 @@ main {
 }
 
 /* Table styling for source list and generic tables */
-table {
+/* table {
   border-collapse: collapse;
   width: 100%;
   margin-top: 20px;
@@ -134,7 +134,7 @@ td {
 }
 th {
   background-color: #f0f0f0;
-}
+} */
 
 button.delete {
   background-color: #e74c3c;
