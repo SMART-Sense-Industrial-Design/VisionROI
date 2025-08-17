@@ -210,6 +210,7 @@ async def run_inference_loop(cam_id: str):
         save_flag = bool(save_roi_flags.get(cam_id))
         output = None
         best_score = -1.0
+        scores: list[dict[str, float | str]] = []
 
         # pass 1: evaluate page ROIs to determine best group and draw them
         for i, r in enumerate(rois):
@@ -241,6 +242,7 @@ async def run_inference_loop(cam_id: str):
                     try:
                         res = cv2.matchTemplate(roi_gray, template, cv2.TM_CCOEFF_NORMED)
                         score = float(res[0][0])
+                        scores.append({'page': r.get('page', ''), 'score': score})
                         if score > best_score:
                             best_score = score
                             output = r.get('page', '')
@@ -259,11 +261,13 @@ async def run_inference_loop(cam_id: str):
                 cv2.LINE_AA,
             )
 
+        scores.sort(key=lambda x: x['score'], reverse=True)
+
         # pass 2: process ROI items that belong to detected group
-        if output:
+        if output or scores:
             try:
                 q = get_roi_result_queue(cam_id)
-                payload = json.dumps({'group': output})
+                payload = json.dumps({'group': output, 'scores': scores})
                 if q.full():
                     q.get_nowait()
                 await q.put(payload)
