@@ -403,7 +403,9 @@ async def start_camera_task(
         width, height = camera_resolutions.get(cam_id, (None, None))
         worker = CameraWorker(src, asyncio.get_running_loop(), width, height)
         if not worker.start():
-            camera_workers[cam_id] = None
+            # ป้องกันไม่ให้กล้องค้างเมื่อเปิดไม่สำเร็จ
+            await worker.stop()
+            camera_workers.pop(cam_id, None)
             return (
                 task,
                 {"status": "error", "message": "open_failed", "cam_id": cam_id},
