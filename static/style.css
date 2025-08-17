@@ -11,6 +11,10 @@ body {
   margin-right: 5px;
 }
 
+.navbar {
+  background-color: rgb(108, 172, 235);
+}
+
 .nav-link.active {
   background-color: #b2d4ff;
 }
