@@ -14,6 +14,17 @@ def stub_quart():
                 return f
             return decorator
 
+        class DummyResponse:
+            def __init__(self, status_code=200):
+                self.status_code = status_code
+
+        class DummyClient:
+            async def get(self, *args, **kwargs):
+                return DummyQuart.DummyResponse()
+
+        def test_client(self):
+            return DummyQuart.DummyClient()
+
         def websocket(self, *args, **kwargs):
             def decorator(f):
                 return f
