@@ -38,6 +38,9 @@ function createController(cellId){
 
     startButton.onclick=startStream;
     stopButton.onclick=stopStream;
+    sourceSelect.onchange=()=>{
+        localStorage.setItem(`${cellId}-source`,sourceSelect.value);
+    };
 
     async function fetchWithStatus(url,options={}){
         statusEl.innerText='กำลังโหลด...';
@@ -71,6 +74,8 @@ function createController(cellId){
                     opt.textContent=item.name;
                     sourceSelect.appendChild(opt);
                 });
+                const stored=localStorage.getItem(`${cellId}-source`)||'';
+                if(stored)sourceSelect.value=stored;
                 showAlert('Sources loaded','success');
             }
         }catch(e){
@@ -97,6 +102,7 @@ function createController(cellId){
             showAlert('Select source first','error');
             return;
         }
+        localStorage.setItem(`${cellId}-source`,name);
         const cfgRes=await fetchWithStatus(`/source_config?name=${encodeURIComponent(name)}`);
         const cfg=await cfgRes.json();
         let roiPath=cfg.rois;
@@ -213,7 +219,10 @@ function createController(cellId){
                 const srcRes=await fetch(`/roi_stream_status/${cam}`);
                 if(srcRes.ok){
                     const srcData=await srcRes.json();
-                    if(srcData.source)sourceSelect.value=srcData.source;
+                    if(srcData.source){
+                        sourceSelect.value=srcData.source;
+                        localStorage.setItem(`${cellId}-source`,srcData.source);
+                    }
                 }
             }catch(e){}
             if(data.running){

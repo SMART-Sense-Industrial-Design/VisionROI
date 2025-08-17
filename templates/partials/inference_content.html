@@ -36,6 +36,10 @@
         const groupSelect = getEl('groupSelect');
         const roiGrid = getEl('rois');
 
+        sourceSelect.onchange = () => {
+            localStorage.setItem(`${cellId}-source`, sourceSelect.value);
+        };
+
         startButton.onclick = startInference;
         stopButton.onclick = stopInference;
         groupSelect.onchange = switchGroup;
@@ -73,6 +77,10 @@
                         opt.textContent = item.name;
                         sourceSelect.appendChild(opt);
                     });
+                    const stored = localStorage.getItem(`${cellId}-source`) || '';
+                    if (stored) {
+                        sourceSelect.value = stored;
+                    }
                     showAlert('Sources loaded', 'success');
                 }
             } catch (err) {
@@ -149,6 +157,8 @@
                 showAlert('Select source first', 'error');
                 return;
             }
+            localStorage.setItem(`${cellId}-source`, name);
+
             const cfgRes = await fetchWithStatus(`/source_config?name=${encodeURIComponent(name)}`);
             const cfg = await cfgRes.json();
 
