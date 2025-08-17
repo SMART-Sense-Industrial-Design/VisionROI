@@ -164,8 +164,8 @@ function createController(cellId){
         roiSocket.onmessage=event=>{
             try{
                 const data=JSON.parse(event.data);
-                if(data.group){
-                    pageNameEl.innerText=data.group;
+                if('group' in data){
+                    pageNameEl.innerText=data.group||'';
                     if(Array.isArray(data.scores)){
                         scoreTableBody.innerHTML='';
                         data.scores.forEach(item=>{
