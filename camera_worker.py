@@ -26,6 +26,8 @@ class CameraWorker:
 
     def start(self) -> bool:
         if not self.cap.isOpened():
+            # ปล่อยทรัพยากรทันทีหากไม่สามารถเปิดกล้องได้
+            self.cap.release()
             return False
         if not self._thread.is_alive():
             self._thread.start()
@@ -54,6 +56,8 @@ class CameraWorker:
 
     async def stop(self) -> None:
         self._stop.set()
-        await asyncio.to_thread(self._thread.join)
-        await asyncio.to_thread(self.cap.release)
+        if self._thread.is_alive():
+            await asyncio.to_thread(self._thread.join)
+        if self.cap.isOpened():
+            await asyncio.to_thread(self.cap.release)
         await asyncio.to_thread(cv2.destroyAllWindows)

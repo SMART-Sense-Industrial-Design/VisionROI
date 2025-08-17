@@ -193,20 +193,31 @@
             const name = document.getElementById("sourceSelect").value;
             if (!name) {
                 if (typeof showAlert === 'function') showAlert('Select source first', 'error');
+                hasStarted = false;
                 return;
             }
             startBtn.disabled = true;
             currentSource = name;
             const cfg = await fetch(`/source_config?name=${encodeURIComponent(name)}`).then(r => r.json());
             const { rois, ...camCfg } = cfg;
-            const startRes = await fetch(`/start_roi_stream/${cam}`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(camCfg)
-            });
-            if (!startRes.ok) {
+            try {
+                const startRes = await fetch(`/start_roi_stream/${cam}`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(camCfg)
+                });
+                if (!startRes.ok) {
+                    if (typeof showAlert === 'function') showAlert('Failed to start ROI stream', 'error');
+                    isStreaming = false;
+                    hasStarted = false;
+                    startBtn.disabled = false;
+                    stopBtn.disabled = true;
+                    return;
+                }
+            } catch (err) {
                 if (typeof showAlert === 'function') showAlert('Failed to start ROI stream', 'error');
                 isStreaming = false;
+                hasStarted = false;
                 startBtn.disabled = false;
                 stopBtn.disabled = true;
                 return;
