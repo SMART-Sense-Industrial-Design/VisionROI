@@ -95,7 +95,7 @@ main {
   text-align: center;
 }
 
-.card {
+.roi-card {
   padding: 10px;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
   margin-bottom: 20px;
@@ -113,13 +113,7 @@ main {
   display: inline-block;
 }
 
-.roi-card {
-  display: flex;
-  align-items: flex-start;
-  /* Ensure ROI card is visible even before ROIs load and prevent wrapping under the video */
-  min-width: 200px;
-  flex-shrink: 0;
-}
+
 
 /* Table styling for source list and generic tables */
 /* table {
