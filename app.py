@@ -40,6 +40,7 @@ save_roi_flags: dict[str, bool] = {}
 
 # ไฟล์สำหรับเก็บสถานะการทำงาน เพื่อให้สามารถกลับมารันต่อหลังรีสตาร์ท service
 STATE_FILE = "service_state.json"
+PAGE_SCORE_THRESHOLD = 0.7
 
 
 def save_service_state() -> None:
@@ -261,6 +262,9 @@ async def run_inference_loop(cam_id: str):
                 cv2.LINE_AA,
             )
 
+        if best_score <= PAGE_SCORE_THRESHOLD:
+            output = ''
+
         scores.sort(key=lambda x: x['score'], reverse=True)
 
         # pass 2: process ROI items that belong to detected group
@@ -277,7 +281,7 @@ async def run_inference_loop(cam_id: str):
         for i, r in enumerate(rois):
             if r.get('type') != 'roi':
                 continue
-            if output and r.get('group') != output:
+            if not output or r.get('group') != output:
                 continue
             if np is None:
                 continue
