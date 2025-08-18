@@ -39,7 +39,8 @@ def test_camera_reopen_after_fail():
             task, resp, status = await app.start_camera_task("cam1", app.roi_tasks, app.run_roi_loop)
             assert status == 200
             await asyncio.sleep(0)
-            app.roi_tasks["cam1"], _, _ = await app.stop_camera_task("cam1", app.roi_tasks)
+            await app.stop_camera_task("cam1", app.roi_tasks)
+            assert "cam1" not in app.roi_tasks
         asyncio.run(run())
     finally:
         app.cv2.VideoCapture = orig_vc

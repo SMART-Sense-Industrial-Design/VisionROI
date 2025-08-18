@@ -168,8 +168,19 @@ class TelegramNotify:
 
     def close(self):
         """ส่งสัญญาณหยุดและรอ thread ก่อนปิด session"""
-        # ส่ง sentinel เพื่อหยุด worker thread
-        self.send_queue.put(self._stop_sentinel)
+        # ส่ง sentinel เพื่อหยุด worker thread โดยไม่บล็อก
+        try:
+            self.send_queue.put(self._stop_sentinel, timeout=1)
+        except queue.Full:
+            pass
         # รอให้ thread ทำงานเสร็จ
-        self.worker_thread.join()
+        if self.worker_thread.is_alive():
+            self.worker_thread.join()
         self.session.close()
+
+    def __del__(self):
+        """Ensure background thread and session are cleaned up."""
+        try:
+            self.close()
+        except Exception:
+            pass
