@@ -41,7 +41,7 @@ inference_groups: dict[str, str | None] = {}
 
 # ไฟล์สำหรับเก็บสถานะการทำงาน เพื่อให้สามารถกลับมารันต่อหลังรีสตาร์ท service
 STATE_FILE = "service_state.json"
-PAGE_SCORE_THRESHOLD = 0.7
+PAGE_SCORE_THRESHOLD = 0.4
 
 
 def save_service_state() -> None:
