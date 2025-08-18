@@ -37,6 +37,7 @@ roi_tasks: dict[str, asyncio.Task | None] = {}
 inference_rois: dict[str, list[dict]] = {}
 active_sources: dict[str, str] = {}
 save_roi_flags: dict[str, bool] = {}
+inference_groups: dict[str, str | None] = {}
 
 # ไฟล์สำหรับเก็บสถานะการทำงาน เพื่อให้สามารถกลับมารันต่อหลังรีสตาร์ท service
 STATE_FILE = "service_state.json"
@@ -205,6 +206,7 @@ async def run_inference_loop(cam_id: str):
 
     async def process_frame(frame):
         rois = inference_rois.get(cam_id, [])
+        forced_group = inference_groups.get(cam_id)
         if not rois:
             return cv2.resize(frame, (0, 0), fx=0.5, fy=0.5)
 
@@ -212,11 +214,13 @@ async def run_inference_loop(cam_id: str):
         output = None
         best_score = -1.0
         scores: list[dict[str, float | str]] = []
+        has_page = False
 
         # pass 1: evaluate page ROIs to determine best group and draw them
         for i, r in enumerate(rois):
             if np is None or r.get('type') != 'page':
                 continue
+            has_page = True
             pts = r.get('points', [])
             if len(pts) != 4:
                 continue
@@ -262,7 +266,9 @@ async def run_inference_loop(cam_id: str):
                 cv2.LINE_AA,
             )
 
-        if best_score <= PAGE_SCORE_THRESHOLD:
+        if not has_page:
+            output = forced_group or ''
+        elif best_score <= PAGE_SCORE_THRESHOLD:
             output = ''
 
         scores.sort(key=lambda x: x['score'], reverse=True)
@@ -281,8 +287,9 @@ async def run_inference_loop(cam_id: str):
         for i, r in enumerate(rois):
             if r.get('type') != 'roi':
                 continue
-            if not output or r.get('group') != output:
-                continue
+            if forced_group != 'all':
+                if not output or r.get('group') != output:
+                    continue
             if np is None:
                 continue
             pts = r.get('points', [])
@@ -591,7 +598,7 @@ async def create_source():
 
 
 # ฟังก์ชันช่วยเริ่มงาน inference เพื่อใช้ซ้ำได้ทั้งจาก route และตอนรีสตาร์ท
-async def perform_start_inference(cam_id: str, rois=None, save_state: bool = True):
+async def perform_start_inference(cam_id: str, rois=None, group: str | None = None, save_state: bool = True):
     if roi_tasks.get(cam_id) and not roi_tasks[cam_id].done():
         return False
     if rois is None:
@@ -623,6 +630,10 @@ async def perform_start_inference(cam_id: str, rois=None, save_state: bool = Tru
                     r["_template"] = tmpl
     # เก็บ ROI ทั้งหมดไว้เพื่อใช้วาดกรอบและประมวลผลเฉพาะที่จำเป็น
     inference_rois[cam_id] = rois
+    if group is None:
+        inference_groups.pop(cam_id, None)
+    else:
+        inference_groups[cam_id] = group
     queue = get_roi_result_queue(cam_id)
     while not queue.empty():
         queue.get_nowait()
@@ -641,11 +652,12 @@ async def start_inference(cam_id: str):
     data = await request.get_json() or {}
     cfg = dict(data)
     rois = cfg.pop("rois", None)
+    group = cfg.pop("group", None)
     if cfg:
         cfg_ok = await apply_camera_settings(cam_id, cfg)
         if not cfg_ok:
             return jsonify({"status": "error", "cam_id": cam_id}), 400
-    ok = await perform_start_inference(cam_id, rois)
+    ok = await perform_start_inference(cam_id, rois, group)
     if ok:
         return jsonify({"status": "started", "cam_id": cam_id}), 200
     return jsonify({"status": "error", "cam_id": cam_id}), 400
