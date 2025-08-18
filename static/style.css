@@ -26,6 +26,10 @@ main {
   margin-top: 70px;
 }
 
+.menu-select-list {
+  background: #b2d4ff;
+  padding: 10px;
+}
 /* Standard table styling */
 /* .roi-table {
   border-collapse: collapse;
