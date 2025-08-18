@@ -199,7 +199,7 @@
             const startRes = await fetchWithStatus(`/start_inference/${cam}`, {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ ...camCfg, rois })
+                body: JSON.stringify({ ...camCfg, rois, group: selectedGroup })
             });
             const startData = await startRes.json();
             if (startData.status === 'started' || startData.status === 'already_running') {
@@ -295,7 +295,7 @@
                 await fetchWithStatus(`/start_inference/${cam}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ rois })
+                    body: JSON.stringify({ rois, group: stored })
                 });
                 if (rois.length > 0) {
                     renderRoiPlaceholders();
