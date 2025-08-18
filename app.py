@@ -430,19 +430,18 @@ async def stop_camera_task(
     queue_dict: dict[str, asyncio.Queue[bytes | None]] | None = None,
 ):
     """หยุดงานที่ใช้กล้องตาม cam_id"""
-    task = task_dict.get(cam_id)
+    task = task_dict.pop(cam_id, None)
     if task is not None and not task.done():
         task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await task
         # ให้เวลาสั้นๆ เพื่อให้ thread ที่อ่านภาพจบก่อนปล่อยกล้องจริงๆ
         await asyncio.sleep(0)
-        task_dict[cam_id] = None
         status = "stopped"
     else:
         status = "no_task"
     if queue_dict is not None:
-        queue = queue_dict.get(cam_id)
+        queue = queue_dict.pop(cam_id, None)
         if queue is not None:
             await queue.put(None)
             while queue.qsize() > 1:
@@ -450,7 +449,6 @@ async def stop_camera_task(
                     queue.get_nowait()
                 except asyncio.QueueEmpty:
                     break
-            queue_dict.pop(cam_id, None)
     # ปล่อยกล้องเมื่อไม่มีงานอื่นใช้งานอยู่
     inf_task = inference_tasks.get(cam_id)
     roi_task = roi_tasks.get(cam_id)
@@ -460,7 +458,7 @@ async def stop_camera_task(
         and (roi_task is None or roi_task.done())
         and worker
     ):
-        lock = camera_locks.setdefault(cam_id, asyncio.Lock())
+        lock = camera_locks.pop(cam_id, None) or asyncio.Lock()
         async with lock:
             await worker.stop()
             camera_workers.pop(cam_id, None)
@@ -469,7 +467,7 @@ async def stop_camera_task(
             del worker
             gc.collect()
 
-    return task_dict.get(cam_id), {"status": status, "cam_id": cam_id}, 200
+    return task, {"status": status, "cam_id": cam_id}, 200
 
 
 # ✅ WebSocket video stream
@@ -637,9 +635,7 @@ async def perform_start_inference(cam_id: str, rois=None, group: str | None = No
     queue = get_roi_result_queue(cam_id)
     while not queue.empty():
         queue.get_nowait()
-    inference_tasks[cam_id], _, _ = await start_camera_task(
-        cam_id, inference_tasks, run_inference_loop
-    )
+    await start_camera_task(cam_id, inference_tasks, run_inference_loop)
     if save_state:
         save_service_state()
     return True
@@ -666,9 +662,7 @@ async def start_inference(cam_id: str):
 # ✅ หยุดงาน inference
 @app.route('/stop_inference/<string:cam_id>', methods=["POST"])
 async def stop_inference(cam_id: str):
-    inference_tasks[cam_id], resp, status = await stop_camera_task(
-        cam_id, inference_tasks, frame_queues
-    )
+    _, resp, status = await stop_camera_task(cam_id, inference_tasks, frame_queues)
     queue = roi_result_queues.get(cam_id)
     if queue is not None:
         await queue.put(None)
@@ -690,18 +684,14 @@ async def start_roi_stream(cam_id: str):
     queue = get_roi_frame_queue(cam_id)
     while not queue.empty():
         queue.get_nowait()
-    roi_tasks[cam_id], resp, status = await start_camera_task(
-        cam_id, roi_tasks, run_roi_loop
-    )
+    _, resp, status = await start_camera_task(cam_id, roi_tasks, run_roi_loop)
     return jsonify(resp), status
 
 
 # ✅ หยุดงาน ROI stream
 @app.route('/stop_roi_stream/<string:cam_id>', methods=["POST"])
 async def stop_roi_stream(cam_id: str):
-    roi_tasks[cam_id], resp, status = await stop_camera_task(
-        cam_id, roi_tasks, roi_frame_queues
-    )
+    _, resp, status = await stop_camera_task(cam_id, roi_tasks, roi_frame_queues)
     return jsonify(resp), status
 
 # ✅ สถานะงาน inference

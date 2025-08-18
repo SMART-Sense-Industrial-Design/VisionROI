@@ -61,3 +61,14 @@ class CameraWorker:
         if self.cap.isOpened():
             await asyncio.to_thread(self.cap.release)
         await asyncio.to_thread(cv2.destroyAllWindows)
+
+    def __del__(self):
+        """Ensure resources are released when the worker is garbage collected."""
+        try:
+            self._stop.set()
+            if self._thread.is_alive():
+                self._thread.join(timeout=0.1)
+            if self.cap.isOpened():
+                self.cap.release()
+        except Exception:
+            pass
