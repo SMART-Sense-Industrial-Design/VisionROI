@@ -3,7 +3,10 @@
 <div class="cam-row">
     <div class="card roi-card">
         <div id="cam1" class="cam-cell">
-            <select id="cam1-sourceSelect" class="form-select mb-2"></select>
+            <div class="d-flex align-items-center mb-2 gap-2">
+                <label for="cam1-sourceSelect" class="form-label mb-0">Source:</label>
+                <select id="cam1-sourceSelect" class="form-select w-auto"></select>
+            </div>
             <button id="cam1-startButton" class="btn btn-primary me-2">Start</button>
             <button id="cam1-stopButton" class="btn btn-danger" disabled>Stop</button>
             <p id="cam1-status"></p>
@@ -13,7 +16,10 @@
         </div>
     </div>
     <div class="card roi-card">
-        <select id="cam1-groupSelect" class="form-select mb-2"></select>
+        <div class="d-flex align-items-center mb-2 gap-2">
+            <label for="cam1-groupSelect" class="form-label mb-0">Group:</label>
+            <select id="cam1-groupSelect" class="form-select w-auto"></select>
+        </div>
         <div id="cam1-rois" class="roi-grid"></div>
     </div>
 </div>
