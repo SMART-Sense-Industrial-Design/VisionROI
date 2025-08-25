@@ -2,6 +2,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import sys
 import types
+import importlib
 
 import pytest
 
@@ -24,12 +25,11 @@ sys.modules["PIL"] = pil_package
 sys.modules["PIL.Image"] = pil_image_module
 
 
-from inference_modules.easy_ocr import custom as mod
-
-
-def test_process_multiple_roi_thread_safe(tmp_path, monkeypatch):
+@pytest.mark.parametrize("module", ["easy_ocr", "rapid_ocr"])
+def test_process_multiple_roi_thread_safe(tmp_path, monkeypatch, module):
     """เรียก process พร้อมกันหลาย ROI เพื่อทดสอบว่าการบันทึกรูปปลอดภัย"""
 
+    mod = importlib.import_module(f"inference_modules.{module}.custom")
     monkeypatch.setattr(mod, "_data_sources_root", tmp_path)
 
     frame = np.zeros((10, 10, 3), dtype=np.uint8)
