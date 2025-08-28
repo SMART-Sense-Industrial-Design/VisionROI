@@ -16,7 +16,7 @@ except Exception:  # pragma: no cover - fallback when numpy missing
     np = None
 
 try:
-    from rapidocr_onnxruntime import RapidOCR
+    from rapidocr import RapidOCR
 except Exception:  # pragma: no cover - fallback when rapidocr missing
     RapidOCR = None
 
@@ -54,7 +54,7 @@ def _configure_logger(source: str | None) -> None:
 def _get_reader() -> RapidOCR:
     """สร้างและคืนค่า RapidOCR แบบ singleton"""
     if RapidOCR is None:
-        raise RuntimeError("rapidocr_onnxruntime library is not installed")
+        raise RuntimeError("rapidocr library is not installed")
     global _reader
     with _reader_lock:
         if _reader is None:
