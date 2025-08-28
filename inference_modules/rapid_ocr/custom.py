@@ -84,7 +84,18 @@ def _run_ocr_async(frame, roi_id, save, source) -> None:
         reader = _get_reader()
         with _reader_run_lock:
             ocr_result, _ = reader(frame)
-        text = " ".join([res[1] for res in ocr_result]) if ocr_result else ""
+
+        text_items: list[str] = []
+        if isinstance(ocr_result, (list, tuple)):
+            for res in ocr_result:
+                if isinstance(res, (list, tuple)) and len(res) > 1:
+                    text_items.append(str(res[1]))
+                elif isinstance(res, dict) and "text" in res:
+                    text_items.append(str(res["text"]))
+        elif isinstance(ocr_result, dict) and "text" in ocr_result:
+            text_items.append(str(ocr_result["text"]))
+        text = " ".join(text_items)
+
         logger.info(
             f"roi_id={roi_id} OCR result: {text}" if roi_id is not None else f"OCR result: {text}"
         )
