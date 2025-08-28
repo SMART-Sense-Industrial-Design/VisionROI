@@ -43,7 +43,7 @@
 - `numpy`
 - `Pillow`
 - `easyocr`
-- `rapidocr-onnxruntime`
+- `rapidocr`
 
 ### Dependencies เพิ่มเติม (Extras)
 - `onnxruntime` – สำหรับรันโมเดล ONNX
