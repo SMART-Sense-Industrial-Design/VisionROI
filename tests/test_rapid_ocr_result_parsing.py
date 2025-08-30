@@ -11,3 +11,20 @@ def test_rapid_ocr_accepts_dict_results(monkeypatch):
     frame = np.zeros((10,10,3), dtype=np.uint8)
     custom._run_ocr_async(frame, roi_id='1', save=False, source='')
     assert custom.last_ocr_results['1'] == 'abc 123'
+
+
+def test_rapid_ocr_accepts_object_with_text(monkeypatch):
+    custom.last_ocr_results.clear()
+
+    class DummyOutput:
+        def __init__(self):
+            self.text = "789"
+
+    class DummyReader:
+        def __call__(self, frame):
+            return DummyOutput()
+
+    monkeypatch.setattr(custom, '_get_reader', lambda: DummyReader())
+    frame = np.zeros((10, 10, 3), dtype=np.uint8)
+    custom._run_ocr_async(frame, roi_id='2', save=False, source='')
+    assert custom.last_ocr_results['2'] == '789'

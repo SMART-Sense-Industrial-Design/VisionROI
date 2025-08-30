@@ -104,6 +104,14 @@ def _run_ocr_async(frame, roi_id, save, source) -> None:
                     text_items.append(str(res["text"]))
         elif isinstance(ocr_result, dict) and "text" in ocr_result:
             text_items.append(str(ocr_result["text"]))
+        elif hasattr(ocr_result, "text"):
+            text_items.append(str(getattr(ocr_result, "text")))
+        elif hasattr(ocr_result, "texts"):
+            texts_attr = getattr(ocr_result, "texts")
+            if isinstance(texts_attr, (list, tuple)):
+                text_items.extend(str(t) for t in texts_attr)
+            elif texts_attr is not None:
+                text_items.append(str(texts_attr))
         text = " ".join(text_items)
 
         logger.info(
