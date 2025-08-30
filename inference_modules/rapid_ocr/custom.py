@@ -112,6 +112,12 @@ def _run_ocr_async(frame, roi_id, save, source) -> None:
                 text_items.extend(str(t) for t in texts_attr)
             elif texts_attr is not None:
                 text_items.append(str(texts_attr))
+        elif hasattr(ocr_result, "txts"):
+            txts_attr = getattr(ocr_result, "txts")
+            if isinstance(txts_attr, (list, tuple)):
+                text_items.extend(str(t) for t in txts_attr)
+            elif txts_attr is not None:
+                text_items.append(str(txts_attr))
         text = " ".join(text_items)
 
         logger.info(
