@@ -90,6 +90,15 @@ app.config["MAX_CONTENT_LENGTH"] = 100 * 1024 * 1024
 ALLOWED_ROI_DIR = os.path.realpath("data_sources")
 
 
+def ensure_roi_ids(rois):
+    """Ensure each ROI dict has a unique string id."""
+    if isinstance(rois, list):
+        for idx, r in enumerate(rois):
+            if isinstance(r, dict) and "id" not in r:
+                r["id"] = str(idx + 1)
+    return rois
+
+
 async def restore_service_state() -> None:
     """โหลดสถานะที่บันทึกไว้และเริ่มงาน inference ที่เคยรัน"""
     cams = load_service_state()
@@ -827,10 +836,7 @@ async def delete_source(name: str):
 @app.route("/save_roi", methods=["POST"])
 async def save_roi():
     data = await request.get_json()
-    rois = data.get("rois", [])
-    for idx, r in enumerate(rois):
-        if isinstance(r, dict) and "id" not in r:
-            r["id"] = str(idx + 1)
+    rois = ensure_roi_ids(data.get("rois", []))
     path = request.args.get("path", "")
     base_dir = ALLOWED_ROI_DIR
     if path:
@@ -877,11 +883,7 @@ async def load_roi(name: str):
     if not os.path.exists(roi_path):
         return jsonify({"rois": [], "filename": roi_file})
     with open(roi_path, "r") as f:
-        rois = json.load(f)
-    if isinstance(rois, list):
-        for idx, r in enumerate(rois):
-            if isinstance(r, dict) and "id" not in r:
-                r["id"] = str(idx + 1)
+        rois = ensure_roi_ids(json.load(f))
     return jsonify({"rois": rois, "filename": roi_file})
 
 # ✅ โหลด ROI ตามพาธที่ระบุใน config
@@ -891,11 +893,7 @@ async def load_roi_file():
     if not path or not os.path.exists(path):
         return jsonify({"rois": [], "filename": "None"})
     with open(path, "r") as f:
-        rois = json.load(f)
-    if isinstance(rois, list):
-        for idx, r in enumerate(rois):
-            if isinstance(r, dict) and "id" not in r:
-                r["id"] = str(idx + 1)
+        rois = ensure_roi_ids(json.load(f))
     return jsonify({"rois": rois, "filename": os.path.basename(path)})
 
 # ✅ ส่ง snapshot 1 เฟรม (ใช้ในหน้า inference)
