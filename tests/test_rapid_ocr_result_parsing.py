@@ -28,3 +28,20 @@ def test_rapid_ocr_accepts_object_with_text(monkeypatch):
     frame = np.zeros((10, 10, 3), dtype=np.uint8)
     custom._run_ocr_async(frame, roi_id='2', save=False, source='')
     assert custom.last_ocr_results['2'] == '789'
+
+
+def test_rapid_ocr_accepts_object_with_txts(monkeypatch):
+    custom.last_ocr_results.clear()
+
+    class DummyOutput:
+        def __init__(self):
+            self.txts = ("329",)
+
+    class DummyReader:
+        def __call__(self, frame):
+            return DummyOutput()
+
+    monkeypatch.setattr(custom, '_get_reader', lambda: DummyReader())
+    frame = np.zeros((10, 10, 3), dtype=np.uint8)
+    custom._run_ocr_async(frame, roi_id='3', save=False, source='')
+    assert custom.last_ocr_results['3'] == '329'
