@@ -28,7 +28,7 @@ _handler: TimedRotatingFileHandler | None = None
 _current_source: str | None = None
 _data_sources_root = Path(__file__).resolve().parents[2] / "data_sources"
 
-_reader: RapidOCR | None = None
+_reader = None
 _reader_lock = threading.Lock()
 _reader_run_lock = threading.Lock()
 
@@ -51,10 +51,10 @@ def _configure_logger(source: str | None) -> None:
     _current_source = source
 
 
-def _get_reader() -> RapidOCR:
+def _get_reader():
     """สร้างและคืนค่า RapidOCR แบบ singleton"""
     if RapidOCR is None:
-        raise RuntimeError("rapidocr library is not installed")
+        raise RuntimeError("rapidocr_onnxruntime library is not installed")
     global _reader
     with _reader_lock:
         if _reader is None:
