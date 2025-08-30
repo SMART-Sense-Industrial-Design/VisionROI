@@ -83,7 +83,17 @@ def _run_ocr_async(frame, roi_id, save, source) -> None:
     try:
         reader = _get_reader()
         with _reader_run_lock:
-            ocr_result, _ = reader(frame)
+            # RapidOCR อาจคืนผลลัพธ์เป็น tuple (result, time) หรือเพียง result อย่างเดียว
+            result = reader(frame)
+            if (
+                isinstance(result, (list, tuple))
+                and len(result) == 2
+                and isinstance(result[0], (list, tuple))
+                and not isinstance(result[1], (list, tuple, dict))
+            ):
+                ocr_result = result[0]
+            else:
+                ocr_result = result
 
         text_items: list[str] = []
         if isinstance(ocr_result, (list, tuple)):
