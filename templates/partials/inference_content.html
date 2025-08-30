@@ -254,13 +254,15 @@
             roiSocket.onmessage = function(event) {
                 try {
                     const data = JSON.parse(event.data);
-                    const imgEl = document.getElementById(`${cellId}-roi-${data.id}`);
-                    if (imgEl) {
-                        imgEl.src = `data:image/jpeg;base64,${data.image}`;
-                    }
-                    const textEl = document.getElementById(`${cellId}-text-${data.id}`);
-                    if (textEl) {
-                        textEl.textContent = data.text || '';
+                    if (Object.prototype.hasOwnProperty.call(data, 'id')) {
+                        const imgEl = document.getElementById(`${cellId}-roi-${data.id}`);
+                        if (imgEl) {
+                            imgEl.src = `data:image/jpeg;base64,${data.image}`;
+                        }
+                        const textEl = document.getElementById(`${cellId}-text-${data.id}`);
+                        if (textEl) {
+                            textEl.textContent = data.text || '';
+                        }
                     }
                 } catch (e) {
                     console.error('ROI message error', e);

@@ -182,11 +182,15 @@ function createController(cellId){
                             scoreTableBody.appendChild(tr);
                         });
                     }
-                }else if(data.id){
-                    const imgEl=document.getElementById(`${cellId}-roi-${data.id}`);
-                    if(imgEl){imgEl.src=`data:image/jpeg;base64,${data.image}`;}
-                    const textEl=document.getElementById(`${cellId}-text-${data.id}`);
-                    if(textEl){textEl.textContent=data.text||'';}
+                } else if (Object.prototype.hasOwnProperty.call(data, 'id')) {
+                    const imgEl = document.getElementById(`${cellId}-roi-${data.id}`);
+                    if (imgEl) {
+                        imgEl.src = `data:image/jpeg;base64,${data.image}`;
+                    }
+                    const textEl = document.getElementById(`${cellId}-text-${data.id}`);
+                    if (textEl) {
+                        textEl.textContent = data.text || '';
+                    }
 
                 }
             }catch(e){}
