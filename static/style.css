@@ -129,6 +129,16 @@ main {
   width: 200px;
   display: flex;
   flex-direction: column;
+  box-sizing: border-box;
+}
+
+.roi-column .menu-select-list {
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.roi-column .menu-select-list .form-select {
+  width: 100% !important;
 }
 
 .video-wrapper {
