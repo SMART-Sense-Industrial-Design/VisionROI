@@ -48,7 +48,12 @@ class CameraWorker:
                         pass
                 self.queue.put_nowait(frame)
 
-            self.loop.call_soon_threadsafe(put_frame)
+            if self.loop.is_closed():
+                break
+            try:
+                self.loop.call_soon_threadsafe(put_frame)
+            except RuntimeError:
+                break
             time.sleep(0.04)
 
     async def read(self):
@@ -57,10 +62,19 @@ class CameraWorker:
     async def stop(self) -> None:
         self._stop.set()
         if self._thread.is_alive():
-            await asyncio.to_thread(self._thread.join)
+            try:
+                await asyncio.to_thread(self._thread.join)
+            except RuntimeError:
+                self._thread.join()
         if self.cap.isOpened():
-            await asyncio.to_thread(self.cap.release)
-        await asyncio.to_thread(cv2.destroyAllWindows)
+            try:
+                await asyncio.to_thread(self.cap.release)
+            except RuntimeError:
+                self.cap.release()
+        try:
+            await asyncio.to_thread(cv2.destroyAllWindows)
+        except RuntimeError:
+            cv2.destroyAllWindows()
 
     def __del__(self):
         """Ensure resources are released when the worker is garbage collected."""
@@ -70,5 +84,6 @@ class CameraWorker:
                 self._thread.join(timeout=0.1)
             if self.cap.isOpened():
                 self.cap.release()
+            cv2.destroyAllWindows()
         except Exception:
             pass
