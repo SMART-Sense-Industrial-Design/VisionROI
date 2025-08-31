@@ -63,11 +63,12 @@ main {
 }
 
 .roi-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, 80px);
+  flex: 1;
+  display: flex;
+  flex-direction: column;
   gap: 8px;
-  margin-left: 10px;
   padding: 10px;
+  overflow-y: auto;
 }
 
 .roi-item {
@@ -78,6 +79,7 @@ main {
   border-radius: 0;
   padding: 6px;
   background-color: #ffffff;
+  flex: 0 0 100px;
 }
 
 .roi-title {
@@ -87,8 +89,9 @@ main {
 }
 
 .roi-image {
-  width: 80px;
-  height: auto;
+  width: 100%;
+  height: 60px;
+  object-fit: cover;
   display: block;
   border: 2px solid red;
 }
@@ -107,9 +110,25 @@ main {
 
 .cam-row {
   display: flex;
-  align-items: flex-start;
+  align-items: stretch;
   gap: 10px;
   margin-bottom: 20px;
+}
+
+.stream-card {
+  flex: 1;
+}
+
+.video-stream {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+.roi-column {
+  width: 200px;
+  display: flex;
+  flex-direction: column;
 }
 
 .video-wrapper {
