@@ -134,8 +134,9 @@ main {
 
 .roi-column .menu-select-list {
   flex-direction: column;
-  align-items: flex-start;
-}
+  align-items: flex-start !important;
+  width: 100%;
+
 
 .roi-column .menu-select-list .form-select {
   width: 100% !important;
