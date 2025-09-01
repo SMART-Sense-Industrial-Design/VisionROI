@@ -550,7 +550,7 @@
                 table.className = 'table table-hover table-sm';
                 const thead = document.createElement('thead');
                 const headerRow = document.createElement('tr');
-                ['ID', 'xywh', 'Page Name', 'Capture Image', 'Action'].forEach(colName => {
+                ['ID', 'xywh', 'Page Name', 'Save Image', 'Action'].forEach(colName => {
                     const th = document.createElement('th');
                     th.textContent = colName;
                     headerRow.appendChild(th);
@@ -594,7 +594,7 @@
                     const actionTd = document.createElement('td');
                     const buttonWidth = '80px';
                     const cropBtn = document.createElement('button');
-                    cropBtn.textContent = 'Capture';
+                    cropBtn.textContent = 'Save';
                     cropBtn.className = 'btn btn-primary btn-sm me-2';
                     cropBtn.style.width = buttonWidth;
                     cropBtn.addEventListener('click', () => cropPageRoi(idx));
