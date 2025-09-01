@@ -438,9 +438,14 @@
             if (!container) return;
             container.innerHTML = '';
 
+            const row = document.createElement('div');
+            row.className = 'row g-3';
+
             if (rois.length > 0) {
+                const col = document.createElement('div');
+                col.className = 'col-12 col-md-6';
                 const card = document.createElement('div');
-                card.className = 'card';
+                card.className = 'card h-100';
 
                 const header = document.createElement('div');
                 header.className = 'card-header';
@@ -450,13 +455,16 @@
                 const body = document.createElement('div');
                 body.className = 'card-body';
 
+                const tableWrapper = document.createElement('div');
+                tableWrapper.className = 'table-responsive';
+
                 const table = document.createElement('table');
                 table.className = 'table table-hover table-sm';
                 const thead = document.createElement('thead');
                 const headerRow = document.createElement('tr');
-                ['ID', 'x', 'y', 'w', 'h', 'Group', 'Inference Module', 'Delete'].forEach(col => {
+                ['ID', 'x', 'y', 'w', 'h', 'Group', 'Inference Module', 'Delete'].forEach(colName => {
                     const th = document.createElement('th');
-                    th.textContent = col;
+                    th.textContent = colName;
                     headerRow.appendChild(th);
                 });
                 thead.appendChild(headerRow);
@@ -516,14 +524,18 @@
                 });
 
                 table.appendChild(tbody);
-                body.appendChild(table);
+                tableWrapper.appendChild(table);
+                body.appendChild(tableWrapper);
                 card.appendChild(body);
-                container.appendChild(card);
+                col.appendChild(card);
+                row.appendChild(col);
             }
 
             if (pageRois.length > 0) {
+                const col = document.createElement('div');
+                col.className = 'col-12 col-md-6';
                 const card = document.createElement('div');
-                card.className = 'card mt-3';
+                card.className = 'card h-100';
 
                 const header = document.createElement('div');
                 header.className = 'card-header';
@@ -533,13 +545,16 @@
                 const body = document.createElement('div');
                 body.className = 'card-body';
 
+                const tableWrapper = document.createElement('div');
+                tableWrapper.className = 'table-responsive';
+
                 const table = document.createElement('table');
                 table.className = 'table table-hover table-sm';
                 const thead = document.createElement('thead');
                 const headerRow = document.createElement('tr');
-                ['ID', 'x', 'y', 'w', 'h', 'Page Name', 'Crop Image', 'Action'].forEach(col => {
+                ['ID', 'x', 'y', 'w', 'h', 'Page Name', 'Crop Image', 'Action'].forEach(colName => {
                     const th = document.createElement('th');
-                    th.textContent = col;
+                    th.textContent = colName;
                     headerRow.appendChild(th);
                 });
                 thead.appendChild(headerRow);
@@ -599,9 +614,15 @@
                 });
 
                 table.appendChild(tbody);
-                body.appendChild(table);
+                tableWrapper.appendChild(table);
+                body.appendChild(tableWrapper);
                 card.appendChild(body);
-                container.appendChild(card);
+                col.appendChild(card);
+                row.appendChild(col);
+            }
+
+            if (row.childElementCount > 0) {
+                container.appendChild(row);
             }
         }
 
