@@ -46,42 +46,35 @@ PAGE_SCORE_THRESHOLD = 0.4
 
 def save_service_state() -> None:
     """บันทึกข้อมูลกล้องและสถานะ inference ลงไฟล์"""
-    data: dict[str, dict[str, object]] = {}
-    cam_ids = set(
-        list(camera_sources.keys())
-        + list(active_sources.keys())
-        + list(inference_tasks.keys())
-    )
-    for cam_id in cam_ids:
-        running = bool(
-            inference_tasks.get(cam_id) and not inference_tasks[cam_id].done()
-        )
-        w, h = camera_resolutions.get(cam_id, (None, None))
-        data[str(cam_id)] = {
+    cam_ids = set(camera_sources) | set(active_sources) | set(inference_tasks)
+    data = {
+        str(cam_id): {
             "source": camera_sources.get(cam_id),
-            "resolution": [w, h],
+            "resolution": list(camera_resolutions.get(cam_id, (None, None))),
             "active_source": active_sources.get(cam_id, ""),
-            "inference_running": running,
+            "inference_running": bool(
+                inference_tasks.get(cam_id)
+                and not inference_tasks[cam_id].done()
+            ),
         }
-    try:
+        for cam_id in cam_ids
+    }
+    with contextlib.suppress(Exception):
         with open(STATE_FILE, "w") as f:
             json.dump({"cameras": data}, f)
-    except Exception:
-        pass
 
 
 def load_service_state() -> dict[str, dict[str, object]]:
     """โหลดข้อมูลสถานะจากไฟล์"""
-    if not os.path.exists(STATE_FILE):
+    path = Path(STATE_FILE)
+    if not path.exists():
         return {}
-    try:
-        with open(STATE_FILE, "r") as f:
+    with contextlib.suppress(Exception):
+        with path.open("r") as f:
             data = json.load(f)
-        cams = data.get("cameras")
-        if isinstance(cams, dict):
-            return cams
-    except Exception:
-        pass
+            cams = data.get("cameras")
+            if isinstance(cams, dict):
+                return cams
     return {}
 
 app = Quart(__name__)
@@ -144,14 +137,13 @@ async def inference_page() -> str:
 
 
 def load_custom_module(name: str) -> ModuleType | None:
-    path = os.path.join("inference_modules", name, "custom.py")
-    if not os.path.exists(path):
+    path = Path("inference_modules") / name / "custom.py"
+    if not path.exists():
         return None
     module_name = f"custom_{name}"
     # ลบโมดูลเก่าที่ค้างอยู่เพื่อให้โหลดใหม่ได้ถูกต้องและไม่กินหน่วยความจำ
-    if module_name in sys.modules:
-        del sys.modules[module_name]
-        importlib.invalidate_caches()
+    sys.modules.pop(module_name, None)
+    importlib.invalidate_caches()
 
     spec = importlib.util.spec_from_file_location(module_name, path)
     if not spec or not spec.loader:
