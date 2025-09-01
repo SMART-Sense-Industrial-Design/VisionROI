@@ -391,6 +391,13 @@ async def run_inference_loop(cam_id: str):
     except asyncio.CancelledError:
         # ยอมให้ยกเลิกงานได้อย่างปลอดภัยเพื่อป้องกันการค้างของ thread
         pass
+    finally:
+        # ล้างโมดูล inference ที่โหลดไว้เพื่อลดการใช้หน่วยความจำหลังหยุดงาน
+        for mod_name, (module, _, _) in module_cache.items():
+            if module is not None:
+                sys.modules.pop(f"custom_{mod_name}", None)
+        module_cache.clear()
+        gc.collect()
 
 
 async def run_roi_loop(cam_id: str):
