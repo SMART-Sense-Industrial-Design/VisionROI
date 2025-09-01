@@ -7,7 +7,7 @@ from pathlib import Path
 
 def test_click_creates_rectangle_and_saves():
     html = Path('templates/roi_selection.html').read_text()
-    match = re.search(r"frameContainer.addEventListener\('click',\s*\(e\) => \{([\s\S]*?drawAllRois\(\);\n\s*)\}\);", html)
+    match = re.search(r"canvas.addEventListener\('click',\s*\(e\) => \{([\s\S]*?drawAllRois\(\);\n\s*)\}\);", html)
     assert match, 'click handler not found'
     handler = match.group(1)
 
@@ -25,8 +25,7 @@ def test_click_creates_rectangle_and_saves():
     function drawAllRois(){}
     Date.now = () => 123;
     global.fetch = (url, opts) => { fetchBody = opts.body; return Promise.resolve({}); };
-    const frameContainer = { getBoundingClientRect: () => ({left:0, top:0, width:100, height:100}) };
-    const canvas = { width:100, height:100 };
+    const canvas = { width:100, height:100, getBoundingClientRect: () => ({left:0, top:0, width:100, height:100}) };
     function handler(e) {
 {handler}
     }

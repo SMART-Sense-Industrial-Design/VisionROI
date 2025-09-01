@@ -176,6 +176,8 @@ button.delete {
 #video {
   border: 1px solid black;
   position: relative;
+  box-sizing: border-box;
+  display: block;
 }
 
 #canvas {
@@ -217,9 +219,8 @@ button.delete {
 
 #alert-box {
   position: fixed;
-  top: 70px !important;      /* ปรับตามความสูงของ navbar */
-  right: 0 !important;
-
-  z-index: 9999 !important;
+  top: 70px; /* ค่าเริ่มต้นหากยังไม่ได้คำนวณจาก JS */
+  right: 1rem;
+  z-index: 1050;
 }
 
