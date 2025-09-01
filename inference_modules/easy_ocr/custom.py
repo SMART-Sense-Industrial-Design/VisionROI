@@ -82,8 +82,7 @@ def _run_ocr_async(frame, roi_id, save, source) -> None:
     """ประมวลผล OCR และบันทึกรูปในเธรดแยก"""
     try:
         reader = _get_reader()
-        with _reader_run_lock:
-            ocr_result = reader.readtext(frame, detail=0)
+        ocr_result = reader.readtext(frame, detail=0)
         text = " ".join(ocr_result)
         logger.info(
             f"roi_id={roi_id} OCR result: {text}" if roi_id is not None else f"OCR result: {text}"
@@ -130,18 +129,21 @@ def process(
 
     with _last_ocr_lock:
         last_time = last_ocr_times.get(roi_id)
-        diff_time = 0 if last_time is None else current_time - last_time
-        if last_time is None or diff_time >= interval:
-            last_ocr_times[roi_id] = current_time
-            should_ocr = True
-        else:
-            should_ocr = False
+    diff_time = 0 if last_time is None else current_time - last_time
+    should_ocr = last_time is None or diff_time >= interval
 
     result_text = last_ocr_results.get(roi_id, "")
 
-    if should_ocr:
-        threading.Thread(
-            target=_run_ocr_async, args=(frame.copy(), roi_id, save, source), daemon=True
-        ).start()
+    if should_ocr and _reader_run_lock.acquire(blocking=False):
+        with _last_ocr_lock:
+            last_ocr_times[roi_id] = current_time
+
+        def _target() -> None:
+            try:
+                _run_ocr_async(frame.copy(), roi_id, save, source)
+            finally:
+                _reader_run_lock.release()
+
+        threading.Thread(target=_target, daemon=True).start()
 
     return result_text
