@@ -144,9 +144,10 @@ def process(
     save: bool = False,
     source: str = "",
     cam_id: int | None = None,
+    interval: float = 3.0,
 ):
-    """ประมวลผล ROI และเรียก OCR เมื่อเวลาห่างจากครั้งก่อน >= 2 วินาที
-    บันทึกรูปภาพแบบไม่บล็อกเมื่อระบุให้บันทึก"""
+    """ประมวลผล ROI และเรียก OCR เมื่อเวลาห่างจากครั้งก่อน >= interval วินาที
+    (ค่าเริ่มต้น 3 วินาที) บันทึกรูปภาพแบบไม่บล็อกเมื่อระบุให้บันทึก"""
 
     _configure_logger(source)
 
@@ -165,7 +166,7 @@ def process(
     with _last_ocr_lock:
         last_time = last_ocr_times.get(roi_id)
         diff_time = 0 if last_time is None else current_time - last_time
-        if last_time is None or diff_time >= 3:
+        if last_time is None or diff_time >= interval:
             last_ocr_times[roi_id] = current_time
             should_ocr = True
         else:
