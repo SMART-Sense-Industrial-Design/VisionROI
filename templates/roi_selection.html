@@ -462,7 +462,7 @@
                 table.className = 'table table-hover table-sm';
                 const thead = document.createElement('thead');
                 const headerRow = document.createElement('tr');
-                ['ID', 'x', 'y', 'w', 'h', 'Group', 'Inference Module', 'Delete'].forEach(colName => {
+                ['ID', 'xywh', 'Group', 'Inference Module', 'Delete'].forEach(colName => {
                     const th = document.createElement('th');
                     th.textContent = colName;
                     headerRow.appendChild(th);
@@ -482,11 +482,9 @@
                     const idTd = document.createElement('td');
                     idTd.textContent = r.id;
                     tr.appendChild(idTd);
-                    [x, y, w, h].forEach(val => {
-                        const td = document.createElement('td');
-                        td.textContent = Math.round(val);
-                        tr.appendChild(td);
-                    });
+                    const tdCoords = document.createElement('td');
+                    tdCoords.textContent = `(${Math.round(x)},${Math.round(y)},${Math.round(w)},${Math.round(h)})`;
+                    tr.appendChild(tdCoords);
                     const tdGroup = document.createElement('td');
                     const input = document.createElement('input');
                     input.className = 'form-control form-control-sm';
@@ -552,7 +550,7 @@
                 table.className = 'table table-hover table-sm';
                 const thead = document.createElement('thead');
                 const headerRow = document.createElement('tr');
-                ['ID', 'x', 'y', 'w', 'h', 'Page Name', 'Crop Image', 'Action'].forEach(colName => {
+                ['ID', 'xywh', 'Page Name', 'Crop Image', 'Action'].forEach(colName => {
                     const th = document.createElement('th');
                     th.textContent = colName;
                     headerRow.appendChild(th);
@@ -572,11 +570,9 @@
                     const idTd = document.createElement('td');
                     idTd.textContent = r.id;
                     tr.appendChild(idTd);
-                    [x, y, w, h].forEach(val => {
-                        const td = document.createElement('td');
-                        td.textContent = Math.round(val);
-                        tr.appendChild(td);
-                    });
+                    const tdCoords = document.createElement('td');
+                    tdCoords.textContent = `(${Math.round(x)},${Math.round(y)},${Math.round(w)},${Math.round(h)})`;
+                    tr.appendChild(tdCoords);
                     const tdPage = document.createElement('td');
                     const input = document.createElement('input');
                     input.className = 'form-control form-control-sm';

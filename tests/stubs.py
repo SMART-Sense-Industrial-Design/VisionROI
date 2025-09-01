@@ -37,6 +37,7 @@ def stub_quart():
     quart_stub.jsonify = lambda *a, **k: None
     quart_stub.send_file = lambda *a, **k: None
     quart_stub.redirect = lambda *a, **k: None
+    quart_stub.Response = DummyQuart.DummyResponse
     sys.modules["quart"] = quart_stub
     return quart_stub
 
