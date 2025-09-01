@@ -62,9 +62,10 @@ main {
   padding: 10px;
 }
 
+/* ROI list shown in a single responsive column */
 .roi-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, 80px);
+  display: flex;
+  flex-direction: column;
   gap: 8px;
   margin-left: 10px;
   padding: 10px;
@@ -78,6 +79,7 @@ main {
   border-radius: 0;
   padding: 6px;
   background-color: #ffffff;
+  width: 100%;
 }
 
 .roi-title {
@@ -87,7 +89,7 @@ main {
 }
 
 .roi-image {
-  width: 80px;
+  width: 100%;
   height: auto;
   display: block;
   border: 2px solid red;
@@ -110,6 +112,32 @@ main {
   align-items: flex-start;
   gap: 10px;
   margin-bottom: 20px;
+  flex-wrap: wrap;
+}
+
+/* video and ROI list layout */
+.video-card {
+  flex: 1 1 auto;
+}
+
+.roi-list-card {
+  flex: 0 0 250px;
+}
+
+.stream-video {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+@media (max-width: 768px) {
+  .cam-row {
+    flex-direction: column;
+  }
+  .roi-list-card {
+    flex: 1 1 auto;
+    width: 100%;
+  }
 }
 
 .video-wrapper {

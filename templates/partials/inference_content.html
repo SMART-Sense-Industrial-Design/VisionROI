@@ -1,7 +1,7 @@
 <h2>Inference Group with Saved ROI</h2>
 <p>Modules are defined in the ROI file.</p>
 <div class="cam-row">
-    <div class="card roi-card">
+    <div class="card roi-card video-card">
         <div id="cam1" class="cam-cell">
             <div class="d-flex align-items-center mb-2 gap-2 menu-select-list">
                 <label for="cam1-sourceSelect" class="form-label mb-0">Source:</label>
@@ -11,11 +11,11 @@
             <button id="cam1-stopButton" class="btn btn-danger" disabled>Stop</button>
             <p id="cam1-status"></p>
             <div class="video-wrapper">
-                <img id="cam1-video" width="320" height="240" />
+                <img id="cam1-video" class="stream-video" />
             </div>
         </div>
     </div>
-    <div class="card roi-card">
+    <div class="card roi-card roi-list-card">
         <div class="d-flex align-items-center mb-2 gap-2 menu-select-list">
             <label for="cam1-groupSelect" class="form-label mb-0">Group:</label>
             <select id="cam1-groupSelect" class="form-select w-auto"></select>
