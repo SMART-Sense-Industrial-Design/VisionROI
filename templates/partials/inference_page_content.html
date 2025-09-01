@@ -1,7 +1,7 @@
 <h2>Inference Page</h2>
 <p>Stream camera with ROI overlay.</p>
 <div class="cam-row">
-    <div class="card roi-card">
+    <div class="card roi-card video-card">
         <div id="cam1" class="cam-cell">
             <div class="d-flex align-items-center mb-2 gap-2 menu-select-list">
                 <label for="cam1-sourceSelect" class="form-label mb-0">Source:</label>
@@ -11,7 +11,7 @@
             <button id="cam1-stopButton" class="btn btn-danger" disabled>Stop</button>
             <p id="cam1-status"></p>
             <div class="video-wrapper">
-                <img id="cam1-video" width="320" height="240" />
+                <img id="cam1-video" class="stream-video" />
                 <p>page: <span id="cam1-pageName"></span></p>
                 <table id="cam1-pageScores" class="table">
                     <thead><tr><th>Page</th><th>Score</th></tr></thead>
@@ -20,7 +20,7 @@
             </div>
         </div>
     </div>
-    <div class="card roi-card">
+    <div class="card roi-card roi-list-card">
         <div id="cam1-rois" class="roi-grid"></div>
     </div>
 </div>
