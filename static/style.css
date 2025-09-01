@@ -219,8 +219,9 @@ button.delete {
 
 #alert-box {
   position: fixed;
-  top: 70px; /* ค่าเริ่มต้นหากยังไม่ได้คำนวณจาก JS */
-  right: 1rem;
+  top: 1rem;
+  left: 50%;
+  transform: translateX(-50%);
   z-index: 1050;
 }
 
