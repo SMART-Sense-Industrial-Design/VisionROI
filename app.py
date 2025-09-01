@@ -561,8 +561,11 @@ async def ws(cam_id: str):
                 await websocket.close(code=1000)
                 break
             await websocket.send(frame_bytes)
-    except (ConnectionClosed, asyncio.CancelledError):
+    except ConnectionClosed:
         pass
+    finally:
+        with contextlib.suppress(Exception):
+            await websocket.close()
 
 
 # ✅ WebSocket ROI stream
@@ -576,8 +579,11 @@ async def ws_roi(cam_id: str):
                 await websocket.close(code=1000)
                 break
             await websocket.send(frame_bytes)
-    except (ConnectionClosed, asyncio.CancelledError):
+    except ConnectionClosed:
         pass
+    finally:
+        with contextlib.suppress(Exception):
+            await websocket.close()
 
 
 @app.websocket('/ws_roi_result/<string:cam_id>')
@@ -590,8 +596,11 @@ async def ws_roi_result(cam_id: str):
                 await websocket.close(code=1000)
                 break
             await websocket.send(data)
-    except (ConnectionClosed, asyncio.CancelledError):
+    except ConnectionClosed:
         pass
+    finally:
+        with contextlib.suppress(Exception):
+            await websocket.close()
 
 
 # =========================
