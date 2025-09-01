@@ -40,9 +40,18 @@
         link.classList.toggle('active', link.getAttribute('href') === path);
       });
     }
+    function positionAlertBox() {
+      const alertBox = document.getElementById('alert-box');
+      const nav = document.querySelector('.navbar');
+      if (alertBox && nav) {
+        alertBox.style.top = nav.offsetHeight + 10 + 'px';
+      }
+    }
     window.addEventListener('DOMContentLoaded', () => {
       setActiveLink(window.location.pathname);
+      positionAlertBox();
     });
+    window.addEventListener('resize', positionAlertBox);
   </script>
 
 </body>

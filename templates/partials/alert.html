@@ -1,11 +1,11 @@
-<div id="alert-box" class="alert d-none m-3" role="alert"></div>
+<div id="alert-box" class="alert d-none" role="alert"></div>
 <script>
 function showAlert(message, type='info', timeout=3000) {
   const box = document.getElementById('alert-box');
   if (!box) return;
   const bsType = type === 'error' ? 'danger' : type;
   box.textContent = message;
-  box.className = `alert alert-${bsType} m-3`;
+  box.className = `alert alert-${bsType}`;
   box.classList.remove('d-none');
   setTimeout(() => {
     box.classList.add('d-none');

@@ -246,8 +246,8 @@
             startBtn.disabled = false;
         }
 
-        frameContainer.addEventListener('click', (e) => {
-            const rect = frameContainer.getBoundingClientRect();
+        canvas.addEventListener('click', (e) => {
+            const rect = canvas.getBoundingClientRect();
             const scaleX = canvas.width / rect.width;
             const scaleY = canvas.height / rect.height;
             const x = (e.clientX - rect.left) * scaleX;
@@ -311,8 +311,8 @@
             drawAllRois();
         });
 
-        frameContainer.addEventListener('mousemove', (e) => {
-            const rect = frameContainer.getBoundingClientRect();
+        canvas.addEventListener('mousemove', (e) => {
+            const rect = canvas.getBoundingClientRect();
             const scaleX = canvas.width / rect.width;
             const scaleY = canvas.height / rect.height;
             const x = (e.clientX - rect.left) * scaleX;
@@ -330,7 +330,7 @@
             drawAllRois();
         });
 
-        frameContainer.addEventListener('mouseleave', () => {
+        canvas.addEventListener('mouseleave', () => {
             hoverPoint = null;
             if (currentMode === 'rect' && drawingRect) {
                 drawingRect = false;
