@@ -109,7 +109,7 @@ def process(
     save: bool = False,
     source: str = "",
     cam_id: int | None = None,
-    interval: float = 3.0,
+    interval: float = 1.0,
 ):
     """ประมวลผล ROI และเรียก OCR เมื่อเวลาห่างจากครั้งก่อน >= interval วินาที
     (ค่าเริ่มต้น 3 วินาที) บันทึกรูปภาพแบบไม่บล็อกเมื่อระบุให้บันทึก"""
