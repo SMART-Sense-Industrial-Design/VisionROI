@@ -676,6 +676,11 @@ async def stop_inference(cam_id: str):
     if queue is not None:
         await queue.put(None)
         roi_result_queues.pop(cam_id, None)
+    # Clear cached ROI data and flags to free memory
+    inference_rois.pop(cam_id, None)
+    inference_groups.pop(cam_id, None)
+    save_roi_flags.pop(cam_id, None)
+    gc.collect()
     save_service_state()
     return jsonify(resp), status
 
