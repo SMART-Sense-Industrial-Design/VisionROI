@@ -82,18 +82,17 @@ def _run_ocr_async(frame, roi_id, save, source) -> None:
     """ประมวลผล OCR และบันทึกรูปในเธรดแยก"""
     try:
         reader = _get_reader()
-        with _reader_run_lock:
-            # RapidOCR อาจคืนผลลัพธ์เป็น tuple (result, time) หรือเพียง result อย่างเดียว
-            result = reader(frame)
-            if (
-                isinstance(result, (list, tuple))
-                and len(result) == 2
-                and isinstance(result[0], (list, tuple))
-                and not isinstance(result[1], (list, tuple, dict))
-            ):
-                ocr_result = result[0]
-            else:
-                ocr_result = result
+        # RapidOCR อาจคืนผลลัพธ์เป็น tuple (result, time) หรือเพียง result อย่างเดียว
+        result = reader(frame)
+        if (
+            isinstance(result, (list, tuple))
+            and len(result) == 2
+            and isinstance(result[0], (list, tuple))
+            and not isinstance(result[1], (list, tuple, dict))
+        ):
+            ocr_result = result[0]
+        else:
+            ocr_result = result
 
         text_items: list[str] = []
         if isinstance(ocr_result, (list, tuple)):
@@ -165,18 +164,21 @@ def process(
 
     with _last_ocr_lock:
         last_time = last_ocr_times.get(roi_id)
-        diff_time = 0 if last_time is None else current_time - last_time
-        if last_time is None or diff_time >= interval:
-            last_ocr_times[roi_id] = current_time
-            should_ocr = True
-        else:
-            should_ocr = False
+    diff_time = 0 if last_time is None else current_time - last_time
+    should_ocr = last_time is None or diff_time >= interval
 
     result_text = last_ocr_results.get(roi_id, "")
 
-    if should_ocr:
-        threading.Thread(
-            target=_run_ocr_async, args=(frame.copy(), roi_id, save, source), daemon=True
-        ).start()
+    if should_ocr and _reader_run_lock.acquire(blocking=False):
+        with _last_ocr_lock:
+            last_ocr_times[roi_id] = current_time
+
+        def _target() -> None:
+            try:
+                _run_ocr_async(frame.copy(), roi_id, save, source)
+            finally:
+                _reader_run_lock.release()
+
+        threading.Thread(target=_target, daemon=True).start()
 
     return result_text
