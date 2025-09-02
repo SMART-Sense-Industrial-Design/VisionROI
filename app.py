@@ -57,10 +57,17 @@ inference_tasks: dict[str, asyncio.Task | None] = {}
 roi_frame_queues: dict[str, asyncio.Queue[bytes | None]] = {}
 roi_result_queues: dict[str, asyncio.Queue[str | None]] = {}
 roi_tasks: dict[str, asyncio.Task | None] = {}
+
+# note: เดิม inference_rois เป็น list[dict] ต่อกล้อง (เก็บ rois.json ที่โหลดมา)
 inference_rois: dict[str, list[dict]] = {}
 active_sources: dict[str, str] = {}
 save_roi_flags: dict[str, bool] = {}
+
+# บังคับ group ในโหมด Inference Group (ถ้า None = ไม่บังคับ ใช้ผล page/roi)
 inference_groups: dict[str, str | None] = {}
+
+# โหมดงานล่าสุดของกล้องนั้นๆ: "inference" หรือ "roi_stream"
+inference_mode: dict[str, str | None] = {}
 
 STATE_FILE = "service_state.json"
 PAGE_SCORE_THRESHOLD = 0.4
@@ -125,6 +132,7 @@ def _free_cam_state(cam_id: str):
     save_roi_flags.pop(cam_id, None)
     inference_groups.pop(cam_id, None)
     inference_rois.pop(cam_id, None)
+    inference_mode.pop(cam_id, None)
 
     q = frame_queues.pop(cam_id, None)
     if q is not None:
@@ -164,16 +172,28 @@ def get_cam_lock(cam_id: str) -> asyncio.Lock:
     return camera_locks.setdefault(cam_id, asyncio.Lock())
 
 
+def _is_inference_running(cam_id: str) -> bool:
+    t = inference_tasks.get(cam_id)
+    return bool(t and not t.done())
+
+
+def _is_roi_running(cam_id: str) -> bool:
+    t = roi_tasks.get(cam_id)
+    return bool(t and not t.done())
+
+
 def save_service_state() -> None:
-    cam_ids = set(camera_sources) | set(active_sources) | set(inference_tasks)
+    # รวม cam_ids จากทั้ง inference, roi, sources เพื่อ cover ทุกเคส
+    cam_ids = set(camera_sources) | set(active_sources) | set(inference_tasks) | set(roi_tasks)
     data = {
         str(cam_id): {
             "source": camera_sources.get(cam_id),
             "resolution": list(camera_resolutions.get(cam_id, (None, None))),
             "active_source": active_sources.get(cam_id, ""),
-            "inference_running": bool(
-                inference_tasks.get(cam_id) and not inference_tasks[cam_id].done()
-            ),
+            "inference_running": _is_inference_running(cam_id),
+            "roi_running": _is_roi_running(cam_id),
+            "mode": inference_mode.get(cam_id),        # "inference" | "roi_stream" | None
+            "group": inference_groups.get(cam_id),     # บังคับ group (ถ้ามี)
         }
         for cam_id in cam_ids
     }
@@ -211,14 +231,31 @@ async def restore_service_state() -> None:
         res = cfg.get("resolution") or [None, None]
         camera_resolutions[cam_id] = (res[0], res[1])
         active_sources[cam_id] = cfg.get("active_source", "")
-        if cfg.get("inference_running"):
-            await perform_start_inference(cam_id, save_state=False)
+
+        # คืนค่า group/โหมดล่าสุด
+        grp = (cfg.get("group") or "").strip() or None
+        if grp:
+            inference_groups[cam_id] = grp
+        mode = (cfg.get("mode") or "").strip() or None
+        if mode in ("inference", "roi_stream"):
+            inference_mode[cam_id] = mode
+
+        # Autostart เฉพาะเมื่อ state ล่าสุดบันทึกว่า "กำลังรัน" และมี active_source
+        has_source = bool(active_sources.get(cam_id))
+        if has_source:
+            if cfg.get("inference_running") and mode == "inference":
+                await perform_start_inference(cam_id, group=inference_groups.get(cam_id), save_state=False)
+            elif cfg.get("roi_running") and mode == "roi_stream":
+                # ROI stream mode (หน้า inference_page / preview ROI)
+                _, _, _ = await start_camera_task(cam_id, roi_tasks, run_roi_loop)
 
     save_service_state()
 
 
-if hasattr(app, "before_serving"):
-    app.before_serving(restore_service_state)
+# ใช้ decorator ให้แน่ใจว่า hook ทำงานแน่
+@app.before_serving
+async def _on_startup():
+    await restore_service_state()
 
 
 # ========== stop helpers ==========
@@ -243,21 +280,20 @@ async def _quit():
     return Response("shutting down", status=202, mimetype="text/plain")
 
 
-if hasattr(app, "after_serving"):
-    @app.after_serving
-    async def _shutdown_cleanup():
-        await asyncio.gather(
-            *[_safe_stop(cid, inference_tasks, frame_queues) for cid in list(inference_tasks.keys())],
-            *[_safe_stop(cid, roi_tasks, roi_frame_queues) for cid in list(roi_tasks.keys())],
-            return_exceptions=True
-        )
-        for cam_id, q in list(roi_result_queues.items()):
-            with contextlib.suppress(Exception):
-                await q.put(None)
-            roi_result_queues.pop(cam_id, None)
-        gc.collect()
-        # schedule trim after event loop settles
-        asyncio.create_task(_deferred_trim(1.0))
+@app.after_serving
+async def _shutdown_cleanup():
+    await asyncio.gather(
+        *[_safe_stop(cid, inference_tasks, frame_queues) for cid in list(inference_tasks.keys())],
+        *[_safe_stop(cid, roi_tasks, roi_frame_queues) for cid in list(roi_tasks.keys())],
+        return_exceptions=True
+    )
+    for cam_id, q in list(roi_result_queues.items()):
+        with contextlib.suppress(Exception):
+            await q.put(None)
+        roi_result_queues.pop(cam_id, None)
+    gc.collect()
+    # schedule trim after event loop settles
+    asyncio.create_task(_deferred_trim(1.0))
 
 
 # =========================
@@ -1003,6 +1039,9 @@ async def load_roi_file():
 # Inference controls
 # =========================
 async def perform_start_inference(cam_id: str, rois=None, group: str | None = None, save_state: bool = True):
+    # โหมด inference (หน้า Inference Group)
+    inference_mode[cam_id] = "inference"
+
     if roi_tasks.get(cam_id) and not roi_tasks[cam_id].done():
         return False
     if rois is None:
@@ -1081,6 +1120,7 @@ async def stop_inference(cam_id: str):
     inference_rois.pop(cam_id, None)
     inference_groups.pop(cam_id, None)
     save_roi_flags.pop(cam_id, None)
+    inference_mode.pop(cam_id, None)
 
     _free_cam_state(cam_id)
     save_service_state()
@@ -1091,6 +1131,9 @@ async def stop_inference(cam_id: str):
 
 @app.route('/start_roi_stream/<string:cam_id>', methods=["POST"])
 async def start_roi_stream(cam_id: str):
+    # โหมด ROI stream (หน้า Inference Page / preview ROI)
+    inference_mode[cam_id] = "roi_stream"
+
     if inference_tasks.get(cam_id) and not inference_tasks[cam_id].done():
         return jsonify({"status": "inference_running", "cam_id": cam_id}), 400
     data = await request.get_json() or {}
@@ -1103,26 +1146,29 @@ async def start_roi_stream(cam_id: str):
         with contextlib.suppress(asyncio.QueueEmpty):
             queue.get_nowait()
     _, resp, status = await start_camera_task(cam_id, roi_tasks, run_roi_loop)
+    save_service_state()
     return jsonify(resp), status
 
 
 @app.route('/stop_roi_stream/<string:cam_id>', methods=["POST"])
 async def stop_roi_stream(cam_id: str):
     _, resp, status = await stop_camera_task(cam_id, roi_tasks, roi_frame_queues)
+    inference_mode.pop(cam_id, None)
     _free_cam_state(cam_id)
+    save_service_state()
     asyncio.create_task(_deferred_trim(1.0))
     return jsonify(resp), status
 
 
 @app.route('/inference_status/<string:cam_id>', methods=["GET"])
 async def inference_status(cam_id: str):
-    running = inference_tasks.get(cam_id) is not None and not inference_tasks[cam_id].done()
+    running = _is_inference_running(cam_id)
     return jsonify({"running": running, "cam_id": cam_id})
 
 
 @app.route('/roi_stream_status/<string:cam_id>', methods=["GET"])
 async def roi_stream_status(cam_id: str):
-    running = roi_tasks.get(cam_id) is not None and not roi_tasks[cam_id].done()
+    running = _is_roi_running(cam_id)
     source = active_sources.get(cam_id, "")
     return jsonify({"running": running, "cam_id": cam_id, "source": source})
 

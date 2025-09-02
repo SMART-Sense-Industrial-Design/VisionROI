@@ -1,0 +1,143 @@
+--- a/app.py
++++ b/app.py
+@@
+-# เดิมมีเฉพาะ inference_groups
+-inference_groups: dict[str, str | None] = {}
++inference_groups: dict[str, str | None] = {}
++inference_rois: dict[str, str | None] = {}      # สำหรับ Inference Page
++inference_kind: dict[str, str | None] = {}      # "group" | "page"
+ 
+ STATE_FILE = "service_state.json"
+ 
+ def save_service_state() -> None:
+     cam_ids = set(camera_sources) | set(active_sources) | set(inference_tasks)
+     data = {
+         str(cam_id): {
+             "source": camera_sources.get(cam_id),
+             "resolution": list(camera_resolutions.get(cam_id, (None, None))),
+             "active_source": active_sources.get(cam_id, ""),
+-            "inference_running": bool(
+-                inference_tasks.get(cam_id) and not inference_tasks[cam_id].done()
+-            ),
+-            "group": inference_groups.get(cam_id),
++            "inference_running": bool(inference_tasks.get(cam_id) and not getattr(inference_tasks.get(cam_id), "done", lambda: True)()),
++            "kind": inference_kind.get(cam_id),          # "group" | "page"
++            "group": inference_groups.get(cam_id),       # สำหรับ Inference Group
++            "roi": inference_rois.get(cam_id),           # สำหรับ Inference Page
+         }
+         for cam_id in cam_ids
+     }
+     with contextlib.suppress(Exception):
+         with open(STATE_FILE, "w") as f:
+             json.dump({"cameras": data}, f)
+ 
+ def load_service_state() -> dict[str, dict[str, object]]:
+     path = Path(STATE_FILE)
+     if not path.exists():
+         return {}
+     with contextlib.suppress(Exception):
+         with path.open("r") as f:
+             data = json.load(f)
+             cams = data.get("cameras")
+             if isinstance(cams, dict):
+                 return cams
+     return {}
+ 
+-async def restore_service_state() -> None:
++async def restore_service_state() -> None:
+     cams = load_service_state()
+     for cam_id, cfg in cams.items():
+         camera_sources[cam_id] = cfg.get("source")
+         res = cfg.get("resolution") or [None, None]
+         camera_resolutions[cam_id] = (res[0], res[1])
+         active_sources[cam_id] = cfg.get("active_source", "")
+-        # คืนค่ากลุ่ม ROI เดิม
+-        grp = cfg.get("group") or None
+-        if grp:
+-            inference_groups[cam_id] = grp
++        # คืนค่าโหมด/ค่าที่เลือกไว้ล่าสุด
++        kind = (cfg.get("kind") or "").strip() or None
++        if kind in ("group", "page"):
++            inference_kind[cam_id] = kind
++        grp = (cfg.get("group") or "").strip() or None
++        roi = (cfg.get("roi") or "").strip() or None
++        if grp:
++            inference_groups[cam_id] = grp
++        if roi:
++            inference_rois[cam_id] = roi
+ 
+-        # ถ้า state เคย "กำลังรัน" ให้ autostart ตามชนิดล่าสุดเท่านั้น
+-        if cfg.get("inference_running"):
+-            await perform_start_inference(cam_id, group=inference_groups.get(cam_id), save_state=False)
++        # Autostart เฉพาะเมื่อ state ล่าสุดบันทึกว่า "กำลังรัน" และมี active_source
++        if cfg.get("inference_running") and active_sources.get(cam_id):
++            if inference_kind.get(cam_id) == "group":
++                await perform_start_inference(cam_id, group=inference_groups.get(cam_id), roi=None, save_state=False)
++            elif inference_kind.get(cam_id) == "page":
++                await perform_start_inference(cam_id, group=None, roi=inference_rois.get(cam_id), save_state=False)
+ 
+     save_service_state()
+ 
+-# เดิมบางที่ใช้ app.before_serving(restore_service_state)
++# ใช้ decorator ให้แน่ใจว่า hook ทำงานแน่
+ @app.before_serving
+ async def _on_startup():
+     await restore_service_state()
+ 
+@@
+-async def perform_start_inference(cam_id: str, group: str | None = None, save_state: bool = True) -> None:
++async def perform_start_inference(
++    cam_id: str,
++    group: str | None = None,
++    roi: str | None = None,
++    save_state: bool = True,
++) -> None:
+     # ... เตรียม worker/queue ตามเดิม ...
+-    if group:
+-        inference_groups[cam_id] = group
++    if group:
++        inference_kind[cam_id] = "group"
++        inference_groups[cam_id] = group
++        inference_rois.pop(cam_id, None)
++        # TODO: ส่งค่า group ให้ engine/worker ของคุณ
++    elif roi:
++        inference_kind[cam_id] = "page"
++        inference_rois[cam_id] = roi
++        inference_groups.pop(cam_id, None)
++        # TODO: ส่งค่า roi/template ให้ engine/worker ของคุณ
++    else:
++        # ไม่มีพารามิเตอร์ → ใช้ค่าเดิมถ้ามี (ไม่บังคับ)
++        pass
+ 
+     # ... สร้าง/เริ่ม task inference ตามเดิม ...
+ 
+     if save_state:
+         save_service_state()
+ 
+@@
+ @app.route("/api/inference/start", methods=["POST"])
+ async def api_start_inference():
+     data = await request.get_json()
+     cam_id = str(data.get("cam_id"))
+-    group = data.get("group")
+-    await perform_start_inference(cam_id, group=group, save_state=True)
++    group = (data.get("group") or "").strip() or None
++    roi = (data.get("roi") or "").strip() or None
++    await perform_start_inference(cam_id, group=group, roi=roi, save_state=True)
+     return jsonify({"ok": True})
+ 
++@app.route("/api/inference/stop", methods=["POST"])
++async def api_stop_inference():
++    data = await request.get_json()
++    cam_id = str(data.get("cam_id"))
++    # ยกเลิก task ถ้ามี
++    task = inference_tasks.get(cam_id)
++    if task and not task.done():
++        task.cancel()
++        with contextlib.suppress(Exception):
++            await asyncio.sleep(0)  # ให้ cancel ดำเนินการ
++    # เคลียร์ task ออกจากแรมเพื่อให้ save_service_state() เห็นว่าไม่กำลังรัน
++    inference_tasks[cam_id] = None
++    # บันทึก state หลัง stop → inference_running = False
++    save_service_state()
++    return jsonify({"ok": True})
