@@ -206,17 +206,15 @@ def ensure_roi_ids(rois):
 async def restore_service_state() -> None:
     cams = load_service_state()
 
-    async def _start_all():
-        for cam_id, cfg in cams.items():
-            camera_sources[cam_id] = cfg.get("source")
-            res = cfg.get("resolution") or [None, None]
-            camera_resolutions[cam_id] = (res[0], res[1])
-            active_sources[cam_id] = cfg.get("active_source", "")
-            if cfg.get("inference_running"):
-                await perform_start_inference(cam_id, save_state=False)
-        save_service_state()
+    for cam_id, cfg in cams.items():
+        camera_sources[cam_id] = cfg.get("source")
+        res = cfg.get("resolution") or [None, None]
+        camera_resolutions[cam_id] = (res[0], res[1])
+        active_sources[cam_id] = cfg.get("active_source", "")
+        if cfg.get("inference_running"):
+            await perform_start_inference(cam_id, save_state=False)
 
-    asyncio.create_task(_start_all())
+    save_service_state()
 
 
 if hasattr(app, "before_serving"):
