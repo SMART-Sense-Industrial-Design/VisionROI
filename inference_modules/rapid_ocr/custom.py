@@ -49,6 +49,9 @@ _last_ocr_times: dict[tuple[str, int | str | None], float] = {}
 _last_ocr_results: dict[tuple[str, int | str | None], str] = {}
 _state_lock = threading.Lock()
 
+# simplified cache for tests/external access keyed only by roi_id
+last_ocr_results: dict[int | str | None, str] = {}
+
 _imwrite_lock = threading.Lock()
 
 
@@ -141,6 +144,17 @@ def _run_ocr(frame_bgr) -> str:
     with _reader_call_lock:
         result = reader(frame_bgr)
     return _extract_text_from_rapidocr_output(result)
+
+
+def _run_ocr_async(frame_bgr, roi_id: int | str | None = None, save: bool = False, source: str = "") -> str:
+    """Convenience helper used in tests to run OCR and record the result."""
+    text = _run_ocr(frame_bgr)
+    _save_frame_if_needed(frame_bgr, source, roi_id, save)
+    key = (source, roi_id)
+    with _state_lock:
+        _last_ocr_results[key] = text
+        last_ocr_results[roi_id] = text
+    return text
 
 
 def _save_frame_if_needed(frame_bgr, source: str, roi_id: int | str | None, save: bool) -> None:
