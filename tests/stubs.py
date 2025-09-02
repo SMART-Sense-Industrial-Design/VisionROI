@@ -14,6 +14,14 @@ def stub_quart():
                 return f
             return decorator
 
+        # เพิ่มเมธอด post เพื่อให้รองรับ @app.post
+        def post(self, *args, **kwargs):
+            return self.route(*args, **kwargs)
+
+        # เพิ่มเมธอด get เพื่อให้รองรับ @app.get
+        def get(self, *args, **kwargs):
+            return self.route(*args, **kwargs)
+
         class DummyResponse:
             def __init__(self, status_code=200):
                 self.status_code = status_code
