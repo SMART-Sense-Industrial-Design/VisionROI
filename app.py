@@ -636,11 +636,18 @@ async def run_inference_loop(cam_id: str):
     except asyncio.CancelledError:
         pass
     finally:
-        for mod_name, (module, _, _) in module_cache.items():
+        for mod_name, (module, _, _) in list(module_cache.items()):
             if module is not None:
+                with contextlib.suppress(Exception):
+                    cleanup = getattr(module, "cleanup", None)
+                    if callable(cleanup):
+                        result = cleanup()
+                        if inspect.isawaitable(result):
+                            await result
                 sys.modules.pop(f"custom_{mod_name}", None)
-        module_cache.clear()
+            module_cache.pop(mod_name, None)
         gc.collect()
+        _malloc_trim_now()
 
 
 async def run_roi_loop(cam_id: str):
