@@ -570,6 +570,7 @@ async def run_inference_loop(cam_id: str):
                         matrix = cv2.getPerspectiveTransform(src, dst)
                         roi = cv2.warpPerspective(frame, matrix, (max_w, max_h))
                         result_text = ''
+                        task = None
                         try:
                             if is_stopping(cam_id):
                                 raise RuntimeError("stopping")
@@ -578,9 +579,12 @@ async def run_inference_loop(cam_id: str):
                                 args.append(active_sources.get(cam_id, ''))
                             if takes_cam_id:
                                 args.append(cam_id)
-                            result = getattr(module, 'process')(*args)
-                            if inspect.isawaitable(result):
-                                result = await result
+                            proc = getattr(module, 'process')
+                            if inspect.iscoroutinefunction(proc):
+                                task = asyncio.create_task(proc(*args))
+                            else:
+                                task = asyncio.create_task(asyncio.to_thread(proc, *args))
+                            result = await asyncio.wait_for(task, timeout=None)
                             if is_stopping(cam_id):
                                 raise RuntimeError("stopping")
                             if isinstance(result, str):
@@ -588,7 +592,22 @@ async def run_inference_loop(cam_id: str):
                             elif isinstance(result, dict) and 'text' in result:
                                 result_text = str(result['text'])
                         except Exception:
-                            pass
+                            if task is not None:
+                                task.cancel()
+                                with contextlib.suppress(asyncio.CancelledError):
+                                    await task
+                            cleanup = getattr(module, 'cleanup', None)
+                            if callable(cleanup):
+                                try:
+                                    params = inspect.signature(cleanup).parameters
+                                    if 'cam_id' in params:
+                                        cleanup(cam_id)
+                                    else:
+                                        cleanup()
+                                except Exception:
+                                    pass
+                            if is_stopping(cam_id):
+                                return None
                         try:
                             ok, roi_buf = cv2.imencode('.jpg', roi, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
                             if ok and roi_buf is not None:
@@ -622,7 +641,8 @@ async def run_inference_loop(cam_id: str):
                             (int(label_pt[0]), max(0, int(label_pt[1]) - 5)),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 1, cv2.LINE_AA)
                 del src_int, src
-
+            if is_stopping(cam_id):
+                return None
         out = cv2.resize(frame, (0, 0), fx=0.5, fy=0.5)
         del frame
         return out
