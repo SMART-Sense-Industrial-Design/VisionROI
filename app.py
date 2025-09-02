@@ -1068,5 +1068,19 @@ async def ws_snapshot(cam_id: str):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run VisionROI server")
     parser.add_argument("--port", type=int, default=5000, help="Port for the web server")
+    parser.add_argument("--use-uvicorn", action="store_true", help="Run with uvicorn instead of built-in server")
     args = parser.parse_args()
-    app.run(port=args.port)
+
+    if args.use_uvicorn:
+        import uvicorn
+        # ใช้ uvicorn รัน (เสถียรกว่า app.run())
+        uvicorn.run(
+            "app:app",              # module:variable
+            host="0.0.0.0",
+            port=args.port,
+            reload=False,
+            lifespan="on"
+        )
+    else:
+        # dev mode
+        app.run(port=args.port) 
