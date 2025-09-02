@@ -181,7 +181,9 @@ async def _safe_stop(cam_id: str,
 
 # ========== Graceful shutdown (simple & robust) ==========
 # We avoid os._exit and any ctypes. Let uvicorn/Quart handle lifespan and run our after_serving cleanup.
-@app.post("/_quit")
+# Quart เวอร์ชันปัจจุบัน (และสตับในเทส) อาจไม่มีเมธอด post();
+# ใช้ route แทนเพื่อความเข้ากันได้
+@app.route("/_quit", methods=["POST"])
 async def _quit():
     # trigger normal SIGTERM which uvicorn handles gracefully
     asyncio.get_event_loop().call_soon(lambda: os.kill(os.getpid(), signal.SIGTERM))
@@ -232,7 +234,7 @@ async def inference_page() -> str:
     return await render_template("inference_page.html")
 
 
-@app.get("/_healthz")
+@app.route("/_healthz", methods=["GET"])
 async def _healthz():
     return "ok", 200
 
@@ -1005,10 +1007,15 @@ async def start_inference(cam_id: str):
 @app.route('/stop_inference/<string:cam_id>', methods=["POST"])
 async def stop_inference(cam_id: str):
     _, resp, status = await stop_camera_task(cam_id, inference_tasks, frame_queues)
-    queue = roi_result_queues.get(cam_id)
+
+    queue = roi_result_queues.pop(cam_id, None)
     if queue is not None:
+        # นำ None ใส่คิวเพื่อปิดการส่งผลลัพธ์ แล้วล้างคิวออกให้หมด
         await queue.put(None)
-        roi_result_queues.pop(cam_id, None)
+        with contextlib.suppress(asyncio.QueueEmpty):
+            while not queue.empty():
+                queue.get_nowait()
+
     inference_rois.pop(cam_id, None)
     inference_groups.pop(cam_id, None)
     save_roi_flags.pop(cam_id, None)
