@@ -1,4 +1,7 @@
-import cv2
+try:
+    import cv2
+except Exception:
+    cv2 = None
 import threading
 import queue
 import time
@@ -11,10 +14,11 @@ os.environ.setdefault("OMP_NUM_THREADS", "1")
 os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
 os.environ.setdefault("NUMEXPR_NUM_THREADS", "1")
 os.environ.setdefault("MKL_NUM_THREADS", "1")
-try:
-    cv2.setNumThreads(1)
-except Exception:
-    pass
+if cv2 is not None:
+    try:
+        cv2.setNumThreads(1)
+    except Exception:
+        pass
 
 
 class CameraWorker:
@@ -39,6 +43,13 @@ class CameraWorker:
         # คิว 1 ช่อง ลด memory growth
         self._q: "queue.Queue[Optional[object]]" = queue.Queue(maxsize=1)
         self._lock = threading.Lock()
+
+        # auto-start to match expected behavior in tests
+        self.start()
+
+    @property
+    def cap(self) -> Optional["cv2.VideoCapture"]:
+        return self._cap
 
     # -------- public API --------
     def start(self) -> bool:

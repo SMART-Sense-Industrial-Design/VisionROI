@@ -4,7 +4,10 @@ import os
 import sys
 import platform
 import argparse
-import cv2
+try:
+    import cv2
+except Exception:
+    cv2 = None
 from camera_worker import CameraWorker
 try:
     import numpy as np
@@ -19,6 +22,7 @@ from pathlib import Path
 import contextlib
 import inspect
 import gc
+from itertools import chain
 from typing import Callable, Awaitable, Any
 try:
     from websockets.exceptions import ConnectionClosed
@@ -34,10 +38,11 @@ os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
 os.environ.setdefault("NUMEXPR_NUM_THREADS", "1")
 os.environ.setdefault("MKL_NUM_THREADS", "1")
 os.environ.setdefault("MKL_THREADING_LAYER", "GNU")
-try:
-    cv2.setNumThreads(1)
-except Exception:
-    pass
+if cv2 is not None:
+    try:
+        cv2.setNumThreads(1)
+    except Exception:
+        pass
 
 # ---------- crash backtrace (won't prevent crash, just logs) ----------
 try:
@@ -82,9 +87,11 @@ def _is_idle() -> bool:
     if camera_workers:
         return False
     # queues must be gone or empty
-    for q in list(frame_queues.values()) + list(roi_frame_queues.values()) + list(roi_result_queues.values()):
+    for q in chain(
+        frame_queues.values(), roi_frame_queues.values(), roi_result_queues.values()
+    ):
         try:
-            if q is not None and (not q.empty()):
+            if q and not q.empty():
                 return False
         except Exception:
             pass
@@ -235,7 +242,7 @@ async def _safe_stop(cam_id: str,
 
 
 # ========== Graceful shutdown ==========
-@app.post("/_quit")
+@app.route("/_quit", methods=["POST"])
 async def _quit():
     asyncio.get_event_loop().call_soon(lambda: os.kill(os.getpid(), signal.SIGTERM))
     return Response("shutting down", status=202, mimetype="text/plain")
@@ -286,7 +293,7 @@ async def inference_page() -> str:
     return await render_template("inference_page.html")
 
 
-@app.get("/_healthz")
+@app.route("/_healthz", methods=["GET"])
 async def _healthz():
     return "ok", 200
 
@@ -1097,9 +1104,11 @@ async def start_roi_stream(cam_id: str):
         if not cfg_ok:
             return jsonify({"status": "error", "cam_id": cam_id}), 400
     queue = get_roi_frame_queue(cam_id)
-    while not queue.empty():
-        with contextlib.suppress(asyncio.QueueEmpty):
+    while True:
+        try:
             queue.get_nowait()
+        except asyncio.QueueEmpty:
+            break
     _, resp, status = await start_camera_task(cam_id, roi_tasks, run_roi_loop)
     return jsonify(resp), status
 
@@ -1130,6 +1139,8 @@ async def roi_stream_status(cam_id: str):
 # =========================
 @app.route("/ws_snapshot/<string:cam_id>")
 async def ws_snapshot(cam_id: str):
+    if cv2 is None:
+        return "OpenCV not available", 500
     worker = camera_workers.get(cam_id)
     if worker is None:
         return "Camera not initialized", 400
@@ -1156,13 +1167,16 @@ async def ws_snapshot(cam_id: str):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run VisionROI server")
     parser.add_argument("--port", type=int, default=5000, help="Port for the web server")
-    parser.add_argument("--use-uvicorn", action="store_true", help="Run with uvicorn instead of built-in server")
+    parser.add_argument(
+        "--no-uvicorn",
+        dest="use_uvicorn",
+        action="store_false",
+        help="Run with built-in server instead of uvicorn",
+    )
+    parser.set_defaults(use_uvicorn=True)
     args = parser.parse_args()
 
-    # default to uvicorn
-    use_uvicorn = True if args.use_uvicorn or True else False
-
-    if use_uvicorn:
+    if args.use_uvicorn:
         import uvicorn
         uvicorn_kwargs = dict(
             host="0.0.0.0",
