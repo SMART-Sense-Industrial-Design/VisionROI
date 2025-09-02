@@ -132,17 +132,17 @@ if hasattr(app, "after_serving"):
     @app.after_serving
     async def _shutdown_cleanup():
         # stop inference tasks
-        for cam_id in list(inference_tasks.keys()):
-            try:
-                await stop_camera_task(cam_id, inference_tasks, frame_queues)
-            except Exception:
-                pass
+        tasks = [
+            stop_camera_task(cam_id, inference_tasks, frame_queues)
+            for cam_id in list(inference_tasks.keys())
+        ]
+        await asyncio.gather(*tasks, return_exceptions=True)
         # stop roi tasks
-        for cam_id in list(roi_tasks.keys()):
-            try:
-                await stop_camera_task(cam_id, roi_tasks, roi_frame_queues)
-            except Exception:
-                pass
+        tasks = [
+            stop_camera_task(cam_id, roi_tasks, roi_frame_queues)
+            for cam_id in list(roi_tasks.keys())
+        ]
+        await asyncio.gather(*tasks, return_exceptions=True)
         # close result queues
         for cam_id, q in list(roi_result_queues.items()):
             try:
