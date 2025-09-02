@@ -265,9 +265,10 @@ async def restore_service_state() -> None:
 
 
 # ใช้ decorator ให้แน่ใจว่า hook ทำงานแน่
-@app.before_serving
 async def _on_startup():
     await restore_service_state()
+if hasattr(app, "before_serving"):
+    app.before_serving(_on_startup)
 
 
 # ========== stop helpers ==========
@@ -292,7 +293,6 @@ async def _quit():
     return Response("shutting down", status=202, mimetype="text/plain")
 
 
-@app.after_serving
 async def _shutdown_cleanup():
     await asyncio.gather(
         *[_safe_stop(cid, inference_tasks, frame_queues) for cid in list(inference_tasks.keys())],
@@ -306,6 +306,8 @@ async def _shutdown_cleanup():
     gc.collect()
     # schedule trim after event loop settles
     asyncio.create_task(_deferred_trim(1.0))
+if hasattr(app, "after_serving"):
+    app.after_serving(_shutdown_cleanup)
 
 
 # =========================
@@ -1161,12 +1163,17 @@ async def start_inference(cam_id: str):
 async def stop_inference(cam_id: str):
     # ตั้งสัญญาณหยุดก่อน เพื่อให้ลูป/โมดูลไม่ส่งผลเพิ่ม
     set_stop_flag(cam_id, True)
-
     _, resp, status = await stop_camera_task(cam_id, inference_tasks, frame_queues)
+
+    # เผื่อมีงาน ROI stream ค้างอยู่ ให้หยุดด้วย
+    if roi_tasks.get(cam_id) and not roi_tasks[cam_id].done():
+        await stop_camera_task(cam_id, roi_tasks, roi_frame_queues)
+
     queue = roi_result_queues.get(cam_id)
     if queue is not None:
         await queue.put(None)
         roi_result_queues.pop(cam_id, None)
+
     # clear cached ROI data and flags
     inference_rois.pop(cam_id, None)
     inference_groups.pop(cam_id, None)
@@ -1175,7 +1182,12 @@ async def stop_inference(cam_id: str):
 
     _free_cam_state(cam_id)
     save_service_state()
-    # schedule safe trim shortly after stop
+
+    # คืนหน่วยความจำให้เร็วที่สุด
+    gc.collect()
+    _malloc_trim_now()
+
+    # schedule safe trim shortly after stop เผื่อมีเศษเหลือ
     asyncio.create_task(_deferred_trim(1.0))
     return jsonify(resp), status
 
