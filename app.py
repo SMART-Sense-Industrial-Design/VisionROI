@@ -24,7 +24,17 @@ try:
 except Exception:
     ConnectionClosed = Exception
 
-import signal  # signals
+import signal
+import faulthandler
+
+# ========== Enable native crash dumps (helps investigate any segfaults) ==========
+try:
+    faulthandler.enable()  # python trace on fatal signals
+    # show native backtrace on SIGSEGV/SIGABRT too (doesn't prevent crash, just prints)
+    faulthandler.register(signal.SIGSEGV, all_threads=True, chain=True)
+    faulthandler.register(signal.SIGABRT, all_threads=True, chain=True)
+except Exception:
+    pass
 
 # === Runtime state ===
 camera_workers: dict[str, CameraWorker | None] = {}
@@ -50,21 +60,10 @@ ALLOWED_ROI_DIR = os.path.realpath("data_sources")
 
 
 # =========================
-# Memory helpers (free & trim)
+# Memory helpers (free refs; NO ctypes/malloc_trim)
 # =========================
-def _malloc_trim():
-    """Try to return free heap pages back to the OS (Linux/glibc)."""
-    try:
-        import ctypes
-        libc = ctypes.CDLL("libc.so.6")
-        libc.malloc_trim(0)
-    except Exception:
-        pass
-
-
 def _free_cam_state(cam_id: str):
     """Drop all references for this camera to allow GC to reclaim big buffers."""
-    # Drop conf/state that may hold refs
     camera_sources.pop(cam_id, None)
     camera_resolutions.pop(cam_id, None)
     active_sources.pop(cam_id, None)
@@ -72,7 +71,6 @@ def _free_cam_state(cam_id: str):
     inference_groups.pop(cam_id, None)
     inference_rois.pop(cam_id, None)
 
-    # Queues: drain & drop
     q = frame_queues.pop(cam_id, None)
     if q is not None:
         with contextlib.suppress(Exception):
@@ -91,12 +89,8 @@ def _free_cam_state(cam_id: str):
             while not rres.empty():
                 rres.get_nowait()
 
-    # Locks
     camera_locks.pop(cam_id, None)
-
-    # GC & trim
-    gc.collect()
-    _malloc_trim()
+    gc.collect()  # rely on CPython GC; do NOT call malloc_trim on Jetson
 
 
 # =========================
@@ -185,38 +179,13 @@ async def _safe_stop(cam_id: str,
         pass
 
 
-# ========== Graceful shutdown (fast & robust) ==========
-_SHUTTING_DOWN = False  # prevent reentry
-
-async def _shutdown_cleanup_concurrent():
-    # run after_serving cleanup but cap time
-    if "_shutdown_cleanup" in globals():
-        with contextlib.suppress(Exception, asyncio.TimeoutError):
-            await asyncio.wait_for(_shutdown_cleanup(), timeout=2.0)
-
-async def _graceful_exit():
-    """Cancel tasks, unblock queues, release cameras, then exit fast."""
-    global _SHUTTING_DOWN
-    if _SHUTTING_DOWN:
-        return
-    _SHUTTING_DOWN = True
-    with contextlib.suppress(Exception):
-        await _shutdown_cleanup_concurrent()
-    # allow 202 response to flush
-    await asyncio.sleep(0.05)
-    os._exit(0)
-
-def _sync_signal_handler(signum, frame):
-    """Ensure SIGTERM/SIGINT triggers the same fast path."""
-    try:
-        loop = asyncio.get_event_loop()
-        loop.call_soon_threadsafe(lambda: asyncio.create_task(_graceful_exit()))
-    except RuntimeError:
-        os._exit(0)
-
-# install sync handlers early (more reliable than loop.add_signal_handler for our case)
-signal.signal(signal.SIGTERM, _sync_signal_handler)
-signal.signal(signal.SIGINT,  _sync_signal_handler)
+# ========== Graceful shutdown (simple & robust) ==========
+# We avoid os._exit and any ctypes. Let uvicorn/Quart handle lifespan and run our after_serving cleanup.
+@app.post("/_quit")
+async def _quit():
+    # trigger normal SIGTERM which uvicorn handles gracefully
+    asyncio.get_event_loop().call_soon(lambda: os.kill(os.getpid(), signal.SIGTERM))
+    return Response("shutting down", status=202, mimetype="text/plain")
 
 
 # Close all tasks/cameras concurrently at shutdown (Quart lifespan)
@@ -233,7 +202,6 @@ if hasattr(app, "after_serving"):
                 await q.put(None)
             roi_result_queues.pop(cam_id, None)
         gc.collect()
-        _malloc_trim()  # trim heap after shutdown cleanup
 
 
 # =========================
@@ -264,19 +232,9 @@ async def inference_page() -> str:
     return await render_template("inference_page.html")
 
 
-# Health & quit endpoints (used by systemd)
 @app.get("/_healthz")
 async def _healthz():
     return "ok", 200
-
-
-@app.post("/_quit")
-async def _quit():
-    global _SHUTTING_DOWN
-    if _SHUTTING_DOWN:
-        return Response("already shutting down", status=202, mimetype="text/plain")
-    asyncio.create_task(_graceful_exit())
-    return Response("shutting down", status=202, mimetype="text/plain")
 
 
 # =========================
@@ -623,12 +581,11 @@ async def stop_camera_task(
             await worker.stop()
             camera_workers.pop(cam_id, None)
 
-            # NEW: fully free per-camera state & trim memory
+            # fully free per-camera state
             _free_cam_state(cam_id)
 
             del worker
             gc.collect()
-            _malloc_trim()
 
         return task, {"status": status, "cam_id": cam_id}, 200
 
@@ -1052,16 +1009,11 @@ async def stop_inference(cam_id: str):
     if queue is not None:
         await queue.put(None)
         roi_result_queues.pop(cam_id, None)
-    # clear cached ROI data and flags
     inference_rois.pop(cam_id, None)
     inference_groups.pop(cam_id, None)
     save_roi_flags.pop(cam_id, None)
 
-    # NEW: fully free per-camera state & trim memory
     _free_cam_state(cam_id)
-    gc.collect()
-    _malloc_trim()
-
     save_service_state()
     return jsonify(resp), status
 
@@ -1088,12 +1040,7 @@ async def start_roi_stream(cam_id: str):
 @app.route('/stop_roi_stream/<string:cam_id>', methods=["POST"])
 async def stop_roi_stream(cam_id: str):
     _, resp, status = await stop_camera_task(cam_id, roi_tasks, roi_frame_queues)
-
-    # NEW: free state & trim for ROI-only mode too
     _free_cam_state(cam_id)
-    gc.collect()
-    _malloc_trim()
-
     return jsonify(resp), status
 
 
@@ -1136,17 +1083,25 @@ if __name__ == "__main__":
     parser.add_argument("--use-uvicorn", action="store_true", help="Run with uvicorn instead of built-in server")
     args = parser.parse_args()
 
-    if args.use_uvicorn:
+    use_uvicorn = True if args.use_uvicorn or True else False  # keep uvicorn
+
+    if use_uvicorn:
         import uvicorn
-        uvicorn.run(
-            "app:app",
+        uvicorn_kwargs = dict(
             host="0.0.0.0",
             port=args.port,
             reload=False,
             lifespan="on",
+            workers=1,
             timeout_keep_alive=2,
             timeout_graceful_shutdown=2,
-            workers=1,
         )
+        # บน macOS: ใช้ pure-Python stack เพื่อตัด C-extensions (uvloop/httptools) ที่ชอบชนกับ OpenCV
+        if sys.platform == "darwin":
+            uvicorn_kwargs.update({
+                "loop": "asyncio",  # แทน uvloop
+                "http": "h11",      # แทน httptools
+            })
+        uvicorn.run("app:app", **uvicorn_kwargs)
     else:
         app.run(port=args.port)
