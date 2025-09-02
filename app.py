@@ -1,5 +1,9 @@
 from quart import Quart, render_template, websocket, request, jsonify, send_file, redirect, Response
 import asyncio
+import os
+import sys
+import platform
+import argparse
 import cv2
 from camera_worker import CameraWorker
 try:
@@ -10,9 +14,6 @@ import json
 import base64
 import shutil
 import importlib.util
-import os
-import sys
-import argparse
 from types import ModuleType
 from pathlib import Path
 import contextlib
@@ -27,10 +28,20 @@ except Exception:
 import signal
 import faulthandler
 
-# ========== Enable native crash dumps (helps investigate any segfaults) ==========
+# ---------- stability: limit threads (helps memory & races) ----------
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+os.environ.setdefault("NUMEXPR_NUM_THREADS", "1")
+os.environ.setdefault("MKL_NUM_THREADS", "1")
+os.environ.setdefault("MKL_THREADING_LAYER", "GNU")
 try:
-    faulthandler.enable()  # python trace on fatal signals
-    # show native backtrace on SIGSEGV/SIGABRT too (doesn't prevent crash, just prints)
+    cv2.setNumThreads(1)
+except Exception:
+    pass
+
+# ---------- crash backtrace (won't prevent crash, just logs) ----------
+try:
+    faulthandler.enable()
     faulthandler.register(signal.SIGSEGV, all_threads=True, chain=True)
     faulthandler.register(signal.SIGABRT, all_threads=True, chain=True)
 except Exception:
@@ -60,10 +71,54 @@ ALLOWED_ROI_DIR = os.path.realpath("data_sources")
 
 
 # =========================
-# Memory helpers (free refs; NO ctypes/malloc_trim)
+# Memory helpers
 # =========================
+def _is_idle() -> bool:
+    """ไม่มี worker/task เหลือ และคิวว่างทั้งหมด"""
+    if any((t and not t.done()) for t in inference_tasks.values()):
+        return False
+    if any((t and not t.done()) for t in roi_tasks.values()):
+        return False
+    if camera_workers:
+        return False
+    # queues must be gone or empty
+    for q in list(frame_queues.values()) + list(roi_frame_queues.values()) + list(roi_result_queues.values()):
+        try:
+            if q is not None and (not q.empty()):
+                return False
+        except Exception:
+            pass
+    return True
+
+
+def _supports_trim() -> bool:
+    return sys.platform.startswith("linux")
+
+
+def _malloc_trim_now() -> None:
+    """เรียก malloc_trim เฉพาะ Linux และเมื่อ idle จริง ๆ เท่านั้น"""
+    if not _supports_trim():
+        return
+    if not _is_idle():
+        return
+    try:
+        import ctypes, ctypes.util
+        libc = ctypes.CDLL(ctypes.util.find_library("c"))
+        if hasattr(libc, "malloc_trim"):
+            libc.malloc_trim(0)
+    except Exception:
+        pass
+
+
+async def _deferred_trim(delay: float = 1.0):
+    """หน่วงเวลาเล็กน้อย รอทุกอย่างสงบก่อน แล้วค่อย trim (Linux เท่านั้น)"""
+    await asyncio.sleep(delay)
+    gc.collect()
+    _malloc_trim_now()
+
+
 def _free_cam_state(cam_id: str):
-    """Drop all references for this camera to allow GC to reclaim big buffers."""
+    """ตัด references ทั้งหมดของกล้องนี้"""
     camera_sources.pop(cam_id, None)
     camera_resolutions.pop(cam_id, None)
     active_sources.pop(cam_id, None)
@@ -75,22 +130,22 @@ def _free_cam_state(cam_id: str):
     if q is not None:
         with contextlib.suppress(Exception):
             while not q.empty():
-                q.get_nowait()
+                _ = q.get_nowait()
 
     rq = roi_frame_queues.pop(cam_id, None)
     if rq is not None:
         with contextlib.suppress(Exception):
             while not rq.empty():
-                rq.get_nowait()
+                _ = rq.get_nowait()
 
     rres = roi_result_queues.pop(cam_id, None)
     if rres is not None:
         with contextlib.suppress(Exception):
             while not rres.empty():
-                rres.get_nowait()
+                _ = rres.get_nowait()
 
     camera_locks.pop(cam_id, None)
-    gc.collect()  # rely on CPython GC; do NOT call malloc_trim on Jetson
+    gc.collect()
 
 
 # =========================
@@ -179,18 +234,13 @@ async def _safe_stop(cam_id: str,
         pass
 
 
-# ========== Graceful shutdown (simple & robust) ==========
-# We avoid os._exit and any ctypes. Let uvicorn/Quart handle lifespan and run our after_serving cleanup.
-# Quart เวอร์ชันปัจจุบัน (และสตับในเทส) อาจไม่มีเมธอด post();
-# ใช้ route แทนเพื่อความเข้ากันได้
-@app.route("/_quit", methods=["POST"])
+# ========== Graceful shutdown ==========
+@app.post("/_quit")
 async def _quit():
-    # trigger normal SIGTERM which uvicorn handles gracefully
     asyncio.get_event_loop().call_soon(lambda: os.kill(os.getpid(), signal.SIGTERM))
     return Response("shutting down", status=202, mimetype="text/plain")
 
 
-# Close all tasks/cameras concurrently at shutdown (Quart lifespan)
 if hasattr(app, "after_serving"):
     @app.after_serving
     async def _shutdown_cleanup():
@@ -204,6 +254,8 @@ if hasattr(app, "after_serving"):
                 await q.put(None)
             roi_result_queues.pop(cam_id, None)
         gc.collect()
+        # schedule trim after event loop settles
+        asyncio.create_task(_deferred_trim(1.0))
 
 
 # =========================
@@ -234,7 +286,7 @@ async def inference_page() -> str:
     return await render_template("inference_page.html")
 
 
-@app.route("/_healthz", methods=["GET"])
+@app.get("/_healthz")
 async def _healthz():
     return "ok", 200
 
@@ -260,7 +312,7 @@ def load_custom_module(name: str) -> ModuleType | None:
 
 
 # =========================
-# Queues getters
+# Queue getters
 # =========================
 def get_frame_queue(cam_id: str) -> asyncio.Queue[bytes]:
     return frame_queues.setdefault(cam_id, asyncio.Queue(maxsize=1))
@@ -296,20 +348,30 @@ async def read_and_queue_frame(
     if frame is None:
         return
     try:
-        encoded, buffer = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
+        ok, buffer = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
+        if not ok or buffer is None:
+            await asyncio.sleep(0.05)
+            return
+        frame_bytes = buffer.tobytes() if hasattr(buffer, "tobytes") else bytes(buffer)
     except Exception:
         await asyncio.sleep(0.05)
         return
-    if not encoded or buffer is None:
-        await asyncio.sleep(0.05)
-        return
-    frame_bytes = buffer.tobytes() if hasattr(buffer, "tobytes") else buffer
-    if queue.full():
+    finally:
+        # drop heavy arrays ASAP
         try:
-            queue.get_nowait()
-        except asyncio.QueueEmpty:
+            del frame
+        except Exception:
             pass
+        try:
+            del buffer
+        except Exception:
+            pass
+    if queue.full():
+        with contextlib.suppress(asyncio.QueueEmpty):
+            queue.get_nowait()
     await queue.put(frame_bytes)
+    # drop bytes ref too
+    frame_bytes = None
     await asyncio.sleep(0.04)
 
 
@@ -323,7 +385,9 @@ async def run_inference_loop(cam_id: str):
         rois = inference_rois.get(cam_id, [])
         forced_group = inference_groups.get(cam_id)
         if not rois:
-            return cv2.resize(frame, (0, 0), fx=0.5, fy=0.5)
+            out = cv2.resize(frame, (0, 0), fx=0.5, fy=0.5)
+            del frame
+            return out
 
         save_flag = bool(save_roi_flags.get(cam_id))
         output = None
@@ -340,12 +404,11 @@ async def run_inference_loop(cam_id: str):
             if len(pts) != 4:
                 continue
             src = np.array([[p['x'], p['y']] for p in pts], dtype=np.float32)
-            color = (0, 255, 0)
-            width_a = np.linalg.norm(src[0] - src[1])
-            width_b = np.linalg.norm(src[2] - src[3])
+            width_a = float(np.linalg.norm(src[0] - src[1]))
+            width_b = float(np.linalg.norm(src[2] - src[3]))
             max_w = int(max(width_a, width_b))
-            height_a = np.linalg.norm(src[0] - src[3])
-            height_b = np.linalg.norm(src[1] - src[2])
+            height_a = float(np.linalg.norm(src[0] - src[3]))
+            height_b = float(np.linalg.norm(src[1] - src[2]))
             max_h = int(max(height_a, height_b))
             dst = np.array([[0, 0], [max_w - 1, 0], [max_w - 1, max_h - 1], [0, max_h - 1]], dtype=np.float32)
             matrix = cv2.getPerspectiveTransform(src, dst)
@@ -354,33 +417,29 @@ async def run_inference_loop(cam_id: str):
             if template is not None:
                 try:
                     roi_gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
-                except Exception:
-                    roi_gray = None
-                if roi_gray is not None:
                     if roi_gray.shape != template.shape:
                         roi_gray = cv2.resize(roi_gray, (template.shape[1], template.shape[0]))
+                    res = cv2.matchTemplate(roi_gray, template, cv2.TM_CCOEFF_NORMED)
+                    score = float(res[0][0])
+                    scores.append({'page': r.get('page', ''), 'score': score})
+                    if score > best_score:
+                        best_score = score
+                        output = r.get('page', '')
+                except Exception:
+                    pass
+                finally:
                     try:
-                        res = cv2.matchTemplate(roi_gray, template, cv2.TM_CCOEFF_NORMED)
-                        score = float(res[0][0])
-                        scores.append({'page': r.get('page', ''), 'score': score})
-                        if score > best_score:
-                            best_score = score
-                            output = r.get('page', '')
+                        del roi_gray
                     except Exception:
                         pass
-            cv2.polylines(frame, [src.astype(int)], True, color, 2)
+            # draw
+            cv2.polylines(frame, [src.astype(int)], True, (0, 255, 0), 2)
             label_pt = src[0].astype(int)
-            cv2.putText(
-                frame,
-                str(r.get('id', i + 1)),
-                (int(label_pt[0]), max(0, int(label_pt[1]) - 5)),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.5,
-                color,
-                1,
-                cv2.LINE_AA,
-            )
-
+            cv2.putText(frame, str(r.get('id', i + 1)),
+                        (int(label_pt[0]), max(0, int(label_pt[1]) - 5)),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1, cv2.LINE_AA)
+            # drop temps
+            del src, dst, matrix, roi
         if not has_page:
             output = forced_group or ''
         elif best_score <= PAGE_SCORE_THRESHOLD:
@@ -410,47 +469,41 @@ async def run_inference_loop(cam_id: str):
             if len(pts) != 4:
                 continue
             src = np.array([[p['x'], p['y']] for p in pts], dtype=np.float32)
-
-            if r.get('module'):
-                mod_name = r.get('module')
-                module_entry = module_cache.get(mod_name)
-                if module_entry is None:
-                    module = load_custom_module(mod_name)
-                    takes_source = False
-                    takes_cam_id = False
-                    if module:
-                        proc = getattr(module, 'process', None)
-                        if callable(proc):
-                            params = inspect.signature(proc).parameters
-                            takes_source = 'source' in params
-                            takes_cam_id = 'cam_id' in params
-                    module_cache[mod_name] = (module, takes_source, takes_cam_id)
-                else:
-                    module, takes_source, takes_cam_id = module_entry
-                if module is None:
-                    print(f"module '{mod_name}' not found for ROI {r.get('id', i)}")
-                else:
-                    process_fn = getattr(module, 'process', None)
-                    if not callable(process_fn):
-                        print(f"process function not found in module '{mod_name}' for ROI {r.get('id', i)}")
+            try:
+                if r.get('module'):
+                    mod_name = r.get('module')
+                    module_entry = module_cache.get(mod_name)
+                    if module_entry is None:
+                        module = load_custom_module(mod_name)
+                        takes_source = False
+                        takes_cam_id = False
+                        if module:
+                            proc = getattr(module, 'process', None)
+                            if callable(proc):
+                                params = inspect.signature(proc).parameters
+                                takes_source = 'source' in params
+                                takes_cam_id = 'cam_id' in params
+                        module_cache[mod_name] = (module, takes_source, takes_cam_id)
                     else:
-                        width_a = np.linalg.norm(src[0] - src[1])
-                        width_b = np.linalg.norm(src[2] - src[3])
+                        module, takes_source, takes_cam_id = module_entry
+                    if module is not None:
+                        width_a = float(np.linalg.norm(src[0] - src[1]))
+                        width_b = float(np.linalg.norm(src[2] - src[3]))
                         max_w = int(max(width_a, width_b))
-                        height_a = np.linalg.norm(src[0] - src[3])
-                        height_b = np.linalg.norm(src[1] - src[2])
+                        height_a = float(np.linalg.norm(src[0] - src[3]))
+                        height_b = float(np.linalg.norm(src[1] - src[2]))
                         max_h = int(max(height_a, height_b))
                         dst = np.array([[0, 0], [max_w - 1, 0], [max_w - 1, max_h - 1], [0, max_h - 1]], dtype=np.float32)
                         matrix = cv2.getPerspectiveTransform(src, dst)
                         roi = cv2.warpPerspective(frame, matrix, (max_w, max_h))
                         result_text = ''
                         try:
-                            args = [roi, r.get('id', str(i)), save_flag]
+                            args = [roi, r.get('id', str(i)), bool(save_flag)]
                             if takes_source:
                                 args.append(active_sources.get(cam_id, ''))
                             if takes_cam_id:
                                 args.append(cam_id)
-                            result = process_fn(*args)
+                            result = getattr(module, 'process')( *args )
                             if inspect.isawaitable(result):
                                 result = await result
                             if isinstance(result, str):
@@ -460,33 +513,41 @@ async def run_inference_loop(cam_id: str):
                         except Exception:
                             pass
                         try:
-                            _, roi_buf = cv2.imencode('.jpg', roi, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
-                            roi_b64 = base64.b64encode(roi_buf).decode('ascii')
-                            q = get_roi_result_queue(cam_id)
-                            payload = json.dumps({'id': r.get('id', i), 'image': roi_b64, 'text': result_text})
-                            if q.full():
-                                q.get_nowait()
-                            await q.put(payload)
+                            ok, roi_buf = cv2.imencode('.jpg', roi, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
+                            if ok and roi_buf is not None:
+                                roi_b64 = base64.b64encode(roi_buf).decode('ascii')
+                                q = get_roi_result_queue(cam_id)
+                                payload = json.dumps({'id': r.get('id', i), 'image': roi_b64, 'text': result_text})
+                                if q.full():
+                                    q.get_nowait()
+                                await q.put(payload)
                         except Exception:
                             pass
-            else:
-                print(f"module missing for ROI {r.get('id', i)}")
+                        finally:
+                            try:
+                                del roi_buf
+                            except Exception:
+                                pass
+                            try:
+                                del roi
+                            except Exception:
+                                pass
+                    else:
+                        print(f"module '{mod_name}' not found for ROI {r.get('id', i)}")
+                else:
+                    print(f"module missing for ROI {r.get('id', i)}")
+            finally:
+                src_int = src.astype(int)
+                cv2.polylines(frame, [src_int], True, (255, 0, 0), 2)
+                label_pt = src_int[0]
+                cv2.putText(frame, str(r.get('id', i + 1)),
+                            (int(label_pt[0]), max(0, int(label_pt[1]) - 5)),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 1, cv2.LINE_AA)
+                del src_int, src
 
-            src_int = src.astype(int)
-            cv2.polylines(frame, [src_int], True, (255, 0, 0), 2)
-            label_pt = src_int[0]
-            cv2.putText(
-                frame,
-                str(r.get('id', i + 1)),
-                (int(label_pt[0]), max(0, int(label_pt[1]) - 5)),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.5,
-                (255, 0, 0),
-                1,
-                cv2.LINE_AA,
-            )
-
-        return cv2.resize(frame, (0, 0), fx=0.5, fy=0.5)
+        out = cv2.resize(frame, (0, 0), fx=0.5, fy=0.5)
+        del frame
+        return out
 
     queue = get_frame_queue(cam_id)
     try:
@@ -567,10 +628,8 @@ async def stop_camera_task(
                 with contextlib.suppress(Exception):
                     await asyncio.wait_for(queue.put(None), timeout=0.2)
                 for _ in range(3):
-                    try:
+                    with contextlib.suppress(asyncio.QueueEmpty):
                         queue.get_nowait()
-                    except asyncio.QueueEmpty:
-                        break
 
         inf_task = inference_tasks.get(cam_id)
         roi_task = roi_tasks.get(cam_id)
@@ -582,12 +641,15 @@ async def stop_camera_task(
         ):
             await worker.stop()
             camera_workers.pop(cam_id, None)
-
             # fully free per-camera state
             _free_cam_state(cam_id)
-
-            del worker
+            try:
+                del worker
+            except Exception:
+                pass
             gc.collect()
+            # schedule safe trim a bit later
+            asyncio.create_task(_deferred_trim(1.0))
 
         return task, {"status": status, "cam_id": cam_id}, 200
 
@@ -605,6 +667,8 @@ async def ws(cam_id: str):
                 await websocket.close(code=1000)
                 break
             await websocket.send(frame_bytes)
+            # drop ref immediately
+            frame_bytes = None
     except ConnectionClosed:
         pass
     finally:
@@ -622,6 +686,7 @@ async def ws_roi(cam_id: str):
                 await websocket.close(code=1000)
                 break
             await websocket.send(frame_bytes)
+            frame_bytes = None
     except ConnectionClosed:
         pass
     finally:
@@ -639,6 +704,7 @@ async def ws_roi_result(cam_id: str):
                 await websocket.close(code=1000)
                 break
             await websocket.send(data)
+            data = None
     except ConnectionClosed:
         pass
     finally:
@@ -975,10 +1041,8 @@ async def perform_start_inference(cam_id: str, rois=None, group: str | None = No
 
     q = get_roi_result_queue(cam_id)
     while not q.empty():
-        try:
+        with contextlib.suppress(asyncio.QueueEmpty):
             q.get_nowait()
-        except asyncio.QueueEmpty:
-            break
 
     await start_camera_task(cam_id, inference_tasks, run_inference_loop)
     if save_state:
@@ -1007,21 +1071,19 @@ async def start_inference(cam_id: str):
 @app.route('/stop_inference/<string:cam_id>', methods=["POST"])
 async def stop_inference(cam_id: str):
     _, resp, status = await stop_camera_task(cam_id, inference_tasks, frame_queues)
-
-    queue = roi_result_queues.pop(cam_id, None)
+    queue = roi_result_queues.get(cam_id)
     if queue is not None:
-        # นำ None ใส่คิวเพื่อปิดการส่งผลลัพธ์ แล้วล้างคิวออกให้หมด
         await queue.put(None)
-        with contextlib.suppress(asyncio.QueueEmpty):
-            while not queue.empty():
-                queue.get_nowait()
-
+        roi_result_queues.pop(cam_id, None)
+    # clear cached ROI data and flags
     inference_rois.pop(cam_id, None)
     inference_groups.pop(cam_id, None)
     save_roi_flags.pop(cam_id, None)
 
     _free_cam_state(cam_id)
     save_service_state()
+    # schedule safe trim shortly after stop
+    asyncio.create_task(_deferred_trim(1.0))
     return jsonify(resp), status
 
 
@@ -1036,10 +1098,8 @@ async def start_roi_stream(cam_id: str):
             return jsonify({"status": "error", "cam_id": cam_id}), 400
     queue = get_roi_frame_queue(cam_id)
     while not queue.empty():
-        try:
+        with contextlib.suppress(asyncio.QueueEmpty):
             queue.get_nowait()
-        except asyncio.QueueEmpty:
-            break
     _, resp, status = await start_camera_task(cam_id, roi_tasks, run_roi_loop)
     return jsonify(resp), status
 
@@ -1048,6 +1108,7 @@ async def start_roi_stream(cam_id: str):
 async def stop_roi_stream(cam_id: str):
     _, resp, status = await stop_camera_task(cam_id, roi_tasks, roi_frame_queues)
     _free_cam_state(cam_id)
+    asyncio.create_task(_deferred_trim(1.0))
     return jsonify(resp), status
 
 
@@ -1078,7 +1139,15 @@ async def ws_snapshot(cam_id: str):
     ok, buffer = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
     if not ok:
         return "Encode error", 500
-    return Response(buffer.tobytes(), mimetype="image/jpeg")
+    try:
+        data = buffer.tobytes()
+    finally:
+        try:
+            del frame
+            del buffer
+        except Exception:
+            pass
+    return Response(data, mimetype="image/jpeg")
 
 
 # =========================
@@ -1090,7 +1159,8 @@ if __name__ == "__main__":
     parser.add_argument("--use-uvicorn", action="store_true", help="Run with uvicorn instead of built-in server")
     args = parser.parse_args()
 
-    use_uvicorn = True if args.use_uvicorn or True else False  # keep uvicorn
+    # default to uvicorn
+    use_uvicorn = True if args.use_uvicorn or True else False
 
     if use_uvicorn:
         import uvicorn
@@ -1103,12 +1173,9 @@ if __name__ == "__main__":
             timeout_keep_alive=2,
             timeout_graceful_shutdown=2,
         )
-        # บน macOS: ใช้ pure-Python stack เพื่อตัด C-extensions (uvloop/httptools) ที่ชอบชนกับ OpenCV
+        # On macOS, use pure-Python backends to avoid C-extension races
         if sys.platform == "darwin":
-            uvicorn_kwargs.update({
-                "loop": "asyncio",  # แทน uvloop
-                "http": "h11",      # แทน httptools
-            })
+            uvicorn_kwargs.update({"loop": "asyncio", "http": "h11"})
         uvicorn.run("app:app", **uvicorn_kwargs)
     else:
         app.run(port=args.port)
