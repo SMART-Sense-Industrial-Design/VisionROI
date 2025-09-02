@@ -11,9 +11,8 @@ import threading
 from pathlib import Path
 from queue import Queue, Empty
 from dataclasses import dataclass
+from typing import Any, Dict
 import numpy as np
-from typing import Any
-
 
 try:
     import easyocr
@@ -32,6 +31,9 @@ _data_sources_root = Path(__file__).resolve().parents[2] / "data_sources"
 _reader: Any | None = None
 _reader_lock = threading.Lock()        # create/destroy reader
 _reader_call_lock = threading.Lock()   # serialize readtext() calls
+
+# ===== NEW: stop events per source =====
+_stop_events: Dict[str, threading.Event] = {}   # key = source
 
 # ===== per-ROI queues & workers =====
 @dataclass
@@ -79,6 +81,7 @@ def _get_reader() -> Any:
     global _reader
     with _reader_lock:
         if _reader is None:
+            # ปรับภาษาตามต้องการได้
             _reader = easyocr.Reader(["en", "th"], gpu=False)
         return _reader
 
@@ -97,7 +100,7 @@ def _run_ocr(frame_bgr) -> str:
     reader = _get_reader()
     with _reader_call_lock:
         ocr_result = reader.readtext(frame_bgr, detail=0)
-    return " ".join(ocr_result)
+    return " ".join(map(str, ocr_result))
 
 
 def _save_frame_if_needed(frame_bgr, source: str, roi_id: int | str | None, save: bool) -> None:
@@ -113,42 +116,59 @@ def _save_frame_if_needed(frame_bgr, source: str, roi_id: int | str | None, save
 
 
 def _worker_loop_for_key(key: tuple[str, int | str | None]) -> None:
-    """Worker ต่อ ROI: ดึงจากคิวของ key นี้เท่านั้น"""
+    """
+    Worker ต่อ ROI: ดึงจากคิวของ key นี้เท่านั้น
+    NEW: เช็ค stop_event ของ source และหยุดทันทีเมื่อถูกสั่งหยุด
+    """
     q = _queues[key]
     source, roi_id = key
-    logger.info(f"OCR worker started for source={source} roi_id={roi_id}")
-    while True:
-        try:
-            task: OcrTask = q.get(timeout=1.0)
-        except Empty:
-            continue
+    src = (source or "")
+    stop_event = _stop_events.setdefault(src, threading.Event())
 
-        try:
-            text = _run_ocr(task.frame_bgr)
-            logger.info(
-                f"source={task.source} roi_id={task.roi_id} OCR result: {text}"
-                if task.roi_id is not None
-                else f"source={task.source} OCR result: {text}"
-            )
-            _save_frame_if_needed(task.frame_bgr, task.source, task.roi_id, task.save)
+    logger.info(f"OCR worker started for source={src} roi_id={roi_id}")
+    try:
+        while True:
+            if stop_event.is_set():
+                break
 
-            with _state_lock:
-                _last_ocr_results[key] = text
-                _last_ocr_times[key] = time.monotonic()
-        except Exception as e:  # pragma: no cover
-            logger.exception(f"OCR error for {key}: {e}")
-            # ป้องกัน spam: อัพเดตเวลาแม้ผิดพลาด
-            with _state_lock:
-                _last_ocr_times[key] = time.monotonic()
-        finally:
-            q.task_done()
+            try:
+                task: OcrTask = q.get(timeout=0.5)
+            except Empty:
+                continue
+
+            try:
+                if stop_event.is_set():
+                    q.task_done()
+                    break
+
+                text = _run_ocr(task.frame_bgr)
+                logger.info(
+                    f"source={task.source} roi_id={task.roi_id} OCR result: {text}"
+                    if task.roi_id is not None
+                    else f"source={task.source} OCR result: {text}"
+                )
+                _save_frame_if_needed(task.frame_bgr, task.source, task.roi_id, task.save)
+
+                with _state_lock:
+                    _last_ocr_results[key] = text
+                    _last_ocr_times[key] = time.monotonic()
+            except Exception as e:  # pragma: no cover
+                logger.exception(f"OCR error for {key}: {e}")
+                with _state_lock:
+                    _last_ocr_times[key] = time.monotonic()
+            finally:
+                q.task_done()
+    finally:
+        logger.info(f"OCR worker stopped for source={src} roi_id={roi_id}")
 
 
 def _ensure_queue_and_worker(key: tuple[str, int | str | None], max_queue_size: int) -> None:
     """สร้างคิว/เวิร์กเกอร์สำหรับ key ถ้ายังไม่มี"""
+    src = (key[0] or "")
     with _qw_lock:
         if key not in _queues:
             _queues[key] = Queue(maxsize=max_queue_size)
+        _stop_events.setdefault(src, threading.Event())  # เตรียม stop_event เสมอ
         if key not in _workers:
             t = threading.Thread(target=_worker_loop_for_key, args=(key,), daemon=True)
             t.start()
@@ -169,8 +189,7 @@ def _enqueue_latest_with_drop_oldest(q: Queue[OcrTask], item: OcrTask) -> None:
                 _ = q.get_nowait()  # drop oldest
                 q.task_done()
             except Empty:
-                # มีโอกาสเล็กน้อยที่คิวไม่เต็มแล้วในจังหวะนี้ ให้ลอง put อีกครั้ง
-                pass
+                pass  # ลอง put อีกรอบในลูป
 
 
 def process(
@@ -191,7 +210,7 @@ def process(
 
     พารามิเตอร์:
       - interval: เวลาขั้นต่ำต่อ ROI ก่อนจะ OCR ใหม่
-      - max_queue_size: ขนาดสูงสุดต่อคิวของ ROI แต่ละตัว (ค่าเริ่มต้น 4)
+      - max_queue_size: ขนาดสูงสุดต่อคิวของ ROI แต่ละตัว (ค่าเริ่มต้น 3)
     """
     _configure_logger(source)
 
@@ -208,8 +227,15 @@ def process(
     else:
         frame_bgr = frame
 
-    key = (source or "", roi_id)
+    src = (source or "")
+    key = (src, roi_id)
     now = time.monotonic()
+
+    # NEW: ถ้า source ถูกสั่งหยุดอยู่ ห้าม enqueue งานใหม่ ให้คืนค่าล่าสุดทันที
+    ev = _stop_events.get(src)
+    if ev is not None and ev.is_set():
+        with _state_lock:
+            return _last_ocr_results.get(key, "")
 
     # สร้างคิวและเวิร์กเกอร์ของ ROI นี้ถ้ายังไม่มี
     _ensure_queue_and_worker(key, max_queue_size=max_queue_size)
@@ -227,3 +253,43 @@ def process(
         _enqueue_latest_with_drop_oldest(q, task)
 
     return result_text
+
+
+# ===== NEW: public API สำหรับกด Stop จากฝั่ง app.py =====
+def stop_workers_for_source(source: str) -> None:
+    """
+    หยุด OCR ของ source:
+    - set stop_event (ให้ worker ออกเองเร็วที่สุด)
+    - ล้างคิว/ลบ worker/ลบ state ต่อ ROI
+    - ปล่อย EasyOCR reader เพื่อลด memory
+    """
+    src = (source or "")
+    ev = _stop_events.setdefault(src, threading.Event())
+    ev.set()
+
+    # ล้างทุกคิวของ source นี้
+    with _qw_lock:
+        target_keys = [k for k in list(_queues.keys()) if (k[0] or "") == src]
+        for k in target_keys:
+            q = _queues.pop(k, None)
+            if q is not None:
+                try:
+                    while True:
+                        q.get_nowait()
+                        q.task_done()
+                except Empty:
+                    pass
+            _workers.pop(k, None)
+            with _state_lock:
+                _last_ocr_results.pop(k, None)
+                _last_ocr_times.pop(k, None)
+
+    # ปล่อย reader เพื่อลด memory/handle
+    global _reader
+    try:
+        _reader = None
+    except Exception:
+        pass
+
+    # พร้อมสำหรับ start ใหม่ภายหลัง
+    _stop_events.pop(src, None)

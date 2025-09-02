@@ -47,6 +47,18 @@ try:
 except Exception:
     pass
 
+# ===== เพิ่ม import ไว้ด้านบนไฟล์ (ใกล้ ๆ imports อื่น) =====
+try:
+    from inference_modules.rapid_ocr.custom import stop_workers_for_source as rapidocr_stop
+except Exception:
+    rapidocr_stop = None  # rapidocr ไม่ได้ใช้/ไม่ติดตั้งใน env นี้
+
+try:
+    from inference_modules.easy_ocr.custom import stop_workers_for_source as easyocr_stop
+except Exception:
+    easyocr_stop = None  # easyocr ไม่ได้ใช้/ไม่ติดตั้งใน env นี้
+
+
 # === Runtime state ===
 camera_workers: dict[str, CameraWorker | None] = {}
 camera_sources: dict[str, int | str] = {}
@@ -1157,27 +1169,67 @@ async def start_inference(cam_id: str):
     return jsonify({"status": "error", "cam_id": cam_id}), 400
 
 
+# ===== แทนที่ฟังก์ชันนี้ทั้งก้อน =====
 @app.route('/stop_inference/<string:cam_id>', methods=["POST"])
 async def stop_inference(cam_id: str):
-    # ตั้งสัญญาณหยุดก่อน เพื่อให้ลูป/โมดูลไม่ส่งผลเพิ่ม
+    # 1) ตั้ง stop flag ให้ฝั่ง producer/UI/loop หยุด enqueue งานใหม่
     set_stop_flag(cam_id, True)
 
+    # 2) ระบุชื่อ source/group ที่ใช้เป็น key ของ OCR workers
+    #    (ถ้ามี mapping อยู่แล้วให้ใช้; ถ้าไม่มี ใช้ cam_id เป็น fallback)
+    source_name = inference_groups.get(cam_id) or cam_id or ""
+
+    # 3) หยุด OCR workers ของ source นี้ทันที (ทั้ง rapid_ocr และ easy_ocr ตามที่มี)
+    try:
+        mode = inference_mode.get(cam_id)  # ถ้ามีเก็บโหมดไว้ เช่น "rapid_ocr" / "easy_ocr"
+    except Exception:
+        mode = None
+
+    try:
+        if mode == "rapid_ocr":
+            if rapidocr_stop:
+                rapidocr_stop(source_name)
+        elif mode == "easy_ocr":
+            if easyocr_stop:
+                easyocr_stop(source_name)
+        else:
+            # ไม่รู้โหมดแน่ชัด: สั่งหยุดทั้งสองฝั่งอย่างปลอดภัย (ถ้า module มี)
+            if rapidocr_stop:
+                rapidocr_stop(source_name)
+            if easyocr_stop:
+                easyocr_stop(source_name)
+    except Exception as e:
+        # กันพัง: ถ้าการหยุด OCR มีปัญหา ให้ log ไว้แล้วไปต่อ
+        print(f"stop_inference: failed to stop OCR workers for source={source_name}: {e}")
+
+    # 4) หยุดกล้อง/งานหลักของกล้อง (consumer ของเฟรม)
     _, resp, status = await stop_camera_task(cam_id, inference_tasks, frame_queues)
+
+    # 5) ส่ง sentinel ปิดช่องส่งผลลัพธ์ ROI (ถ้ามี) แล้วล้างออก
     queue = roi_result_queues.get(cam_id)
     if queue is not None:
-        await queue.put(None)
+        try:
+            await queue.put(None)  # ให้ consumer downstream ออกจากลูป
+        except Exception:
+            pass
         roi_result_queues.pop(cam_id, None)
-    # clear cached ROI data and flags
+
+    # 6) ล้าง cache/flags ฝั่งแอป (หลังจากหยุด OCR + กล้องแล้ว)
     inference_rois.pop(cam_id, None)
     inference_groups.pop(cam_id, None)
     save_roi_flags.pop(cam_id, None)
     inference_mode.pop(cam_id, None)
 
+    # 7) เคลียร์ state/รีซอร์สของกล้อง
     _free_cam_state(cam_id)
     save_service_state()
-    # schedule safe trim shortly after stop
+
+    # 8) ดีเลย์สั้น ๆ ให้ worker ที่เช็ค stop_event ออกหมดก่อน trim
+    #    (เพราะฝั่ง OCR worker มี timeout 0.5s ในการตื่นขึ้นมาแล้วออกเอง)
     asyncio.create_task(_deferred_trim(1.0))
+
     return jsonify(resp), status
+
 
 
 @app.route('/start_roi_stream/<string:cam_id>', methods=["POST"])
