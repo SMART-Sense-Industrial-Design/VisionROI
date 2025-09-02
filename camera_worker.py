@@ -188,3 +188,8 @@ class CameraWorker:
                 cap.release()
             except Exception:
                 pass
+
+    # เข้าถึง VideoCapture จากภายนอกเพื่อการทดสอบ
+    @property
+    def cap(self):
+        return self._cap
