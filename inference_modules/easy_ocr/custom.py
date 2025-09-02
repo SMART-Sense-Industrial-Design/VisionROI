@@ -180,7 +180,7 @@ def process(
     source: str = "",
     cam_id: int | None = None,
     interval: float = 1.0,
-    max_queue_size: int = 4,
+    max_queue_size: int = 3,
 ):
     """
     ประมวลผลแบบ "คิวแยกต่อ ROI":

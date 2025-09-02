@@ -236,7 +236,7 @@ def process(
     source: str = "",
     cam_id: int | None = None,
     interval: float = 3.0,
-    max_queue_size: int = 4,
+    max_queue_size: int = 3,
 ):
     """
     ประมวลผล ROI + RapidOCR แบบ "คิวแยกต่อ ROI":
