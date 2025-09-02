@@ -158,9 +158,12 @@ if hasattr(app, "after_serving"):
 def _handle_sigterm(*_: object) -> None:
     """Handle SIGTERM/SIGINT by initiating app shutdown."""
     try:
-        asyncio.create_task(app.shutdown())
+        loop = asyncio.get_event_loop()
+        # เริ่มทำความสะอาดทันทีเพื่อให้รีสตาร์ท service ได้เร็วขึ้น
+        loop.create_task(_shutdown_cleanup())
+        loop.create_task(app.shutdown())
     except Exception:
-        # หากปิดแอปไม่สำเร็จ พยายามเรียกทำความสะอาดทันที
+        # หากไม่สามารถสร้าง task ได้ พยายามทำความสะอาดให้มากที่สุด
         try:
             asyncio.create_task(_shutdown_cleanup())
         except Exception:
