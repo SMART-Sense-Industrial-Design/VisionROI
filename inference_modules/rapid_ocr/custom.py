@@ -9,6 +9,8 @@ import os
 from datetime import datetime
 import threading
 from pathlib import Path
+from queue import Queue, Empty
+from dataclasses import dataclass
 
 try:
     import numpy as np
@@ -28,9 +30,30 @@ _handler: TimedRotatingFileHandler | None = None
 _current_source: str | None = None
 _data_sources_root = Path(__file__).resolve().parents[2] / "data_sources"
 
+# ===== RapidOCR singleton + mutex สำหรับเรียกใช้งาน =====
 _reader = None
-_reader_lock = threading.Lock()
-_reader_run_lock = threading.Lock()
+_reader_lock = threading.Lock()        # create reader
+_reader_call_lock = threading.Lock()   # serialize reader(frame) call
+
+# ===== per-ROI queues & workers =====
+@dataclass
+class OcrTask:
+    source: str
+    roi_id: int | str | None
+    frame_bgr: "np.ndarray"
+    save: bool
+
+# key = (source, roi_id)
+_queues: dict[tuple[str, int | str | None], Queue[OcrTask]] = {}
+_workers: dict[tuple[str, int | str | None], threading.Thread] = {}
+_qw_lock = threading.Lock()  # protect _queues/_workers creation
+
+# per-(source, roi) bookkeeping
+_last_ocr_times: dict[tuple[str, int | str | None], float] = {}
+_last_ocr_results: dict[tuple[str, int | str | None], str] = {}
+_state_lock = threading.Lock()
+
+_imwrite_lock = threading.Lock()
 
 
 def _configure_logger(source: str | None) -> None:
@@ -62,13 +85,6 @@ def _get_reader():
         return _reader
 
 
-# ตัวแปรควบคุมเวลาเรียก OCR แยกตาม roi พร้อมตัวล็อกป้องกันการเข้าถึงพร้อมกัน
-last_ocr_times: dict = {}
-last_ocr_results: dict = {}
-_last_ocr_lock = threading.Lock()
-_imwrite_lock = threading.Lock()
-
-
 def _save_image_async(path, image) -> None:
     """บันทึกรูปภาพแบบแยกเธรด"""
     try:
@@ -78,63 +94,129 @@ def _save_image_async(path, image) -> None:
         logger.exception(f"Failed to save image {path}: {e}")
 
 
-def _run_ocr_async(frame, roi_id, save, source) -> None:
-    """ประมวลผล OCR และบันทึกรูปในเธรดแยก"""
-    try:
-        reader = _get_reader()
-        # RapidOCR อาจคืนผลลัพธ์เป็น tuple (result, time) หรือเพียง result อย่างเดียว
-        result = reader(frame)
-        if (
-            isinstance(result, (list, tuple))
-            and len(result) == 2
-            and isinstance(result[0], (list, tuple))
-            and not isinstance(result[1], (list, tuple, dict))
-        ):
-            ocr_result = result[0]
-        else:
-            ocr_result = result
+def _extract_text_from_rapidocr_output(result_obj) -> str:
+    """
+    รองรับรูปแบบผลลัพธ์ RapidOCR หลายแบบ:
+    - [(box, text, score), ...]
+    - ([...], timing) -> ดึงตัวแรกเป็นรายการผล
+    - dict ที่มี 'text' หรืออ็อบเจ็กต์ที่มี .text / .texts / .txts
+    """
+    # กรณีเป็น (results, something_time)
+    if (
+        isinstance(result_obj, (list, tuple))
+        and len(result_obj) == 2
+        and isinstance(result_obj[0], (list, tuple))
+        and not isinstance(result_obj[1], (list, tuple, dict))
+    ):
+        ocr_result = result_obj[0]
+    else:
+        ocr_result = result_obj
 
-        text_items: list[str] = []
-        if isinstance(ocr_result, (list, tuple)):
-            for res in ocr_result:
-                if isinstance(res, (list, tuple)) and len(res) > 1:
-                    text_items.append(str(res[1]))
-                elif isinstance(res, dict) and "text" in res:
-                    text_items.append(str(res["text"]))
-        elif isinstance(ocr_result, dict) and "text" in ocr_result:
-            text_items.append(str(ocr_result["text"]))
-        elif hasattr(ocr_result, "text"):
-            text_items.append(str(getattr(ocr_result, "text")))
-        elif hasattr(ocr_result, "texts"):
-            texts_attr = getattr(ocr_result, "texts")
-            if isinstance(texts_attr, (list, tuple)):
-                text_items.extend(str(t) for t in texts_attr)
-            elif texts_attr is not None:
-                text_items.append(str(texts_attr))
-        elif hasattr(ocr_result, "txts"):
-            txts_attr = getattr(ocr_result, "txts")
-            if isinstance(txts_attr, (list, tuple)):
-                text_items.extend(str(t) for t in txts_attr)
-            elif txts_attr is not None:
-                text_items.append(str(txts_attr))
-        text = " ".join(text_items)
+    texts: list[str] = []
+    if isinstance(ocr_result, (list, tuple)):
+        for res in ocr_result:
+            # คาดหวังรูปแบบ [box, text, score] หรือ tuple ที่ index 1 เป็นข้อความ
+            if isinstance(res, (list, tuple)) and len(res) > 1:
+                texts.append(str(res[1]))
+            elif isinstance(res, dict) and "text" in res:
+                texts.append(str(res["text"]))
+    elif isinstance(ocr_result, dict) and "text" in ocr_result:
+        texts.append(str(ocr_result["text"]))
+    elif hasattr(ocr_result, "text"):
+        texts.append(str(getattr(ocr_result, "text")))
+    elif hasattr(ocr_result, "texts"):
+        v = getattr(ocr_result, "texts")
+        if isinstance(v, (list, tuple)):
+            texts.extend(str(t) for t in v)
+        elif v is not None:
+            texts.append(str(v))
+    elif hasattr(ocr_result, "txts"):
+        v = getattr(ocr_result, "txts")
+        if isinstance(v, (list, tuple)):
+            texts.extend(str(t) for t in v)
+        elif v is not None:
+            texts.append(str(v))
+    return " ".join(texts)
 
-        logger.info(
-            f"roi_id={roi_id} OCR result: {text}" if roi_id is not None else f"OCR result: {text}"
-        )
-        with _last_ocr_lock:
-            last_ocr_results[roi_id] = text
-    except Exception as e:  # pragma: no cover - log any OCR error
-        logger.exception(f"roi_id={roi_id} OCR error: {e}")
 
-    if save:
-        base_dir = _data_sources_root / source if source else Path(__file__).resolve().parent
-        roi_folder = f"{roi_id}" if roi_id is not None else "roi"
-        save_dir = base_dir / "images" / roi_folder
-        os.makedirs(save_dir, exist_ok=True)
-        filename = datetime.now().strftime("%Y%m%d%H%M%S%f") + ".jpg"
-        path = save_dir / filename
-        _save_image_async(str(path), frame)
+def _run_ocr(frame_bgr) -> str:
+    """เรียก RapidOCR แบบ serialize เพื่อความปลอดภัย"""
+    reader = _get_reader()
+    with _reader_call_lock:
+        result = reader(frame_bgr)
+    return _extract_text_from_rapidocr_output(result)
+
+
+def _save_frame_if_needed(frame_bgr, source: str, roi_id: int | str | None, save: bool) -> None:
+    if not save:
+        return
+    base_dir = _data_sources_root / source if source else Path(__file__).resolve().parent
+    roi_folder = f"{roi_id}" if roi_id is not None else "roi"
+    save_dir = base_dir / "images" / roi_folder
+    os.makedirs(save_dir, exist_ok=True)
+    filename = datetime.now().strftime("%Y%m%d%H%M%S%f") + ".jpg"
+    path = save_dir / filename
+    _save_image_async(str(path), frame_bgr)
+
+
+def _worker_loop_for_key(key: tuple[str, int | str | None]) -> None:
+    """Worker ต่อ ROI: ดึงจากคิวของ key นี้เท่านั้น"""
+    q = _queues[key]
+    source, roi_id = key
+    logger.info(f"OCR worker started for source={source} roi_id={roi_id}")
+    while True:
+        try:
+            task: OcrTask = q.get(timeout=1.0)
+        except Empty:
+            continue
+
+        try:
+            text = _run_ocr(task.frame_bgr)
+            logger.info(
+                f"source={task.source} roi_id={task.roi_id} OCR result: {text}"
+                if task.roi_id is not None
+                else f"source={task.source} OCR result: {text}"
+            )
+            _save_frame_if_needed(task.frame_bgr, task.source, task.roi_id, task.save)
+
+            with _state_lock:
+                _last_ocr_results[key] = text
+                _last_ocr_times[key] = time.monotonic()
+        except Exception as e:  # pragma: no cover
+            logger.exception(f"OCR error for {key}: {e}")
+            # ป้องกัน spam: อัพเดตเวลาแม้ผิดพลาด
+            with _state_lock:
+                _last_ocr_times[key] = time.monotonic()
+        finally:
+            q.task_done()
+
+
+def _ensure_queue_and_worker(key: tuple[str, int | str | None], max_queue_size: int) -> None:
+    """สร้างคิว/เวิร์กเกอร์สำหรับ key ถ้ายังไม่มี"""
+    with _qw_lock:
+        if key not in _queues:
+            _queues[key] = Queue(maxsize=max_queue_size)
+        if key not in _workers:
+            t = threading.Thread(target=_worker_loop_for_key, args=(key,), daemon=True)
+            t.start()
+            _workers[key] = t
+
+
+def _enqueue_latest_with_drop_oldest(q: Queue[OcrTask], item: OcrTask) -> None:
+    """
+    ถ้าคิวเต็ม: ดรอปงานเก่าสุด 1 ชิ้น แล้วใส่ของใหม่ (เพื่อเก็บเฟรมล่าสุด)
+    """
+    while True:
+        try:
+            q.put_nowait(item)
+            return
+        except Exception:
+            try:
+                _ = q.get_nowait()  # drop oldest
+                q.task_done()
+            except Empty:
+                # race เล็กน้อย: ถ้าว่างแล้ว ให้ put ใหม่
+                pass
 
 
 def process(
@@ -144,10 +226,19 @@ def process(
     source: str = "",
     cam_id: int | None = None,
     interval: float = 3.0,
+    max_queue_size: int = 4,
 ):
-    """ประมวลผล ROI และเรียก OCR เมื่อเวลาห่างจากครั้งก่อน >= interval วินาที
-    (ค่าเริ่มต้น 3 วินาที) บันทึกรูปภาพแบบไม่บล็อกเมื่อระบุให้บันทึก"""
+    """
+    ประมวลผล ROI + RapidOCR แบบ "คิวแยกต่อ ROI":
+      - แต่ละ (source, roi_id) มีคิวและ worker ของตัวเอง
+      - ถึงเวลา (>= interval ต่อ ROI) จึง enqueue งานใหม่
+      - ถ้าคิวเต็ม จะดรอปงานเก่าสุด แล้วเก็บงานใหม่สุด (ลด memory growth)
+      - คืนค่าข้อความล่าสุดของ ROI นั้น (ถ้ายังไม่เสร็จจะเป็นค่าก่อนหน้า)
 
+    พารามิเตอร์:
+      - interval: เวลาขั้นต่ำต่อ ROI ก่อนจะ OCR ใหม่ (ค่าเริ่มต้น 3.0 วินาที)
+      - max_queue_size: ขนาดสูงสุดต่อคิวของ ROI แต่ละตัว (ค่าเริ่มต้น 4)
+    """
     _configure_logger(source)
 
     if cam_id is not None:
@@ -157,28 +248,27 @@ def process(
         except Exception:  # pragma: no cover
             pass
 
+    # แปลง PIL -> BGR ถ้าจำเป็น
     if isinstance(frame, Image.Image) and np is not None:
-        frame = cv2.cvtColor(np.array(frame), cv2.COLOR_RGB2BGR)
+        frame_bgr = cv2.cvtColor(np.array(frame), cv2.COLOR_RGB2BGR)
+    else:
+        frame_bgr = frame
 
-    current_time = time.monotonic()
+    key = (source or "", roi_id)
+    now = time.monotonic()
 
-    with _last_ocr_lock:
-        last_time = last_ocr_times.get(roi_id)
-    diff_time = 0 if last_time is None else current_time - last_time
-    should_ocr = last_time is None or diff_time >= interval
+    # สร้างคิวและเวิร์กเกอร์ของ ROI นี้ถ้ายังไม่มี
+    _ensure_queue_and_worker(key, max_queue_size=max_queue_size)
 
-    result_text = last_ocr_results.get(roi_id, "")
+    with _state_lock:
+        last_time = _last_ocr_times.get(key)
+        result_text = _last_ocr_results.get(key, "")
 
-    if should_ocr and _reader_run_lock.acquire(blocking=False):
-        with _last_ocr_lock:
-            last_ocr_times[roi_id] = current_time
+    due = (last_time is None) or ((now - last_time) >= interval)
 
-        def _target() -> None:
-            try:
-                _run_ocr_async(frame.copy(), roi_id, save, source)
-            finally:
-                _reader_run_lock.release()
-
-        threading.Thread(target=_target, daemon=True).start()
+    if due:
+        task = OcrTask(source=key[0], roi_id=key[1], frame_bgr=frame_bgr.copy(), save=save)
+        q = _queues[key]
+        _enqueue_latest_with_drop_oldest(q, task)
 
     return result_text
