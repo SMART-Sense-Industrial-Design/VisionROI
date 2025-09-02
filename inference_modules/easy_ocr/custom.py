@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+from concurrent.futures import ThreadPoolExecutor
 from PIL import Image
 import cv2
 from logging.handlers import TimedRotatingFileHandler
@@ -28,9 +29,9 @@ _handler: TimedRotatingFileHandler | None = None
 _current_source: str | None = None
 _data_sources_root = Path(__file__).resolve().parents[2] / "data_sources"
 
-_reader: easyocr.Reader | None = None
 _reader_lock = threading.Lock()
-_reader_run_lock = threading.Lock()
+_thread_local = threading.local()
+_executor = ThreadPoolExecutor(max_workers=os.cpu_count() or 4)
 
 
 def _configure_logger(source: str | None) -> None:
@@ -52,14 +53,15 @@ def _configure_logger(source: str | None) -> None:
 
 
 def _get_reader() -> easyocr.Reader:
-    """สร้างและคืนค่า easyocr.Reader แบบ singleton"""
+    """สร้างและคืนค่า easyocr.Reader แยกตามเธรด"""
     if easyocr is None:
         raise RuntimeError("easyocr library is not installed")
-    global _reader
-    with _reader_lock:
-        if _reader is None:
-            _reader = easyocr.Reader(["en", "th"], gpu=False)
-        return _reader
+    reader = getattr(_thread_local, "reader", None)
+    if reader is None:
+        with _reader_lock:
+            _thread_local.reader = easyocr.Reader(["en", "th"], gpu=False)
+        reader = _thread_local.reader
+    return reader
 
 
 # ตัวแปรควบคุมเวลาเรียก OCR แยกตาม roi พร้อมตัวล็อกป้องกันการเข้าถึงพร้อมกัน
@@ -134,16 +136,9 @@ def process(
 
     result_text = last_ocr_results.get(roi_id, "")
 
-    if should_ocr and _reader_run_lock.acquire(blocking=False):
+    if should_ocr:
         with _last_ocr_lock:
             last_ocr_times[roi_id] = current_time
-
-        def _target() -> None:
-            try:
-                _run_ocr_async(frame.copy(), roi_id, save, source)
-            finally:
-                _reader_run_lock.release()
-
-        threading.Thread(target=_target, daemon=True).start()
+        _executor.submit(_run_ocr_async, frame.copy(), roi_id, save, source)
 
     return result_text
