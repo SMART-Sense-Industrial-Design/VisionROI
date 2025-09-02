@@ -1,74 +1,124 @@
+# camera_worker.py
 import cv2
-import asyncio
-import threading
 import time
+import threading
+import asyncio
+from typing import Optional
+from queue import Queue, Empty
+from contextlib import contextmanager
+
+@contextmanager
+def silent():
+    try:
+        yield
+    except Exception:
+        pass
+
+def _is_rtsp(src) -> bool:
+    return isinstance(src, str) and src.strip().lower().startswith("rtsp://")
 
 class CameraWorker:
-    """อ่านภาพจากกล้องในเธรดแยกแล้วส่งผ่าน asyncio.Queue"""
-
-    def __init__(
-        self,
-        src,
-        loop: asyncio.AbstractEventLoop | None = None,
-        width: int | None = None,
-        height: int | None = None,
-    ):
+    def __init__(self, src,
+                 loop: Optional[asyncio.AbstractEventLoop] = None,
+                 width: Optional[int] = None,
+                 height: Optional[int] = None,
+                 read_interval: float = 0.0) -> None:
         self.src = src
-        self.loop = loop or asyncio.get_event_loop()
-        self.cap = cv2.VideoCapture(src)
-        if width is not None:
-            self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
-        if height is not None:
-            self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
-        self.queue: asyncio.Queue = asyncio.Queue(maxsize=1)
-        self._stop = threading.Event()
-        self._thread = threading.Thread(target=self._reader, daemon=True)
+        self.loop = loop
+        self.width = width
+        self.height = height
+        self.read_interval = read_interval
+
+        # บน macOS/RTSP ลองใช้ FFMPEG backend ก่อน (ช่วยลด segfault จาก AVFoundation)
+        if _is_rtsp(src):
+            cap = cv2.VideoCapture(src, cv2.CAP_FFMPEG)
+            if not cap or not cap.isOpened():
+                cap = cv2.VideoCapture(src)
+        else:
+            cap = cv2.VideoCapture(src)
+
+        self._cap = cap
+
+        with silent():
+            self._cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        if width:
+            with silent():
+                self._cap.set(cv2.CAP_PROP_FRAME_WIDTH, int(width))
+        if height:
+            with silent():
+                self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, int(height))
+
+        self._stop_evt = threading.Event()
+        self._thread: Optional[threading.Thread] = None
+        self._q: Queue = Queue(maxsize=1)
 
     def start(self) -> bool:
-        if not self.cap.isOpened():
-            # ปล่อยทรัพยากรทันทีหากไม่สามารถเปิดกล้องได้
-            self.cap.release()
+        if not self._cap or not self._cap.isOpened():
             return False
-        if not self._thread.is_alive():
+        if self._thread is None or not self._thread.is_alive():
+            self._thread = threading.Thread(target=self._run, daemon=True)
             self._thread.start()
         return True
 
-    def _reader(self) -> None:
-        while not self._stop.is_set():
-            ret, frame = self.cap.read()
-            if not ret or frame is None:
-                time.sleep(0.1)
+    def _run(self) -> None:
+        # ป้องกันการ read ต่อหลังถูกสั่งหยุด
+        while not self._stop_evt.is_set():
+            ok, frame = self._cap.read() if (self._cap is not None) else (False, None)
+            if not ok or frame is None:
+                time.sleep(0.02)
                 continue
 
-            def put_frame() -> None:
-                if self.queue.full():
-                    try:
-                        self.queue.get_nowait()
-                    except asyncio.QueueEmpty:
-                        pass
-                self.queue.put_nowait(frame)
+            # สำคัญ: copy() ตัดขาดจากบัฟเฟอร์เดิม ลด use-after-free/reuse
+            try:
+                frame_copy = frame.copy()
+            except Exception:
+                time.sleep(0.01)
+                continue
 
-            self.loop.call_soon_threadsafe(put_frame)
-            time.sleep(0.04)
+            if self._q.full():
+                try:
+                    _ = self._q.get_nowait()
+                except Empty:
+                    pass
+            try:
+                self._q.put_nowait(frame_copy)
+            except Exception:
+                pass
+
+            if self.read_interval > 0:
+                time.sleep(self.read_interval)
 
     async def read(self):
-        return await self.queue.get()
+        try:
+            return self._q.get_nowait()
+        except Empty:
+            pass
+        for _ in range(3):
+            await asyncio.sleep(0.03)
+            try:
+                return self._q.get_nowait()
+            except Empty:
+                continue
+        return None
 
     async def stop(self) -> None:
-        self._stop.set()
-        if self._thread.is_alive():
-            await asyncio.to_thread(self._thread.join)
-        if self.cap.isOpened():
-            await asyncio.to_thread(self.cap.release)
-        await asyncio.to_thread(cv2.destroyAllWindows)
+        self._stop_evt.set()
 
-    def __del__(self):
-        """Ensure resources are released when the worker is garbage collected."""
-        try:
-            self._stop.set()
-            if self._thread.is_alive():
-                self._thread.join(timeout=0.1)
-            if self.cap.isOpened():
-                self.cap.release()
-        except Exception:
-            pass
+        # ปล่อยกล้อง (ปลดบล็อค read) แล้วพักเล็กน้อย ลด crash race
+        with silent():
+            if self._cap is not None and self._cap.isOpened():
+                await asyncio.to_thread(self._cap.release)
+        # ให้ backend ปิดเธรดภายในก่อนเล็กน้อย
+        await asyncio.sleep(0.05)
+        self._cap = None  # กันโค้ดส่วนอื่นเผลอใช้ต่อ
+
+        with silent():
+            if self._thread is not None and self._thread.is_alive():
+                await asyncio.to_thread(self._thread.join, 0.5)
+
+        # ล้างคิว
+        while True:
+            try:
+                _ = self._q.get_nowait()
+            except Empty:
+                break

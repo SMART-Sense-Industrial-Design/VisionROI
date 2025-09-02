@@ -1,3 +1,9 @@
+# ใส่บนๆ app.py
+# import faulthandler, os
+# faulthandler.enable()
+# # ถ้าเป็น RTSP ผ่าน ffmpeg แนะนำ:
+# os.environ.setdefault("OPENCV_FFMPEG_CAPTURE_OPTIONS", "rtsp_transport;tcp")
+
 from quart import Quart, render_template, websocket, request, jsonify, send_file, redirect, Response
 import asyncio
 import cv2
@@ -127,22 +133,31 @@ if hasattr(app, "before_serving"):
     app.before_serving(restore_service_state)
 
 
-# ปิดทุกงาน/กล้องเมื่อแอปหยุด (กันค้าง)
+# ========== NEW: helper ปิดงานแบบเร็วพร้อม timeout ==========
+async def _safe_stop(cam_id: str,
+                     task_dict: dict[str, asyncio.Task | None],
+                     queue_dict: dict[str, asyncio.Queue[bytes | None]] | None):
+    try:
+        await asyncio.wait_for(
+            stop_camera_task(cam_id, task_dict, queue_dict),
+            timeout=1.5
+        )
+    except asyncio.TimeoutError:
+        pass
+    except Exception:
+        pass
+
+
+# ปิดทุกงาน/กล้องเมื่อแอปหยุด (กันค้าง) — ปรับให้ปิด "พร้อมกัน"
 if hasattr(app, "after_serving"):
     @app.after_serving
     async def _shutdown_cleanup():
-        # stop inference tasks
-        for cam_id in list(inference_tasks.keys()):
-            try:
-                await stop_camera_task(cam_id, inference_tasks, frame_queues)
-            except Exception:
-                pass
-        # stop roi tasks
-        for cam_id in list(roi_tasks.keys()):
-            try:
-                await stop_camera_task(cam_id, roi_tasks, roi_frame_queues)
-            except Exception:
-                pass
+        # stop inference & roi tasks concurrently with timeout
+        await asyncio.gather(
+            *[_safe_stop(cid, inference_tasks, frame_queues) for cid in list(inference_tasks.keys())],
+            *[_safe_stop(cid, roi_tasks, roi_frame_queues) for cid in list(roi_tasks.keys())],
+            return_exceptions=True
+        )
         # close result queues
         for cam_id, q in list(roi_result_queues.items()):
             try:
@@ -484,6 +499,7 @@ async def start_camera_task(
         if worker is None:
             src = camera_sources.get(cam_id, 0)
             width, height = camera_resolutions.get(cam_id, (None, None))
+            # หมายเหตุ: ถ้า CameraWorker ของคุณต้องการพารามิเตอร์ต่างจากนี้ ให้คงของเดิม
             worker = CameraWorker(src, asyncio.get_running_loop(), width, height)
             if not worker.start():
                 # ป้องกันไม่ให้กล้องค้างเมื่อเปิดไม่สำเร็จ
@@ -506,13 +522,16 @@ async def stop_camera_task(
     task_dict: dict[str, asyncio.Task | None],
     queue_dict: dict[str, asyncio.Queue[bytes | None]] | None = None,
 ):
-    """หยุดงานที่ใช้กล้องตาม cam_id (พร้อม lock กัน race)"""
+    """หยุดงานที่ใช้กล้องตาม cam_id (พร้อม lock กัน race) — ปรับให้มี timeout และไม่วน drain ยาว"""
     async with get_cam_lock(cam_id):
         task = task_dict.pop(cam_id, None)
         if task is not None and not task.done():
             task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await task
+            # อย่ารอไม่จำกัดเวลา
+            try:
+                await asyncio.wait_for(task, timeout=1.0)
+            except (asyncio.TimeoutError, asyncio.CancelledError):
+                pass
             status = "stopped"
         else:
             status = "no_task"
@@ -520,9 +539,13 @@ async def stop_camera_task(
         if queue_dict is not None:
             queue = queue_dict.pop(cam_id, None)
             if queue is not None:
-                await queue.put(None)
-                # drain queue
-                while True:
+                # ปลดบล็อกผู้รอคิว (เช่น WebSocket) ด้วย None — แบบมี timeout สั้น ๆ
+                try:
+                    await asyncio.wait_for(queue.put(None), timeout=0.2)
+                except Exception:
+                    pass
+                # ระบายคิวเร็ว ๆ จำกัดรอบกันวนลูป
+                for _ in range(3):
                     try:
                         queue.get_nowait()
                     except asyncio.QueueEmpty:
