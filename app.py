@@ -653,8 +653,12 @@ async def stop_camera_task(
         if task is not None and not task.done():
             task.cancel()
             try:
-                await asyncio.wait_for(task, timeout=0.8)
-            except (asyncio.TimeoutError, asyncio.CancelledError):
+                await asyncio.wait_for(task, timeout=2.0)
+            except asyncio.TimeoutError:
+                task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
+            except asyncio.CancelledError:
                 pass
             status = "stopped"
         else:
