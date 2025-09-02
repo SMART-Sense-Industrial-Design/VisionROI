@@ -52,6 +52,11 @@ class CameraWorker:
         self._thread: Optional[threading.Thread] = None
         self._q: Queue = Queue(maxsize=1)
 
+    @property
+    def cap(self):
+        """Expose underlying VideoCapture for tests/inspection."""
+        return self._cap
+
     def start(self) -> bool:
         if not self._cap or not self._cap.isOpened():
             return False
