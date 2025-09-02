@@ -69,6 +69,9 @@ inference_groups: dict[str, str | None] = {}
 # โหมดงานล่าสุดของกล้องนั้นๆ: "inference" หรือ "roi_stream"
 inference_mode: dict[str, str | None] = {}
 
+# สัญญาณหยุดระดับกล้อง (ตั้ง True เมื่อสั่ง Stop)
+stop_flags: dict[str, bool] = {}
+
 STATE_FILE = "service_state.json"
 PAGE_SCORE_THRESHOLD = 0.4
 
@@ -133,6 +136,7 @@ def _free_cam_state(cam_id: str):
     inference_groups.pop(cam_id, None)
     inference_rois.pop(cam_id, None)
     inference_mode.pop(cam_id, None)
+    stop_flags.pop(cam_id, None)
 
     q = frame_queues.pop(cam_id, None)
     if q is not None:
@@ -170,6 +174,14 @@ def _safe_in_base(base: str, target: str) -> bool:
 
 def get_cam_lock(cam_id: str) -> asyncio.Lock:
     return camera_locks.setdefault(cam_id, asyncio.Lock())
+
+
+def set_stop_flag(cam_id: str, value: bool) -> None:
+    stop_flags[cam_id] = bool(value)
+
+
+def is_stopping(cam_id: str) -> bool:
+    return bool(stop_flags.get(cam_id))
 
 
 def _is_inference_running(cam_id: str) -> bool:
@@ -370,6 +382,11 @@ def get_roi_result_queue(cam_id: str) -> asyncio.Queue[str | None]:
 async def read_and_queue_frame(
     cam_id: str, queue: asyncio.Queue[bytes], frame_processor=None
 ) -> None:
+    # ถ้ากำลังหยุด ไม่อ่าน/ไม่ส่งเฟรม
+    if is_stopping(cam_id):
+        await asyncio.sleep(0.02)
+        return
+
     worker = camera_workers.get(cam_id)
     if worker is None:
         await asyncio.sleep(0.05)
@@ -420,6 +437,14 @@ async def run_inference_loop(cam_id: str):
     module_cache: dict[str, tuple[ModuleType | None, bool, bool]] = {}
 
     async def process_frame(frame):
+        # ออกเร็วถ้ากำลังหยุด
+        if is_stopping(cam_id):
+            try:
+                del frame
+            except Exception:
+                pass
+            return None
+
         rois = inference_rois.get(cam_id, [])
         forced_group = inference_groups.get(cam_id)
         if not rois:
@@ -435,6 +460,8 @@ async def run_inference_loop(cam_id: str):
 
         # pass 1: evaluate page ROIs
         for i, r in enumerate(rois):
+            if is_stopping(cam_id):
+                return None
             if np is None or r.get('type') != 'page':
                 continue
             has_page = True
@@ -478,6 +505,10 @@ async def run_inference_loop(cam_id: str):
                         cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1, cv2.LINE_AA)
             # drop temps
             del src, dst, matrix, roi
+
+        if is_stopping(cam_id):
+            return None
+
         if not has_page:
             output = forced_group or ''
         elif best_score <= PAGE_SCORE_THRESHOLD:
@@ -485,7 +516,7 @@ async def run_inference_loop(cam_id: str):
 
         scores.sort(key=lambda x: x['score'], reverse=True)
 
-        if output or scores:
+        if (output or scores) and not is_stopping(cam_id):
             try:
                 q = get_roi_result_queue(cam_id)
                 payload = json.dumps({'group': output, 'scores': scores})
@@ -496,6 +527,8 @@ async def run_inference_loop(cam_id: str):
                 pass
 
         for i, r in enumerate(rois):
+            if is_stopping(cam_id):
+                return None
             if r.get('type') != 'roi':
                 continue
             if forced_group != 'all':
@@ -536,14 +569,18 @@ async def run_inference_loop(cam_id: str):
                         roi = cv2.warpPerspective(frame, matrix, (max_w, max_h))
                         result_text = ''
                         try:
+                            if is_stopping(cam_id):
+                                raise RuntimeError("stopping")
                             args = [roi, r.get('id', str(i)), bool(save_flag)]
                             if takes_source:
                                 args.append(active_sources.get(cam_id, ''))
                             if takes_cam_id:
                                 args.append(cam_id)
-                            result = getattr(module, 'process')( *args )
+                            result = getattr(module, 'process')(*args)
                             if inspect.isawaitable(result):
                                 result = await result
+                            if is_stopping(cam_id):
+                                raise RuntimeError("stopping")
                             if isinstance(result, str):
                                 result_text = result
                             elif isinstance(result, dict) and 'text' in result:
@@ -554,11 +591,12 @@ async def run_inference_loop(cam_id: str):
                             ok, roi_buf = cv2.imencode('.jpg', roi, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
                             if ok and roi_buf is not None:
                                 roi_b64 = base64.b64encode(roi_buf).decode('ascii')
-                                q = get_roi_result_queue(cam_id)
-                                payload = json.dumps({'id': r.get('id', i), 'image': roi_b64, 'text': result_text})
-                                if q.full():
-                                    q.get_nowait()
-                                await q.put(payload)
+                                if not is_stopping(cam_id):
+                                    q = get_roi_result_queue(cam_id)
+                                    payload = json.dumps({'id': r.get('id', i), 'image': roi_b64, 'text': result_text})
+                                    if q.full():
+                                        q.get_nowait()
+                                    await q.put(payload)
                         except Exception:
                             pass
                         finally:
@@ -590,6 +628,8 @@ async def run_inference_loop(cam_id: str):
     queue = get_frame_queue(cam_id)
     try:
         while True:
+            if is_stopping(cam_id):
+                break
             await read_and_queue_frame(cam_id, queue, process_frame)
     except asyncio.CancelledError:
         pass
@@ -605,6 +645,8 @@ async def run_roi_loop(cam_id: str):
     queue = get_roi_frame_queue(cam_id)
     try:
         while True:
+            if is_stopping(cam_id):
+                break
             await read_and_queue_frame(cam_id, queue)
     except asyncio.CancelledError:
         pass
@@ -1045,6 +1087,8 @@ async def load_roi_file():
 async def perform_start_inference(cam_id: str, rois=None, group: str | None = None, save_state: bool = True):
     # โหมด inference (หน้า Inference Group)
     inference_mode[cam_id] = "inference"
+    # เคลียร์สัญญาณหยุดเมื่อเริ่มใหม่
+    set_stop_flag(cam_id, False)
 
     if roi_tasks.get(cam_id) and not roi_tasks[cam_id].done():
         return False
@@ -1115,6 +1159,9 @@ async def start_inference(cam_id: str):
 
 @app.route('/stop_inference/<string:cam_id>', methods=["POST"])
 async def stop_inference(cam_id: str):
+    # ตั้งสัญญาณหยุดก่อน เพื่อให้ลูป/โมดูลไม่ส่งผลเพิ่ม
+    set_stop_flag(cam_id, True)
+
     _, resp, status = await stop_camera_task(cam_id, inference_tasks, frame_queues)
     queue = roi_result_queues.get(cam_id)
     if queue is not None:
@@ -1137,6 +1184,8 @@ async def stop_inference(cam_id: str):
 async def start_roi_stream(cam_id: str):
     # โหมด ROI stream (หน้า Inference Page / preview ROI)
     inference_mode[cam_id] = "roi_stream"
+    # เคลียร์สัญญาณหยุดเมื่อเริ่มใหม่
+    set_stop_flag(cam_id, False)
 
     if inference_tasks.get(cam_id) and not inference_tasks[cam_id].done():
         return jsonify({"status": "inference_running", "cam_id": cam_id}), 400
@@ -1156,6 +1205,9 @@ async def start_roi_stream(cam_id: str):
 
 @app.route('/stop_roi_stream/<string:cam_id>', methods=["POST"])
 async def stop_roi_stream(cam_id: str):
+    # ตั้งสัญญาณหยุดก่อน
+    set_stop_flag(cam_id, True)
+
     _, resp, status = await stop_camera_task(cam_id, roi_tasks, roi_frame_queues)
     inference_mode.pop(cam_id, None)
     _free_cam_state(cam_id)
