@@ -50,6 +50,56 @@ ALLOWED_ROI_DIR = os.path.realpath("data_sources")
 
 
 # =========================
+# Memory helpers (free & trim)
+# =========================
+def _malloc_trim():
+    """Try to return free heap pages back to the OS (Linux/glibc)."""
+    try:
+        import ctypes
+        libc = ctypes.CDLL("libc.so.6")
+        libc.malloc_trim(0)
+    except Exception:
+        pass
+
+
+def _free_cam_state(cam_id: str):
+    """Drop all references for this camera to allow GC to reclaim big buffers."""
+    # Drop conf/state that may hold refs
+    camera_sources.pop(cam_id, None)
+    camera_resolutions.pop(cam_id, None)
+    active_sources.pop(cam_id, None)
+    save_roi_flags.pop(cam_id, None)
+    inference_groups.pop(cam_id, None)
+    inference_rois.pop(cam_id, None)
+
+    # Queues: drain & drop
+    q = frame_queues.pop(cam_id, None)
+    if q is not None:
+        with contextlib.suppress(Exception):
+            while not q.empty():
+                q.get_nowait()
+
+    rq = roi_frame_queues.pop(cam_id, None)
+    if rq is not None:
+        with contextlib.suppress(Exception):
+            while not rq.empty():
+                rq.get_nowait()
+
+    rres = roi_result_queues.pop(cam_id, None)
+    if rres is not None:
+        with contextlib.suppress(Exception):
+            while not rres.empty():
+                rres.get_nowait()
+
+    # Locks
+    camera_locks.pop(cam_id, None)
+
+    # GC & trim
+    gc.collect()
+    _malloc_trim()
+
+
+# =========================
 # Utils / Security helpers
 # =========================
 def _safe_in_base(base: str, target: str) -> bool:
@@ -136,8 +186,6 @@ async def _safe_stop(cam_id: str,
 
 
 # ========== Graceful shutdown (fast & robust) ==========
-from quart import Response
-
 _SHUTTING_DOWN = False  # prevent reentry
 
 async def _shutdown_cleanup_concurrent():
@@ -185,6 +233,7 @@ if hasattr(app, "after_serving"):
                 await q.put(None)
             roi_result_queues.pop(cam_id, None)
         gc.collect()
+        _malloc_trim()  # trim heap after shutdown cleanup
 
 
 # =========================
@@ -573,10 +622,13 @@ async def stop_camera_task(
         ):
             await worker.stop()
             camera_workers.pop(cam_id, None)
-            frame_queues.pop(cam_id, None)
-            roi_frame_queues.pop(cam_id, None)
+
+            # NEW: fully free per-camera state & trim memory
+            _free_cam_state(cam_id)
+
             del worker
             gc.collect()
+            _malloc_trim()
 
         return task, {"status": status, "cam_id": cam_id}, 200
 
@@ -1000,10 +1052,16 @@ async def stop_inference(cam_id: str):
     if queue is not None:
         await queue.put(None)
         roi_result_queues.pop(cam_id, None)
+    # clear cached ROI data and flags
     inference_rois.pop(cam_id, None)
     inference_groups.pop(cam_id, None)
     save_roi_flags.pop(cam_id, None)
+
+    # NEW: fully free per-camera state & trim memory
+    _free_cam_state(cam_id)
     gc.collect()
+    _malloc_trim()
+
     save_service_state()
     return jsonify(resp), status
 
@@ -1030,6 +1088,12 @@ async def start_roi_stream(cam_id: str):
 @app.route('/stop_roi_stream/<string:cam_id>', methods=["POST"])
 async def stop_roi_stream(cam_id: str):
     _, resp, status = await stop_camera_task(cam_id, roi_tasks, roi_frame_queues)
+
+    # NEW: free state & trim for ROI-only mode too
+    _free_cam_state(cam_id)
+    gc.collect()
+    _malloc_trim()
+
     return jsonify(resp), status
 
 
