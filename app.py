@@ -1073,14 +1073,17 @@ if __name__ == "__main__":
 
     if args.use_uvicorn:
         import uvicorn
-        # ใช้ uvicorn รัน (เสถียรกว่า app.run())
         uvicorn.run(
             "app:app",              # module:variable
             host="0.0.0.0",
             port=args.port,
             reload=False,
-            lifespan="on"
+            lifespan="on",
+            # ↓ เพิ่ม 3 ตัวนี้
+            timeout_keep_alive=2,           # ตัด keep-alive เร็ว
+            timeout_graceful_shutdown=2,    # บอก uvicorn ปิดใน 2 วิหลังรับสัญญาณ
+            workers=1,                      # โปรเซสเดียว ปิดง่าย
         )
     else:
-        # dev mode
-        app.run(port=args.port) 
+        app.run(port=args.port)
+
