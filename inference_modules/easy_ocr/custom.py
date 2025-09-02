@@ -134,15 +134,13 @@ def process(
 
     result_text = last_ocr_results.get(roi_id, "")
 
-    if should_ocr and _reader_run_lock.acquire(blocking=False):
+    if should_ocr:
         with _last_ocr_lock:
             last_ocr_times[roi_id] = current_time
 
         def _target() -> None:
-            try:
+            with _reader_run_lock:
                 _run_ocr_async(frame.copy(), roi_id, save, source)
-            finally:
-                _reader_run_lock.release()
 
         threading.Thread(target=_target, daemon=True).start()
 

@@ -14,6 +14,9 @@ def stub_quart():
                 return f
             return decorator
 
+        post = route
+        get = route
+
         class DummyResponse:
             def __init__(self, status_code=200):
                 self.status_code = status_code

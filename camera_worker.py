@@ -40,6 +40,10 @@ class CameraWorker:
         self._q: "queue.Queue[Optional[object]]" = queue.Queue(maxsize=1)
         self._lock = threading.Lock()
 
+    @property
+    def cap(self):
+        return self._cap
+
     # -------- public API --------
     def start(self) -> bool:
         with self._lock:
