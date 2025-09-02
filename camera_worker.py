@@ -12,7 +12,22 @@ class CameraWorker:
         loop: asyncio.AbstractEventLoop | None = None,
         width: int | None = None,
         height: int | None = None,
+        use_gui: bool = False,
     ):
+        """สร้างตัว worker สำหรับอ่านภาพจากกล้อง
+
+        Parameters
+        ----------
+        src : any
+            แหล่งที่มาของวิดีโอสำหรับ ``cv2.VideoCapture``
+        loop : asyncio.AbstractEventLoop | None, optional
+            event loop ที่จะใช้สำหรับส่งเฟรม, by default None
+        width, height : int | None, optional
+            ปรับขนาดเฟรมหากกำหนด
+        use_gui : bool, optional
+            หากเป็น ``True`` จะเรียก ``cv2.destroyAllWindows`` เมื่อหยุด
+        """
+
         self.src = src
         self.loop = loop or asyncio.get_event_loop()
         self.cap = cv2.VideoCapture(src)
@@ -23,6 +38,7 @@ class CameraWorker:
         self.queue: asyncio.Queue = asyncio.Queue(maxsize=1)
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._reader, daemon=True)
+        self.use_gui = use_gui
 
     def start(self) -> bool:
         if not self.cap.isOpened():
@@ -54,13 +70,14 @@ class CameraWorker:
     async def read(self):
         return await self.queue.get()
 
-    async def stop(self) -> None:
+    async def stop(self, timeout: float | None = 1.0) -> None:
         self._stop.set()
         if self._thread.is_alive():
-            await asyncio.to_thread(self._thread.join)
+            await asyncio.to_thread(self._thread.join, timeout)
         if self.cap.isOpened():
             await asyncio.to_thread(self.cap.release)
-        await asyncio.to_thread(cv2.destroyAllWindows)
+        if self.use_gui:
+            await asyncio.to_thread(cv2.destroyAllWindows)
 
     def __del__(self):
         """Ensure resources are released when the worker is garbage collected."""
