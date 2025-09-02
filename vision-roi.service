@@ -10,7 +10,8 @@ WorkingDirectory=/home/jetson/SMARTSense/ninenox/VisionROI
 ExecStart=/home/jetson/SMARTSense/ninenox/venv/bin/python /home/jetson/SMARTSense/ninenox/VisionROI/app.py --port 12000 --use-uvicorn
 
 # หยุดแบบนุ่ม: ยิง /_quit ให้แอป cleanup เองก่อน
-ExecStop=/usr/bin/curl -fsS -X POST http://127.0.0.1:12000/_quit || /bin/kill -s SIGTERM $MAINPID
+ExecStop=/usr/bin/curl -fsS -X POST http://127.0.0.1:12000/_quit
+ExecStop=/bin/kill -s SIGTERM $MAINPID
 
 User=jetson
 Group=jetson

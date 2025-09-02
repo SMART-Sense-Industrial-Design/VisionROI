@@ -24,10 +24,9 @@ try:
 except Exception:
     ConnectionClosed = Exception
 
-# NEW: handle signals
-import signal
+import signal  # signals
 
-# เก็บ worker ของกล้องแต่ละตัวในรูปแบบ dict
+# === Runtime state ===
 camera_workers: dict[str, CameraWorker | None] = {}
 camera_sources: dict[str, int | str] = {}
 camera_resolutions: dict[str, tuple[int | None, int | None]] = {}
@@ -42,7 +41,6 @@ active_sources: dict[str, str] = {}
 save_roi_flags: dict[str, bool] = {}
 inference_groups: dict[str, str | None] = {}
 
-# ไฟล์สำหรับเก็บสถานะการทำงาน เพื่อให้สามารถกลับมารันต่อหลังรีสตาร์ท service
 STATE_FILE = "service_state.json"
 PAGE_SCORE_THRESHOLD = 0.4
 
@@ -122,14 +120,14 @@ if hasattr(app, "before_serving"):
     app.before_serving(restore_service_state)
 
 
-# ========== NEW: helper ปิดงานแบบเร็วพร้อม timeout ==========
+# ========== stop helpers ==========
 async def _safe_stop(cam_id: str,
                      task_dict: dict[str, asyncio.Task | None],
                      queue_dict: dict[str, asyncio.Queue[bytes | None]] | None):
     try:
         await asyncio.wait_for(
             stop_camera_task(cam_id, task_dict, queue_dict),
-            timeout=1.2  # เล็กลงเพื่อหยุดไว
+            timeout=1.2
         )
     except asyncio.TimeoutError:
         pass
@@ -137,42 +135,43 @@ async def _safe_stop(cam_id: str,
         pass
 
 
-# ========== NEW: graceful exit primitives ==========
+# ========== Graceful shutdown (fast & robust) ==========
+from quart import Response
+
+_SHUTTING_DOWN = False  # prevent reentry
+
+async def _shutdown_cleanup_concurrent():
+    # run after_serving cleanup but cap time
+    if "_shutdown_cleanup" in globals():
+        with contextlib.suppress(Exception, asyncio.TimeoutError):
+            await asyncio.wait_for(_shutdown_cleanup(), timeout=2.0)
+
 async def _graceful_exit():
-    """
-    เรียกตอน service ถูกสั่งหยุด:
-    - ยกเลิก tasks ทั้งหมดด้วย timeout สั้น
-    - ส่ง sentinel ลงคิวเพื่อปลดบล็อก WS
-    - ปิด CameraWorker
-    - จากนั้นจบโปรเซสไว ๆ
-    """
-    try:
-        if "_shutdown_cleanup" in globals():
-            await _shutdown_cleanup()
-    except Exception:
-        pass
-    # ออกจากโปรเซสทันที ไม่รอ event loop ปิดเอง เพื่อไม่ให้ systemd คอยนาน
+    """Cancel tasks, unblock queues, release cameras, then exit fast."""
+    global _SHUTTING_DOWN
+    if _SHUTTING_DOWN:
+        return
+    _SHUTTING_DOWN = True
+    with contextlib.suppress(Exception):
+        await _shutdown_cleanup_concurrent()
+    # allow 202 response to flush
+    await asyncio.sleep(0.05)
     os._exit(0)
 
+def _sync_signal_handler(signum, frame):
+    """Ensure SIGTERM/SIGINT triggers the same fast path."""
+    try:
+        loop = asyncio.get_event_loop()
+        loop.call_soon_threadsafe(lambda: asyncio.create_task(_graceful_exit()))
+    except RuntimeError:
+        os._exit(0)
 
-def _install_signal_handlers():
-    """ติดตั้ง SIGTERM/SIGINT handlers ให้เรียก _graceful_exit()"""
-    loop = asyncio.get_running_loop()
-    for sig in (signal.SIGTERM, signal.SIGINT):
-        try:
-            loop.add_signal_handler(sig, lambda s=sig: asyncio.create_task(_graceful_exit()))
-        except NotImplementedError:
-            # บางแพลตฟอร์มอาจไม่รองรับ (เช่น Windows); ข้ามไป
-            pass
-
-
-if hasattr(app, "before_serving"):
-    @app.before_serving
-    async def _install_handlers_before_serving():
-        _install_signal_handlers()
+# install sync handlers early (more reliable than loop.add_signal_handler for our case)
+signal.signal(signal.SIGTERM, _sync_signal_handler)
+signal.signal(signal.SIGINT,  _sync_signal_handler)
 
 
-# ปิดทุกงาน/กล้องเมื่อแอปหยุด (กันค้าง) — ปรับให้ปิด "พร้อมกัน"
+# Close all tasks/cameras concurrently at shutdown (Quart lifespan)
 if hasattr(app, "after_serving"):
     @app.after_serving
     async def _shutdown_cleanup():
@@ -181,7 +180,6 @@ if hasattr(app, "after_serving"):
             *[_safe_stop(cid, roi_tasks, roi_frame_queues) for cid in list(roi_tasks.keys())],
             return_exceptions=True
         )
-        # close result queues
         for cam_id, q in list(roi_result_queues.items()):
             with contextlib.suppress(Exception):
                 await q.put(None)
@@ -217,7 +215,7 @@ async def inference_page() -> str:
     return await render_template("inference_page.html")
 
 
-# NEW: control endpoints for systemd
+# Health & quit endpoints (used by systemd)
 @app.get("/_healthz")
 async def _healthz():
     return "ok", 200
@@ -225,8 +223,11 @@ async def _healthz():
 
 @app.post("/_quit")
 async def _quit():
+    global _SHUTTING_DOWN
+    if _SHUTTING_DOWN:
+        return Response("already shutting down", status=202, mimetype="text/plain")
     asyncio.create_task(_graceful_exit())
-    return "shutting down", 202
+    return Response("shutting down", status=202, mimetype="text/plain")
 
 
 # =========================
@@ -272,7 +273,7 @@ async def read_and_queue_frame(
 ) -> None:
     worker = camera_workers.get(cam_id)
     if worker is None:
-        await asyncio.sleep(0.05)  # เล็กลงนิด ลด spin
+        await asyncio.sleep(0.05)
         return
     frame = await worker.read()
     if frame is None:
@@ -544,7 +545,7 @@ async def stop_camera_task(
         if task is not None and not task.done():
             task.cancel()
             try:
-                await asyncio.wait_for(task, timeout=0.8)  # NEW: เร็วขึ้นอีกนิด
+                await asyncio.wait_for(task, timeout=0.8)
             except (asyncio.TimeoutError, asyncio.CancelledError):
                 pass
             status = "stopped"
@@ -1074,16 +1075,14 @@ if __name__ == "__main__":
     if args.use_uvicorn:
         import uvicorn
         uvicorn.run(
-            "app:app",              # module:variable
+            "app:app",
             host="0.0.0.0",
             port=args.port,
             reload=False,
             lifespan="on",
-            # ↓ เพิ่ม 3 ตัวนี้
-            timeout_keep_alive=2,           # ตัด keep-alive เร็ว
-            timeout_graceful_shutdown=2,    # บอก uvicorn ปิดใน 2 วิหลังรับสัญญาณ
-            workers=1,                      # โปรเซสเดียว ปิดง่าย
+            timeout_keep_alive=2,
+            timeout_graceful_shutdown=2,
+            workers=1,
         )
     else:
         app.run(port=args.port)
-
