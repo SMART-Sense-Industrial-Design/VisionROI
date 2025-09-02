@@ -11,11 +11,7 @@ import threading
 from pathlib import Path
 from queue import Queue, Empty
 from dataclasses import dataclass
-
-try:
-    import numpy as np
-except Exception:  # pragma: no cover - fallback when numpy missing
-    np = None
+import numpy as np
 
 try:
     from rapidocr import RapidOCR
@@ -40,7 +36,7 @@ _reader_call_lock = threading.Lock()   # serialize reader(frame) call
 class OcrTask:
     source: str
     roi_id: int | str | None
-    frame_bgr: "np.ndarray"
+    frame_bgr: np.ndarray
     save: bool
 
 # key = (source, roi_id)

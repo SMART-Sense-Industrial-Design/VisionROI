@@ -11,11 +11,9 @@ import threading
 from pathlib import Path
 from queue import Queue, Empty
 from dataclasses import dataclass
+import numpy as np
+from typing import Any
 
-try:
-    import numpy as np
-except Exception:  # pragma: no cover
-    np = None
 
 try:
     import easyocr
@@ -31,7 +29,7 @@ _current_source: str | None = None
 _data_sources_root = Path(__file__).resolve().parents[2] / "data_sources"
 
 # ===== EasyOCR single reader + global call mutex =====
-_reader: easyocr.Reader | None = None
+_reader: Any | None = None
 _reader_lock = threading.Lock()        # create/destroy reader
 _reader_call_lock = threading.Lock()   # serialize readtext() calls
 
@@ -40,7 +38,7 @@ _reader_call_lock = threading.Lock()   # serialize readtext() calls
 class OcrTask:
     source: str
     roi_id: int | str | None
-    frame_bgr: "np.ndarray"
+    frame_bgr: np.ndarray
     save: bool
 
 # key = (source, roi_id)
@@ -74,7 +72,7 @@ def _configure_logger(source: str | None) -> None:
     _current_source = source
 
 
-def _get_reader() -> easyocr.Reader:
+def _get_reader() -> Any:
     """สร้างและคืนค่า easyocr.Reader แบบ singleton"""
     if easyocr is None:
         raise RuntimeError("easyocr library is not installed")
