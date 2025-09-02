@@ -104,6 +104,13 @@ def _extract_text_from_rapidocr_output(result_obj) -> str:
     - ([ (box, text, score), ... ], other-stuff)
     - หรือ list/tuple/dict ที่ index 1 เป็นข้อความ
     """
+    if hasattr(result_obj, "text"):
+        return str(result_obj.text)
+    if hasattr(result_obj, "txts"):
+        try:
+            return " ".join(map(str, result_obj.txts))
+        except Exception:
+            return str(result_obj.txts)
     if (
         isinstance(result_obj, (list, tuple))
         and len(result_obj) >= 2
@@ -291,6 +298,19 @@ def process(
         _enqueue_latest_with_drop_oldest(q, task)
 
     return result_text
+
+
+def _run_ocr_async(frame_bgr, roi_id=None, save: bool = False, source: str = ""):
+    """เรียก OCR ทันที ใช้สำหรับการทดสอบ"""
+    _configure_logger(source)
+    text = _run_ocr(frame_bgr)
+    key = (source or "", roi_id)
+    with _state_lock:
+        _last_ocr_results[key] = text
+        _last_ocr_times[key] = time.monotonic()
+        last_ocr_results[roi_id] = text
+    _save_frame_if_needed(frame_bgr, source, roi_id, save)
+    return text
 
 
 def stop_workers_for_source(source: str) -> None:

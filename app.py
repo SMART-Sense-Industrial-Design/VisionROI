@@ -289,13 +289,19 @@ async def restore_service_state() -> None:
     save_service_state()
 
 
-# ใช้ decorator ให้แน่ใจว่า hook ทำงานแน่
-@app.before_serving
-async def _on_startup():
-    # ติดตั้ง signal handlers ตั้งแต่ต้น
-    loop = asyncio.get_event_loop()
-    _install_signal_handlers(loop)
-    await restore_service_state()
+# ใช้ decorator ถ้า framework รองรับ
+if hasattr(app, "before_serving"):
+    @app.before_serving
+    async def _on_startup():
+        # ติดตั้ง signal handlers ตั้งแต่ต้น
+        loop = asyncio.get_event_loop()
+        _install_signal_handlers(loop)
+        await restore_service_state()
+else:
+    async def _on_startup():
+        loop = asyncio.get_event_loop()
+        _install_signal_handlers(loop)
+        await restore_service_state()
 
 
 # ========== stop helpers ==========
@@ -319,42 +325,70 @@ async def _quit():
     asyncio.get_event_loop().call_soon(lambda: os.kill(os.getpid(), signal.SIGTERM))
     return Response("shutting down", status=202, mimetype="text/plain")
 
+if hasattr(app, "after_serving"):
+    @app.after_serving
+    async def _shutdown_cleanup():
+        # หยุด OCR modules ทั้งระบบก่อน
+        try:
+            if rapidocr_stop_all:
+                rapidocr_stop_all()
+        except Exception:
+            pass
+        try:
+            if easyocr_stop_all:
+                easyocr_stop_all()
+        except Exception:
+            pass
 
-@app.after_serving
-async def _shutdown_cleanup():
-    # หยุด OCR modules ทั้งระบบก่อน
-    try:
-        if rapidocr_stop_all:
-            rapidocr_stop_all()
-    except Exception:
-        pass
-    try:
-        if easyocr_stop_all:
-            easyocr_stop_all()
-    except Exception:
-        pass
+        # หยุด tasks ของกล้องทั้งหมด
+        await asyncio.gather(
+            *[_safe_stop(cid, inference_tasks, frame_queues) for cid in list(inference_tasks.keys())],
+            *[_safe_stop(cid, roi_tasks, roi_frame_queues) for cid in list(roi_tasks.keys())],
+            return_exceptions=True
+        )
+        # ปิดคิวผลลัพธ์ + เคลียร์ state
+        for cam_id, q in list(roi_result_queues.items()):
+            with contextlib.suppress(Exception):
+                await q.put(None)
+            roi_result_queues.pop(cam_id, None)
 
-    # หยุด tasks ของกล้องทั้งหมด
-    await asyncio.gather(
-        *[_safe_stop(cid, inference_tasks, frame_queues) for cid in list(inference_tasks.keys())],
-        *[_safe_stop(cid, roi_tasks, roi_frame_queues) for cid in list(roi_tasks.keys())],
-        return_exceptions=True
-    )
-    # ปิดคิวผลลัพธ์ + เคลียร์ state
-    for cam_id, q in list(roi_result_queues.items()):
-        with contextlib.suppress(Exception):
-            await q.put(None)
-        roi_result_queues.pop(cam_id, None)
+        inference_rois.clear()
+        inference_groups.clear()
+        save_roi_flags.clear()
+        inference_mode.clear()
+        camera_workers.clear()
 
-    inference_rois.clear()
-    inference_groups.clear()
-    save_roi_flags.clear()
-    inference_mode.clear()
-    camera_workers.clear()
-
-    gc.collect()
-    # schedule trim after event loop settles
-    asyncio.create_task(_deferred_trim(1.0))
+        gc.collect()
+        # schedule trim after event loop settles
+        asyncio.create_task(_deferred_trim(1.0))
+else:
+    async def _shutdown_cleanup():
+        try:
+            if rapidocr_stop_all:
+                rapidocr_stop_all()
+        except Exception:
+            pass
+        try:
+            if easyocr_stop_all:
+                easyocr_stop_all()
+        except Exception:
+            pass
+        await asyncio.gather(
+            *[_safe_stop(cid, inference_tasks, frame_queues) for cid in list(inference_tasks.keys())],
+            *[_safe_stop(cid, roi_tasks, roi_frame_queues) for cid in list(roi_tasks.keys())],
+            return_exceptions=True
+        )
+        for cam_id, q in list(roi_result_queues.items()):
+            with contextlib.suppress(Exception):
+                await q.put(None)
+            roi_result_queues.pop(cam_id, None)
+        inference_rois.clear()
+        inference_groups.clear()
+        save_roi_flags.clear()
+        inference_mode.clear()
+        camera_workers.clear()
+        gc.collect()
+        asyncio.create_task(_deferred_trim(1.0))
 
 
 # =========================
@@ -1269,23 +1303,14 @@ async def stop_inference(cam_id: str):
 
     # หยุด OCR workers ของ source นี้ (rapid_ocr และ easy_ocr)
     source = (active_sources.get(cam_id, "") or "")
-    try:
-        if rapidocr_stop:
-            rapidocr_stop(source)
-    except Exception:
-        pass
-    try:
-        if easyocr_stop:
-            easyocr_stop(source)
-    except Exception:
-        pass
-    # Fallback: dynamic load ถ้า import ตรงไม่พร้อม
-    if not (rapidocr_stop or easyocr_stop):
+    for mod_name, stop_func in (("rapid_ocr", rapidocr_stop), ("easy_ocr", easyocr_stop)):
         try:
-            for _mod in ("rapid_ocr", "easy_ocr"):
-                _m = load_custom_module(_mod)
-                if _m and hasattr(_m, "stop_workers_for_source"):
-                    _m.stop_workers_for_source(source)
+            if stop_func:
+                stop_func(source)
+            else:
+                mod = load_custom_module(mod_name)
+                if mod and hasattr(mod, "stop_workers_for_source"):
+                    mod.stop_workers_for_source(source)
         except Exception:
             pass
 
@@ -1302,6 +1327,8 @@ async def stop_inference(cam_id: str):
 
     _free_cam_state(cam_id)
     save_service_state()
+    gc.collect()
+    _malloc_trim_now()
     # schedule safe trim shortly after stop
     asyncio.create_task(_deferred_trim(1.0))
     return jsonify(resp), status
@@ -1337,22 +1364,14 @@ async def stop_roi_stream(cam_id: str):
 
     # หยุด OCR workers ของ source นี้ (rapid_ocr และ easy_ocr)
     source = (active_sources.get(cam_id, "") or "")
-    try:
-        if rapidocr_stop:
-            rapidocr_stop(source)
-    except Exception:
-        pass
-    try:
-        if easyocr_stop:
-            easyocr_stop(source)
-    except Exception:
-        pass
-    if not (rapidocr_stop or easyocr_stop):
+    for mod_name, stop_func in (("rapid_ocr", rapidocr_stop), ("easy_ocr", easyocr_stop)):
         try:
-            for _mod in ("rapid_ocr", "easy_ocr"):
-                _m = load_custom_module(_mod)
-                if _m and hasattr(_m, "stop_workers_for_source"):
-                    _m.stop_workers_for_source(source)
+            if stop_func:
+                stop_func(source)
+            else:
+                mod = load_custom_module(mod_name)
+                if mod and hasattr(mod, "stop_workers_for_source"):
+                    mod.stop_workers_for_source(source)
         except Exception:
             pass
 
@@ -1360,6 +1379,8 @@ async def stop_roi_stream(cam_id: str):
     inference_mode.pop(cam_id, None)
     _free_cam_state(cam_id)
     save_service_state()
+    gc.collect()
+    _malloc_trim_now()
     asyncio.create_task(_deferred_trim(1.0))
     return jsonify(resp), status
 
