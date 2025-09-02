@@ -1,8 +1,3 @@
-# ใส่บนๆ app.py
-# import faulthandler, os
-# faulthandler.enable()
-# # ถ้าเป็น RTSP ผ่าน ffmpeg แนะนำ:
-# os.environ.setdefault("OPENCV_FFMPEG_CAPTURE_OPTIONS", "rtsp_transport;tcp")
 
 from quart import Quart, render_template, websocket, request, jsonify, send_file, redirect, Response
 import asyncio
