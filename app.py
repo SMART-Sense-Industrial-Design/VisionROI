@@ -18,6 +18,7 @@ from pathlib import Path
 import contextlib
 import inspect
 import gc
+import signal
 from typing import Callable, Awaitable, Any
 try:  # pragma: no cover
     from websockets.exceptions import ConnectionClosed
@@ -151,6 +152,23 @@ if hasattr(app, "after_serving"):
                 pass
             roi_result_queues.pop(cam_id, None)
         gc.collect()
+
+
+# จัดการสัญญาณเพื่อปิดเซิร์ฟเวอร์และเคลียร์ทรัพยากรให้รวดเร็ว
+def _handle_sigterm(*_: object) -> None:
+    """Handle SIGTERM/SIGINT by initiating app shutdown."""
+    try:
+        asyncio.create_task(app.shutdown())
+    except Exception:
+        # หากปิดแอปไม่สำเร็จ พยายามเรียกทำความสะอาดทันที
+        try:
+            asyncio.create_task(_shutdown_cleanup())
+        except Exception:
+            pass
+
+
+signal.signal(signal.SIGTERM, _handle_sigterm)
+signal.signal(signal.SIGINT, _handle_sigterm)
 
 
 # =========================
