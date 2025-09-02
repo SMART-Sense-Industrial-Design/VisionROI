@@ -1,11 +1,10 @@
-
 from quart import Quart, render_template, websocket, request, jsonify, send_file, redirect, Response
 import asyncio
 import cv2
 from camera_worker import CameraWorker
 try:
     import numpy as np
-except Exception:  # pragma: no cover - fallback when numpy is missing
+except Exception:
     np = None
 import json
 import base64
@@ -20,10 +19,13 @@ import contextlib
 import inspect
 import gc
 from typing import Callable, Awaitable, Any
-try:  # pragma: no cover
+try:
     from websockets.exceptions import ConnectionClosed
-except Exception:  # websockets not installed
+except Exception:
     ConnectionClosed = Exception
+
+# NEW: handle signals
+import signal
 
 # เก็บ worker ของกล้องแต่ละตัวในรูปแบบ dict
 camera_workers: dict[str, CameraWorker | None] = {}
@@ -45,7 +47,6 @@ STATE_FILE = "service_state.json"
 PAGE_SCORE_THRESHOLD = 0.4
 
 app = Quart(__name__)
-# กำหนดเพดานขนาดไฟล์ที่เซิร์ฟเวอร์ยอมรับ (100 MB)
 app.config["MAX_CONTENT_LENGTH"] = 100 * 1024 * 1024
 ALLOWED_ROI_DIR = os.path.realpath("data_sources")
 
@@ -54,7 +55,6 @@ ALLOWED_ROI_DIR = os.path.realpath("data_sources")
 # Utils / Security helpers
 # =========================
 def _safe_in_base(base: str, target: str) -> bool:
-    """ตรวจว่าพาธ target อยู่ภายใต้ base จริง (ป้องกัน path traversal)"""
     base = os.path.realpath(base)
     target = os.path.realpath(target)
     try:
@@ -64,12 +64,10 @@ def _safe_in_base(base: str, target: str) -> bool:
 
 
 def get_cam_lock(cam_id: str) -> asyncio.Lock:
-    """คืนค่า lock ประจำกล้อง (หนึ่งตัวต่อ cam_id)"""
     return camera_locks.setdefault(cam_id, asyncio.Lock())
 
 
 def save_service_state() -> None:
-    """บันทึกข้อมูลกล้องและสถานะ inference ลงไฟล์"""
     cam_ids = set(camera_sources) | set(active_sources) | set(inference_tasks)
     data = {
         str(cam_id): {
@@ -77,8 +75,7 @@ def save_service_state() -> None:
             "resolution": list(camera_resolutions.get(cam_id, (None, None))),
             "active_source": active_sources.get(cam_id, ""),
             "inference_running": bool(
-                inference_tasks.get(cam_id)
-                and not inference_tasks[cam_id].done()
+                inference_tasks.get(cam_id) and not inference_tasks[cam_id].done()
             ),
         }
         for cam_id in cam_ids
@@ -89,7 +86,6 @@ def save_service_state() -> None:
 
 
 def load_service_state() -> dict[str, dict[str, object]]:
-    """โหลดข้อมูลสถานะจากไฟล์"""
     path = Path(STATE_FILE)
     if not path.exists():
         return {}
@@ -103,7 +99,6 @@ def load_service_state() -> dict[str, dict[str, object]]:
 
 
 def ensure_roi_ids(rois):
-    """Ensure each ROI dict has a unique string id."""
     if isinstance(rois, list):
         for idx, r in enumerate(rois):
             if isinstance(r, dict) and "id" not in r:
@@ -112,7 +107,6 @@ def ensure_roi_ids(rois):
 
 
 async def restore_service_state() -> None:
-    """โหลดสถานะที่บันทึกไว้และเริ่มงาน inference ที่เคยรัน"""
     cams = load_service_state()
     for cam_id, cfg in cams.items():
         camera_sources[cam_id] = cfg.get("source")
@@ -135,7 +129,7 @@ async def _safe_stop(cam_id: str,
     try:
         await asyncio.wait_for(
             stop_camera_task(cam_id, task_dict, queue_dict),
-            timeout=1.5
+            timeout=1.2  # เล็กลงเพื่อหยุดไว
         )
     except asyncio.TimeoutError:
         pass
@@ -143,11 +137,45 @@ async def _safe_stop(cam_id: str,
         pass
 
 
+# ========== NEW: graceful exit primitives ==========
+async def _graceful_exit():
+    """
+    เรียกตอน service ถูกสั่งหยุด:
+    - ยกเลิก tasks ทั้งหมดด้วย timeout สั้น
+    - ส่ง sentinel ลงคิวเพื่อปลดบล็อก WS
+    - ปิด CameraWorker
+    - จากนั้นจบโปรเซสไว ๆ
+    """
+    try:
+        if "_shutdown_cleanup" in globals():
+            await _shutdown_cleanup()
+    except Exception:
+        pass
+    # ออกจากโปรเซสทันที ไม่รอ event loop ปิดเอง เพื่อไม่ให้ systemd คอยนาน
+    os._exit(0)
+
+
+def _install_signal_handlers():
+    """ติดตั้ง SIGTERM/SIGINT handlers ให้เรียก _graceful_exit()"""
+    loop = asyncio.get_running_loop()
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        try:
+            loop.add_signal_handler(sig, lambda s=sig: asyncio.create_task(_graceful_exit()))
+        except NotImplementedError:
+            # บางแพลตฟอร์มอาจไม่รองรับ (เช่น Windows); ข้ามไป
+            pass
+
+
+if hasattr(app, "before_serving"):
+    @app.before_serving
+    async def _install_handlers_before_serving():
+        _install_signal_handlers()
+
+
 # ปิดทุกงาน/กล้องเมื่อแอปหยุด (กันค้าง) — ปรับให้ปิด "พร้อมกัน"
 if hasattr(app, "after_serving"):
     @app.after_serving
     async def _shutdown_cleanup():
-        # stop inference & roi tasks concurrently with timeout
         await asyncio.gather(
             *[_safe_stop(cid, inference_tasks, frame_queues) for cid in list(inference_tasks.keys())],
             *[_safe_stop(cid, roi_tasks, roi_frame_queues) for cid in list(roi_tasks.keys())],
@@ -155,10 +183,8 @@ if hasattr(app, "after_serving"):
         )
         # close result queues
         for cam_id, q in list(roi_result_queues.items()):
-            try:
+            with contextlib.suppress(Exception):
                 await q.put(None)
-            except Exception:
-                pass
             roi_result_queues.pop(cam_id, None)
         gc.collect()
 
@@ -166,36 +192,41 @@ if hasattr(app, "after_serving"):
 # =========================
 # Routes (pages)
 # =========================
-# ✅ Redirect root ไปหน้า home
 @app.route("/")
 async def index():
     return redirect("/home")
 
 
-# ✅ หน้าแรก (dashboard + menu)
 @app.route("/home")
 async def home():
     return await render_template("home.html")
 
 
-# ✅ หน้าเลือก ROI
 @app.route("/roi")
 async def roi_page():
     return await render_template("roi_selection.html")
 
 
-# ✅ หน้า inference
 @app.route("/inference")
 async def inference() -> str:
-    """แสดงหน้า Inference สำหรับรันโมดูลตาม ROI ที่บันทึกไว้"""
     return await render_template("inference.html")
 
 
-# ✅ หน้า inference page detection
 @app.route("/inference_page")
 async def inference_page() -> str:
-    """แสดงหน้า Inference Page สำหรับตรวจจับหน้ากระดาษ"""
     return await render_template("inference_page.html")
+
+
+# NEW: control endpoints for systemd
+@app.get("/_healthz")
+async def _healthz():
+    return "ok", 200
+
+
+@app.post("/_quit")
+async def _quit():
+    asyncio.create_task(_graceful_exit())
+    return "shutting down", 202
 
 
 # =========================
@@ -206,7 +237,6 @@ def load_custom_module(name: str) -> ModuleType | None:
     if not path.exists():
         return None
     module_name = f"custom_{name}"
-    # ลบโมดูลเก่าที่ค้างอยู่เพื่อให้โหลดใหม่ได้ถูกต้องและไม่กินหน่วยความจำ
     sys.modules.pop(module_name, None)
     importlib.invalidate_caches()
 
@@ -242,27 +272,26 @@ async def read_and_queue_frame(
 ) -> None:
     worker = camera_workers.get(cam_id)
     if worker is None:
-        await asyncio.sleep(0.1)
+        await asyncio.sleep(0.05)  # เล็กลงนิด ลด spin
         return
     frame = await worker.read()
     if frame is None:
-        await asyncio.sleep(0.1)
+        await asyncio.sleep(0.05)
         return
     if np is not None and hasattr(frame, "size") and frame.size == 0:
-        await asyncio.sleep(0.1)
+        await asyncio.sleep(0.05)
         return
     if frame_processor:
         frame = await frame_processor(frame)
     if frame is None:
         return
     try:
-        # ลดขนาด buffer ด้วย JPEG quality หากต้องการ
         encoded, buffer = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
     except Exception:
-        await asyncio.sleep(0.1)
+        await asyncio.sleep(0.05)
         return
     if not encoded or buffer is None:
-        await asyncio.sleep(0.1)
+        await asyncio.sleep(0.05)
         return
     frame_bytes = buffer.tobytes() if hasattr(buffer, "tobytes") else buffer
     if queue.full():
@@ -292,7 +321,7 @@ async def run_inference_loop(cam_id: str):
         scores: list[dict[str, float | str]] = []
         has_page = False
 
-        # pass 1: evaluate page ROIs to determine best group and draw them
+        # pass 1: evaluate page ROIs
         for i, r in enumerate(rois):
             if np is None or r.get('type') != 'page':
                 continue
@@ -349,7 +378,6 @@ async def run_inference_loop(cam_id: str):
 
         scores.sort(key=lambda x: x['score'], reverse=True)
 
-        # pass 2: process ROI items that belong to detected group
         if output or scores:
             try:
                 q = get_roi_result_queue(cam_id)
@@ -455,10 +483,8 @@ async def run_inference_loop(cam_id: str):
         while True:
             await read_and_queue_frame(cam_id, queue, process_frame)
     except asyncio.CancelledError:
-        # ยอมให้ยกเลิกงานได้อย่างปลอดภัยเพื่อป้องกันการค้างของ thread
         pass
     finally:
-        # ล้างโมดูล inference ที่โหลดไว้เพื่อลดการใช้หน่วยความจำหลังหยุดงาน
         for mod_name, (module, _, _) in module_cache.items():
             if module is not None:
                 sys.modules.pop(f"custom_{mod_name}", None)
@@ -472,7 +498,6 @@ async def run_roi_loop(cam_id: str):
         while True:
             await read_and_queue_frame(cam_id, queue)
     except asyncio.CancelledError:
-        # ปิดงานเมื่อถูกยกเลิกเพื่อไม่ให้ไปอ่านกล้องต่อหลังจากถูกสั่งหยุด
         pass
 
 
@@ -484,7 +509,6 @@ async def start_camera_task(
     task_dict: dict[str, asyncio.Task | None],
     loop_func: Callable[[str], Awaitable[Any]],
 ):
-    """เริ่มงานแบบ asynchronous สำหรับกล้องที่ระบุ (พร้อม lock กัน race)"""
     async with get_cam_lock(cam_id):
         task = task_dict.get(cam_id)
         if task is not None and not task.done():
@@ -494,10 +518,8 @@ async def start_camera_task(
         if worker is None:
             src = camera_sources.get(cam_id, 0)
             width, height = camera_resolutions.get(cam_id, (None, None))
-            # หมายเหตุ: ถ้า CameraWorker ของคุณต้องการพารามิเตอร์ต่างจากนี้ ให้คงของเดิม
             worker = CameraWorker(src, asyncio.get_running_loop(), width, height)
             if not worker.start():
-                # ป้องกันไม่ให้กล้องค้างเมื่อเปิดไม่สำเร็จ
                 await worker.stop()
                 camera_workers.pop(cam_id, None)
                 return (
@@ -517,14 +539,12 @@ async def stop_camera_task(
     task_dict: dict[str, asyncio.Task | None],
     queue_dict: dict[str, asyncio.Queue[bytes | None]] | None = None,
 ):
-    """หยุดงานที่ใช้กล้องตาม cam_id (พร้อม lock กัน race) — ปรับให้มี timeout และไม่วน drain ยาว"""
     async with get_cam_lock(cam_id):
         task = task_dict.pop(cam_id, None)
         if task is not None and not task.done():
             task.cancel()
-            # อย่ารอไม่จำกัดเวลา
             try:
-                await asyncio.wait_for(task, timeout=1.0)
+                await asyncio.wait_for(task, timeout=0.8)  # NEW: เร็วขึ้นอีกนิด
             except (asyncio.TimeoutError, asyncio.CancelledError):
                 pass
             status = "stopped"
@@ -534,19 +554,14 @@ async def stop_camera_task(
         if queue_dict is not None:
             queue = queue_dict.pop(cam_id, None)
             if queue is not None:
-                # ปลดบล็อกผู้รอคิว (เช่น WebSocket) ด้วย None — แบบมี timeout สั้น ๆ
-                try:
+                with contextlib.suppress(Exception):
                     await asyncio.wait_for(queue.put(None), timeout=0.2)
-                except Exception:
-                    pass
-                # ระบายคิวเร็ว ๆ จำกัดรอบกันวนลูป
                 for _ in range(3):
                     try:
                         queue.get_nowait()
                     except asyncio.QueueEmpty:
                         break
 
-        # ปล่อยกล้องเมื่อไม่มีงานอื่นใช้งานอยู่
         inf_task = inference_tasks.get(cam_id)
         roi_task = roi_tasks.get(cam_id)
         worker = camera_workers.get(cam_id)
@@ -568,7 +583,6 @@ async def stop_camera_task(
 # =========================
 # WebSockets
 # =========================
-# ✅ WebSocket video stream
 @app.websocket('/ws/<string:cam_id>')
 async def ws(cam_id: str):
     queue = get_frame_queue(cam_id)
@@ -586,7 +600,6 @@ async def ws(cam_id: str):
             await websocket.close()
 
 
-# ✅ WebSocket ROI stream
 @app.websocket('/ws_roi/<string:cam_id>')
 async def ws_roi(cam_id: str):
     queue = get_roi_frame_queue(cam_id)
@@ -649,7 +662,6 @@ async def apply_camera_settings(cam_id: str, data: dict) -> bool:
         except ValueError:
             camera_sources[cam_id] = source_val
 
-        # หากมี task ใดกำลังรันอยู่ ให้เปิดกล้องใหม่ด้วยค่าที่ตั้ง
         if (
             (inference_tasks.get(cam_id) and not inference_tasks[cam_id].done())
             or (roi_tasks.get(cam_id) and not roi_tasks[cam_id].done())
@@ -729,7 +741,6 @@ async def source_list():
                 with cfg_path.open("r") as f:
                     cfg = json.load(f)
             except (OSError, json.JSONDecodeError):
-                # skip sources with unreadable or invalid config
                 continue
             result.append(
                 {
@@ -836,7 +847,6 @@ async def delete_source(name: str):
 # =========================
 # ROI save/load (secure)
 # =========================
-# ✅ บันทึก ROI
 @app.route("/save_roi", methods=["POST"])
 async def save_roi():
     data = await request.get_json()
@@ -876,7 +886,6 @@ async def save_roi():
     return jsonify({"status": "saved", "filename": roi_path})
 
 
-# ✅ โหลด ROI จากไฟล์ล่าสุดของ source
 @app.route("/load_roi/<name>")
 async def load_roi(name: str):
     name = os.path.basename(name.strip())
@@ -897,7 +906,6 @@ async def load_roi(name: str):
     return jsonify({"rois": rois, "filename": roi_file})
 
 
-# ✅ โหลด ROI ตามพาธที่ระบุใน config (จำกัดให้อยู่ใน data_sources เท่านั้น)
 @app.route("/load_roi_file")
 async def load_roi_file():
     path = request.args.get("path", "")
@@ -914,7 +922,6 @@ async def load_roi_file():
 # =========================
 # Inference controls
 # =========================
-# ฟังก์ชันช่วยเริ่มงาน inference เพื่อใช้ซ้ำได้ทั้งจาก route และตอนรีสตาร์ท
 async def perform_start_inference(cam_id: str, rois=None, group: str | None = None, save_state: bool = True):
     if roi_tasks.get(cam_id) and not roi_tasks[cam_id].done():
         return False
@@ -934,7 +941,7 @@ async def perform_start_inference(cam_id: str, rois=None, group: str | None = No
             rois = []
     if not isinstance(rois, list):
         rois = []
-    rois = ensure_roi_ids(rois)  # ← ให้มี id เสมอ
+    rois = ensure_roi_ids(rois)
 
     if np is not None:
         for r in rois:
@@ -948,14 +955,12 @@ async def perform_start_inference(cam_id: str, rois=None, group: str | None = No
                         tmpl = None
                     r["_template"] = tmpl
 
-    # เก็บ ROI ทั้งหมดไว้เพื่อใช้วาดกรอบและประมวลผลเฉพาะที่จำเป็น
     inference_rois[cam_id] = rois
     if group is None:
         inference_groups.pop(cam_id, None)
     else:
         inference_groups[cam_id] = group
 
-    # เคลียร์ผลค้าง
     q = get_roi_result_queue(cam_id)
     while not q.empty():
         try:
@@ -969,7 +974,6 @@ async def perform_start_inference(cam_id: str, rois=None, group: str | None = No
     return True
 
 
-# ✅ เริ่มงาน inference
 @app.route('/start_inference/<string:cam_id>', methods=["POST"])
 async def start_inference(cam_id: str):
     if roi_tasks.get(cam_id) and not roi_tasks[cam_id].done():
@@ -988,7 +992,6 @@ async def start_inference(cam_id: str):
     return jsonify({"status": "error", "cam_id": cam_id}), 400
 
 
-# ✅ หยุดงาน inference
 @app.route('/stop_inference/<string:cam_id>', methods=["POST"])
 async def stop_inference(cam_id: str):
     _, resp, status = await stop_camera_task(cam_id, inference_tasks, frame_queues)
@@ -996,7 +999,6 @@ async def stop_inference(cam_id: str):
     if queue is not None:
         await queue.put(None)
         roi_result_queues.pop(cam_id, None)
-    # Clear cached ROI data and flags to free memory
     inference_rois.pop(cam_id, None)
     inference_groups.pop(cam_id, None)
     save_roi_flags.pop(cam_id, None)
@@ -1005,7 +1007,6 @@ async def stop_inference(cam_id: str):
     return jsonify(resp), status
 
 
-# ✅ เริ่มงาน ROI stream
 @app.route('/start_roi_stream/<string:cam_id>', methods=["POST"])
 async def start_roi_stream(cam_id: str):
     if inference_tasks.get(cam_id) and not inference_tasks[cam_id].done():
@@ -1025,25 +1026,20 @@ async def start_roi_stream(cam_id: str):
     return jsonify(resp), status
 
 
-# ✅ หยุดงาน ROI stream
 @app.route('/stop_roi_stream/<string:cam_id>', methods=["POST"])
 async def stop_roi_stream(cam_id: str):
     _, resp, status = await stop_camera_task(cam_id, roi_tasks, roi_frame_queues)
     return jsonify(resp), status
 
 
-# ✅ สถานะงาน inference
 @app.route('/inference_status/<string:cam_id>', methods=["GET"])
 async def inference_status(cam_id: str):
-    """คืนค่าความพร้อมของงาน inference"""
     running = inference_tasks.get(cam_id) is not None and not inference_tasks[cam_id].done()
     return jsonify({"running": running, "cam_id": cam_id})
 
 
-# ✅ สถานะงาน ROI stream
 @app.route('/roi_stream_status/<string:cam_id>', methods=["GET"])
 async def roi_stream_status(cam_id: str):
-    """เช็คว่างาน ROI stream กำลังทำงานอยู่หรือไม่"""
     running = roi_tasks.get(cam_id) is not None and not roi_tasks[cam_id].done()
     source = active_sources.get(cam_id, "")
     return jsonify({"running": running, "cam_id": cam_id, "source": source})
@@ -1052,7 +1048,6 @@ async def roi_stream_status(cam_id: str):
 # =========================
 # Snapshot (safer Response)
 # =========================
-# ✅ ส่ง snapshot 1 เฟรม (ใช้ในหน้า inference)
 @app.route("/ws_snapshot/<string:cam_id>")
 async def ws_snapshot(cam_id: str):
     worker = camera_workers.get(cam_id)
@@ -1072,8 +1067,6 @@ async def ws_snapshot(cam_id: str):
 # =========================
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run VisionROI server")
-    parser.add_argument(
-        "--port", type=int, default=5000, help="Port for the web server"
-    )
+    parser.add_argument("--port", type=int, default=5000, help="Port for the web server")
     args = parser.parse_args()
     app.run(port=args.port)
