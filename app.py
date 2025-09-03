@@ -541,6 +541,10 @@ async def run_inference_loop(cam_id: str):
     finally:
         for mod_name, (module, _, _) in module_cache.items():
             if module is not None:
+                with contextlib.suppress(Exception):
+                    cleanup_fn = getattr(module, "cleanup", None)
+                    if callable(cleanup_fn):
+                        cleanup_fn()
                 sys.modules.pop(f"custom_{mod_name}", None)
         module_cache.clear()
         gc.collect()
@@ -1057,7 +1061,22 @@ async def stop_inference(cam_id: str):
         await queue.put(None)
         roi_result_queues.pop(cam_id, None)
     # clear cached ROI data and flags
-    inference_rois.pop(cam_id, None)
+    rois = inference_rois.pop(cam_id, [])
+    # cleanup any loaded custom modules
+    seen: set[str] = set()
+    for r in rois:
+        mod_name = r.get("module")
+        if not mod_name or mod_name in seen:
+            continue
+        seen.add(mod_name)
+        mod_key = f"custom_{mod_name}"
+        module = sys.modules.get(mod_key)
+        if module is not None:
+            with contextlib.suppress(Exception):
+                cleanup_fn = getattr(module, "cleanup", None)
+                if callable(cleanup_fn):
+                    cleanup_fn()
+            sys.modules.pop(mod_key, None)
     inference_groups.pop(cam_id, None)
     save_roi_flags.pop(cam_id, None)
 
