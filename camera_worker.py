@@ -3,6 +3,7 @@ import cv2
 import time
 import threading
 import asyncio
+import gc
 from typing import Optional
 from queue import Queue, Empty
 from contextlib import contextmanager
@@ -16,6 +17,16 @@ def silent():
 
 def _is_rtsp(src) -> bool:
     return isinstance(src, str) and src.strip().lower().startswith("rtsp://")
+
+
+def _malloc_trim() -> None:
+    """คืนพื้นที่ heap ให้ OS ถ้าเป็นไปได้ (Linux/glibc)."""
+    try:
+        import ctypes
+        libc = ctypes.CDLL("libc.so.6")
+        libc.malloc_trim(0)
+    except Exception:
+        pass
 
 class CameraWorker:
     def __init__(self, src,
@@ -122,3 +133,8 @@ class CameraWorker:
                 _ = self._q.get_nowait()
             except Empty:
                 break
+
+        # เก็บขยะและคืนหน่วยความจำกลับให้ระบบ
+        gc.collect()
+        _malloc_trim()
+
