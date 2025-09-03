@@ -205,7 +205,7 @@ def process(
     if should_ocr:
         with _last_ocr_lock:
             last_ocr_times[roi_id] = current_time
-        q = _roi_queues.setdefault(roi_id, Queue(maxsize=3))
+        q = _roi_queues.setdefault(roi_id, Queue(maxsize=1))
         item = (frame.copy(), save, source)
         try:
             q.put_nowait(item)
