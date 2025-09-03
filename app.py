@@ -1,3 +1,6 @@
+import faulthandler
+faulthandler.enable()
+
 from quart import Quart, render_template, websocket, request, jsonify, send_file, redirect, Response
 import asyncio
 import cv2
