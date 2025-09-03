@@ -79,12 +79,9 @@ class CameraWorker:
                 time.sleep(0.02)
                 continue
 
-            # สำคัญ: copy() ตัดขาดจากบัฟเฟอร์เดิม ลด use-after-free/reuse
-            try:
-                frame_copy = frame.copy()
-            except Exception:
-                time.sleep(0.01)
-                continue
+            # แปลงเป็น grayscale เพื่อลดการใช้หน่วยความจำ (หากทำได้)
+            with silent():
+                frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
             if self._q.full():
                 try:
@@ -92,9 +89,12 @@ class CameraWorker:
                 except Empty:
                     pass
             try:
-                self._q.put_nowait(frame_copy)
+                self._q.put_nowait(frame)
             except Exception:
                 pass
+            finally:
+                del frame
+                gc.collect()
 
             if self.read_interval > 0:
                 time.sleep(self.read_interval)

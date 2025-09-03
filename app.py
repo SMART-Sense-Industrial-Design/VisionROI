@@ -354,6 +354,8 @@ async def read_and_queue_frame(
         except asyncio.QueueEmpty:
             pass
     await queue.put(frame_bytes)
+    del frame, buffer
+    gc.collect()
     await asyncio.sleep(0.04)
 
 
