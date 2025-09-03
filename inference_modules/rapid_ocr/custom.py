@@ -9,6 +9,7 @@ import os
 from datetime import datetime
 import threading
 from pathlib import Path
+import gc
 
 try:
     import numpy as np
@@ -182,3 +183,26 @@ def process(
         threading.Thread(target=_target, daemon=True).start()
 
     return result_text
+
+
+def cleanup() -> None:
+    """รีเซ็ตสถานะและคืนทรัพยากรที่ใช้โดยโมดูล OCR"""
+    global _reader, _handler, _current_source
+
+    with _reader_lock:
+        _reader = None
+
+    with _last_ocr_lock:
+        last_ocr_times.clear()
+        last_ocr_results.clear()
+
+    if _handler:
+        logger.removeHandler(_handler)
+        try:
+            _handler.close()
+        except Exception:  # pragma: no cover
+            logger.exception("Failed to close log handler")
+        _handler = None
+    _current_source = None
+
+    gc.collect()
