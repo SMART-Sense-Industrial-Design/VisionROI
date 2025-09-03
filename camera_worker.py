@@ -74,7 +74,10 @@ class CameraWorker:
     def _run(self) -> None:
         # ป้องกันการ read ต่อหลังถูกสั่งหยุด
         while not self._stop_evt.is_set():
-            ok, frame = self._cap.read() if (self._cap is not None) else (False, None)
+            if self._cap is None or not self._cap.isOpened():
+                time.sleep(0.02)
+                continue
+            ok, frame = self._cap.read()
             if not ok or frame is None:
                 time.sleep(0.02)
                 continue
@@ -114,18 +117,16 @@ class CameraWorker:
 
     async def stop(self) -> None:
         self._stop_evt.set()
+        with silent():
+            if self._thread is not None and self._thread.is_alive():
+                await asyncio.to_thread(self._thread.join, 0.5)
 
         # ปล่อยกล้อง (ปลดบล็อค read) แล้วพักเล็กน้อย ลด crash race
         with silent():
             if self._cap is not None and self._cap.isOpened():
                 await asyncio.to_thread(self._cap.release)
-        # ให้ backend ปิดเธรดภายในก่อนเล็กน้อย
         await asyncio.sleep(0.05)
         self._cap = None  # กันโค้ดส่วนอื่นเผลอใช้ต่อ
-
-        with silent():
-            if self._thread is not None and self._thread.is_alive():
-                await asyncio.to_thread(self._thread.join, 0.5)
 
         # ล้างคิว
         while True:
