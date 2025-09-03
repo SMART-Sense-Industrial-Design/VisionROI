@@ -125,6 +125,7 @@ def save_service_state() -> None:
             "inference_running": bool(
                 inference_tasks.get(cam_id) and not inference_tasks[cam_id].done()
             ),
+            "inference_group": inference_groups.get(cam_id),
         }
         for cam_id in cam_ids
     }
@@ -161,8 +162,11 @@ async def restore_service_state() -> None:
         res = cfg.get("resolution") or [None, None]
         camera_resolutions[cam_id] = (res[0], res[1])
         active_sources[cam_id] = cfg.get("active_source", "")
+        group = cfg.get("inference_group")
         if cfg.get("inference_running"):
-            await perform_start_inference(cam_id, save_state=False)
+            await perform_start_inference(cam_id, group=group, save_state=False)
+        elif group is not None:
+            inference_groups[cam_id] = group
     save_service_state()
 
 

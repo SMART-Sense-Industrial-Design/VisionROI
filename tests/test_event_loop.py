@@ -62,7 +62,7 @@ def test_event_loop_responsive():
         with contextlib.suppress(asyncio.CancelledError):
             await loop_task
 
-        frames = worker.cap.frames_read
+        frames = worker._cap.frames_read
         await worker.stop()
         app.camera_workers["0"] = None
         return ticks, frames

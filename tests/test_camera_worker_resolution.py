@@ -30,8 +30,8 @@ def test_camera_worker_sets_resolution():
     try:
         loop = asyncio.new_event_loop()
         worker = app.CameraWorker(0, loop, width=640, height=480)
-        assert worker.cap.settings[app.cv2.CAP_PROP_FRAME_WIDTH] == 640
-        assert worker.cap.settings[app.cv2.CAP_PROP_FRAME_HEIGHT] == 480
+        assert worker._cap.settings[app.cv2.CAP_PROP_FRAME_WIDTH] == 640
+        assert worker._cap.settings[app.cv2.CAP_PROP_FRAME_HEIGHT] == 480
     finally:
         app.cv2.VideoCapture = orig_vc
         app.cv2.CAP_PROP_FRAME_WIDTH = orig_w
