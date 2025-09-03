@@ -10,6 +10,7 @@ from datetime import datetime
 import threading
 from pathlib import Path
 import gc
+import queue
 
 try:
     import numpy as np
@@ -31,7 +32,10 @@ _data_sources_root = Path(__file__).resolve().parents[2] / "data_sources"
 
 _reader: easyocr.Reader | None = None
 _reader_lock = threading.Lock()
-_reader_run_lock = threading.Lock()
+
+# คิวและเธรดสำหรับประมวลผล OCR ทีละรายการ
+_OCR_QUEUE_SIZE = 32
+_ocr_queue: "queue.Queue[tuple]" = queue.Queue(maxsize=_OCR_QUEUE_SIZE)
 
 
 def _configure_logger(source: str | None) -> None:
@@ -103,6 +107,20 @@ def _run_ocr_async(frame, roi_id, save, source) -> None:
         _save_image_async(str(path), frame)
 
 
+def _ocr_worker() -> None:
+    """ดึงงานจากคิวแล้วประมวลผล OCR ทีละรายการ"""
+    while True:
+        frame, roi_id, save, source = _ocr_queue.get()
+        try:
+            _run_ocr_async(frame, roi_id, save, source)
+        finally:
+            del frame
+            _ocr_queue.task_done()
+
+
+threading.Thread(target=_ocr_worker, daemon=True).start()
+
+
 def process(
     frame,
     roi_id=None,
@@ -135,17 +153,15 @@ def process(
 
     result_text = last_ocr_results.get(roi_id, "")
 
-    if should_ocr and _reader_run_lock.acquire(blocking=False):
-        with _last_ocr_lock:
-            last_ocr_times[roi_id] = current_time
-
-        def _target() -> None:
-            try:
-                _run_ocr_async(frame.copy(), roi_id, save, source)
-            finally:
-                _reader_run_lock.release()
-
-        threading.Thread(target=_target, daemon=True).start()
+    if should_ocr:
+        try:
+            _ocr_queue.put_nowait((frame, roi_id, save, source))
+        except queue.Full:
+            logger.warning("OCR queue full, dropping frame")
+        else:
+            with _last_ocr_lock:
+                last_ocr_times[roi_id] = current_time
+            _ocr_queue.join()
 
     return result_text
 
@@ -153,6 +169,7 @@ def process(
 def cleanup() -> None:
     """รีเซ็ตสถานะของโมดูลและบังคับเก็บขยะ"""
     global _reader, _handler, _current_source
+    _ocr_queue.join()
     with _reader_lock:
         _reader = None
     with _last_ocr_lock:
