@@ -14,6 +14,10 @@ def stub_quart():
                 return f
             return decorator
 
+        # เพิ่มเมธอด get/post ให้คืน decorator แบบเดียวกับ route
+        get = route
+        post = route
+
         class DummyResponse:
             def __init__(self, status_code=200):
                 self.status_code = status_code
