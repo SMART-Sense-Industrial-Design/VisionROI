@@ -10,6 +10,8 @@ from datetime import datetime
 import threading
 from pathlib import Path
 import gc
+import queue
+from concurrent.futures import ThreadPoolExecutor
 
 try:
     import numpy as np
@@ -31,7 +33,6 @@ _data_sources_root = Path(__file__).resolve().parents[2] / "data_sources"
 
 _reader: easyocr.Reader | None = None
 _reader_lock = threading.Lock()
-_reader_run_lock = threading.Lock()
 
 
 def _configure_logger(source: str | None) -> None:
@@ -68,6 +69,8 @@ last_ocr_times: dict = {}
 last_ocr_results: dict = {}
 _last_ocr_lock = threading.Lock()
 _imwrite_lock = threading.Lock()
+roi_queues: dict[str, queue.Queue] = {}
+executor = ThreadPoolExecutor(max_workers=3)
 
 
 def _save_image_async(path, image) -> None:
@@ -103,6 +106,17 @@ def _run_ocr_async(frame, roi_id, save, source) -> None:
         _save_image_async(str(path), frame)
 
 
+def _worker(roi_id: str, q: queue.Queue) -> None:
+    """ดึงเฟรมจากคิวและเรียก OCR"""
+    while True:
+        item = q.get()
+        if item is None:
+            break
+        frame, save, source = item
+        _run_ocr_async(frame, roi_id, save, source)
+        q.task_done()
+
+
 def process(
     frame,
     roi_id=None,
@@ -135,29 +149,49 @@ def process(
 
     result_text = last_ocr_results.get(roi_id, "")
 
-    if should_ocr and _reader_run_lock.acquire(blocking=False):
+    if should_ocr:
         with _last_ocr_lock:
             last_ocr_times[roi_id] = current_time
 
-        def _target() -> None:
+        key = str(roi_id)
+        q = roi_queues.get(key)
+        if q is None:
+            q = queue.Queue(maxsize=3)
+            roi_queues[key] = q
+            executor.submit(_worker, roi_id, q)
+        try:
+            q.put_nowait((frame.copy(), save, source))
+        except queue.Full:
             try:
-                _run_ocr_async(frame.copy(), roi_id, save, source)
-            finally:
-                _reader_run_lock.release()
-
-        threading.Thread(target=_target, daemon=True).start()
+                q.get_nowait()
+            except queue.Empty:
+                pass
+            q.put_nowait((frame.copy(), save, source))
 
     return result_text
 
 
 def cleanup() -> None:
     """รีเซ็ตสถานะของโมดูลและบังคับเก็บขยะ"""
-    global _reader, _handler, _current_source
+    global _reader, _handler, _current_source, executor
     with _reader_lock:
         _reader = None
     with _last_ocr_lock:
         last_ocr_times.clear()
         last_ocr_results.clear()
+    for q in roi_queues.values():
+        while True:
+            try:
+                q.get_nowait()
+            except queue.Empty:
+                break
+        try:
+            q.put_nowait(None)
+        except queue.Full:
+            pass
+    executor.shutdown(wait=True, cancel_futures=True)
+    roi_queues.clear()
+    executor = ThreadPoolExecutor(max_workers=3)
     if _handler:
         logger.removeHandler(_handler)
         try:
