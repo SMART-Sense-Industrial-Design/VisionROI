@@ -6,6 +6,8 @@
             <div class="d-flex align-items-center mb-2 gap-2 menu-select-list">
                 <label for="cam1-sourceSelect" class="form-label mb-0">Source:</label>
                 <select id="cam1-sourceSelect" class="form-select w-auto"></select>
+                <label for="cam1-intervalInput" class="form-label mb-0">Time:</label>
+                <input id="cam1-intervalInput" type="number" class="form-control w-auto" min="0" step="0.1" value="1" />
             </div>
             <button id="cam1-startButton" class="btn btn-primary me-2">Start</button>
             <button id="cam1-stopButton" class="btn btn-danger" disabled>Stop</button>
@@ -42,7 +44,8 @@ function createController(cellId){
     const stopButton=getEl('stopButton');
     const statusEl=getEl('status');
     const sourceSelect=getEl('sourceSelect');
-
+    const intervalInput=getEl('intervalInput');
+    intervalInput.value=localStorage.getItem(`${cellId}-interval`)||'1';
 
     startButton.onclick=startStream;
     stopButton.onclick=stopStream;
@@ -113,6 +116,8 @@ function createController(cellId){
         localStorage.setItem(`${cellId}-source`,name);
         const cfgRes=await fetchWithStatus(`/source_config?name=${encodeURIComponent(name)}`);
         const cfg=await cfgRes.json();
+        const interval=parseFloat(intervalInput.value)||1;
+        localStorage.setItem(`${cellId}-interval`,interval);
         let roiPath=cfg.rois;
         if(!roiPath.startsWith('/'))roiPath=`data_sources/${cfg.name}/${roiPath}`;
         let roiList=[];
@@ -136,7 +141,7 @@ function createController(cellId){
 
         const startRes=await fetchWithStatus(`/start_inference/${cam}`,{
             method:'POST',headers:{'Content-Type':'application/json'},
-            body:JSON.stringify({...cfg,rois:roiList})
+            body:JSON.stringify({...cfg,rois:roiList,interval})
         });
         const startData=await startRes.json();
         if(startData.status==='started'||startData.status==='already_running'){

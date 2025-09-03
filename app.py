@@ -43,6 +43,7 @@ inference_rois: dict[str, list[dict]] = {}
 active_sources: dict[str, str] = {}
 save_roi_flags: dict[str, bool] = {}
 inference_groups: dict[str, str | None] = {}
+inference_intervals: dict[str, float] = {}
 
 STATE_FILE = "service_state.json"
 PAGE_SCORE_THRESHOLD = 0.4
@@ -74,6 +75,7 @@ def _free_cam_state(cam_id: str):
     save_roi_flags.pop(cam_id, None)
     inference_groups.pop(cam_id, None)
     inference_rois.pop(cam_id, None)
+    inference_intervals.pop(cam_id, None)
 
     # Queues: drain & drop
     q = frame_queues.pop(cam_id, None)
@@ -129,6 +131,7 @@ def save_service_state() -> None:
                 inference_tasks.get(cam_id) and not inference_tasks[cam_id].done()
             ),
             "inference_group": inference_groups.get(cam_id),
+            "interval": inference_intervals.get(cam_id, 1.0),
         }
         for cam_id in cam_ids
     }
@@ -166,6 +169,7 @@ async def restore_service_state() -> None:
         camera_resolutions[cam_id] = (res[0], res[1])
         active_sources[cam_id] = cfg.get("active_source", "")
         group = cfg.get("inference_group")
+        inference_intervals[cam_id] = cfg.get("interval", 1.0)
         if cfg.get("inference_running"):
             await perform_start_inference(cam_id, group=group, save_state=False)
         elif group is not None:
@@ -364,7 +368,7 @@ async def read_and_queue_frame(
 # Loops
 # =========================
 async def run_inference_loop(cam_id: str):
-    module_cache: dict[str, tuple[ModuleType | None, bool, bool]] = {}
+    module_cache: dict[str, tuple[ModuleType | None, bool, bool, bool]] = {}
 
     async def process_frame(frame):
         rois = inference_rois.get(cam_id, [])
@@ -465,15 +469,17 @@ async def run_inference_loop(cam_id: str):
                     module = load_custom_module(mod_name)
                     takes_source = False
                     takes_cam_id = False
+                    takes_interval = False
                     if module:
                         proc = getattr(module, 'process', None)
                         if callable(proc):
                             params = inspect.signature(proc).parameters
                             takes_source = 'source' in params
                             takes_cam_id = 'cam_id' in params
-                    module_cache[mod_name] = (module, takes_source, takes_cam_id)
+                            takes_interval = 'interval' in params
+                    module_cache[mod_name] = (module, takes_source, takes_cam_id, takes_interval)
                 else:
-                    module, takes_source, takes_cam_id = module_entry
+                    module, takes_source, takes_cam_id, takes_interval = module_entry
                 if module is None:
                     print(f"module '{mod_name}' not found for ROI {r.get('id', i)}")
                 else:
@@ -497,6 +503,8 @@ async def run_inference_loop(cam_id: str):
                                 args.append(active_sources.get(cam_id, ''))
                             if takes_cam_id:
                                 args.append(cam_id)
+                            if takes_interval:
+                                args.append(inference_intervals.get(cam_id, 1.0))
                             result = process_fn(*args)
                             if inspect.isawaitable(result):
                                 result = await result
@@ -542,7 +550,7 @@ async def run_inference_loop(cam_id: str):
     except asyncio.CancelledError:
         pass
     finally:
-        for mod_name, (module, _, _) in module_cache.items():
+        for mod_name, (module, _, _, _) in module_cache.items():
             if module is not None:
                 with contextlib.suppress(Exception):
                     cleanup_fn = getattr(module, "cleanup", None)
@@ -1046,6 +1054,14 @@ async def start_inference(cam_id: str):
     cfg = dict(data)
     rois = cfg.pop("rois", None)
     group = cfg.pop("group", None)
+    interval = cfg.pop("interval", None)
+    if interval is not None:
+        try:
+            inference_intervals[cam_id] = float(interval)
+        except (TypeError, ValueError):
+            inference_intervals[cam_id] = 1.0
+    else:
+        inference_intervals.pop(cam_id, None)
     if cfg:
         cfg_ok = await apply_camera_settings(cam_id, cfg)
         if not cfg_ok:
@@ -1082,6 +1098,7 @@ async def stop_inference(cam_id: str):
             sys.modules.pop(mod_key, None)
     inference_groups.pop(cam_id, None)
     save_roi_flags.pop(cam_id, None)
+    inference_intervals.pop(cam_id, None)
 
     # NEW: fully free per-camera state & trim memory
     _free_cam_state(cam_id)
