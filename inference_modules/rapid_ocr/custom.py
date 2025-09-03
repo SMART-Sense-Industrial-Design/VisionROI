@@ -10,6 +10,7 @@ from datetime import datetime
 import threading
 from pathlib import Path
 import gc
+from queue import Queue, Empty, Full
 
 try:
     import numpy as np
@@ -31,7 +32,12 @@ _data_sources_root = Path(__file__).resolve().parents[2] / "data_sources"
 
 _reader = None
 _reader_lock = threading.Lock()
-_reader_run_lock = threading.Lock()
+
+# คิวและตัวจัดการ worker สำหรับแยกงาน OCR ตาม ROI
+_roi_queues: dict = {}
+_worker_thread: threading.Thread | None = None
+_worker_stop_event = threading.Event()
+_worker_thread_lock = threading.Lock()
 
 
 def _configure_logger(source: str | None) -> None:
@@ -138,6 +144,33 @@ def _run_ocr_async(frame, roi_id, save, source) -> None:
         _save_image_async(str(path), frame)
 
 
+def _worker() -> None:
+    """worker หลักที่ดึงงานจากคิวของแต่ละ ROI"""
+    while not _worker_stop_event.is_set():
+        processed = False
+        for roi_id, q in list(_roi_queues.items()):
+            try:
+                frame, save, source = q.get_nowait()
+            except Empty:
+                continue
+            processed = True
+            try:
+                _run_ocr_async(frame, roi_id, save, source)
+            finally:
+                q.task_done()
+        if not processed:
+            time.sleep(0.01)
+
+
+def _ensure_worker() -> None:
+    global _worker_thread
+    with _worker_thread_lock:
+        if _worker_thread is None or not _worker_thread.is_alive():
+            _worker_stop_event.clear()
+            _worker_thread = threading.Thread(target=_worker, daemon=True)
+            _worker_thread.start()
+
+
 def process(
     frame,
     roi_id=None,
@@ -169,25 +202,49 @@ def process(
     should_ocr = last_time is None or diff_time >= interval
 
     result_text = last_ocr_results.get(roi_id, "")
-
-    if should_ocr and _reader_run_lock.acquire(blocking=False):
+    if should_ocr:
         with _last_ocr_lock:
             last_ocr_times[roi_id] = current_time
-
-        def _target() -> None:
+        q = _roi_queues.setdefault(roi_id, Queue(maxsize=3))
+        item = (frame.copy(), save, source)
+        try:
+            q.put_nowait(item)
+        except Full:
             try:
-                _run_ocr_async(frame.copy(), roi_id, save, source)
-            finally:
-                _reader_run_lock.release()
-
-        threading.Thread(target=_target, daemon=True).start()
+                q.get_nowait()
+            except Empty:
+                pass
+            try:
+                q.put_nowait(item)
+            except Full:
+                pass
+        _ensure_worker()
 
     return result_text
 
 
+def stop(roi_id) -> None:
+    """ลบข้อมูลและคิวของ ROI ที่หยุดใช้งาน"""
+    q = _roi_queues.pop(roi_id, None)
+    if q:
+        with q.mutex:
+            q.queue.clear()
+            q.unfinished_tasks = 0
+            q.all_tasks_done.notify_all()
+    with _last_ocr_lock:
+        last_ocr_times.pop(roi_id, None)
+        last_ocr_results.pop(roi_id, None)
+
+
 def cleanup() -> None:
     """รีเซ็ตสถานะและคืนทรัพยากรที่ใช้โดยโมดูล OCR"""
-    global _reader, _handler, _current_source
+    global _reader, _handler, _current_source, _worker_thread
+
+    _worker_stop_event.set()
+    if _worker_thread and _worker_thread.is_alive():
+        _worker_thread.join(timeout=1)
+    _worker_thread = None
+    _roi_queues.clear()
 
     with _reader_lock:
         _reader = None
