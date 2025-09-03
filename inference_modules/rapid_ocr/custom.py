@@ -11,27 +11,16 @@ import threading
 from pathlib import Path
 import gc
 from queue import Queue, Empty, Full
-from inspect import signature, Parameter
 
 try:
     import numpy as np
 except Exception:  # pragma: no cover - fallback when numpy missing
     np = None
 
-# ---- ใช้ rapidocr-onnxruntime โดยตรง ----
-RapidOCR = None
-_rapidocr_err: str | None = None
 try:
-    from rapidocr_onnxruntime import RapidOCR as _RapidOCR
-    RapidOCR = _RapidOCR  # type: ignore[assignment]
-except Exception as e:  # pragma: no cover - fallback when rapidocr_onnxruntime missing
-    _rapidocr_err = f"rapidocr-onnxruntime import error: {e}"
-
-# onnxruntime สำหรับตรวจ EP และแสดงผล provider ที่มีอยู่
-try:
-    import onnxruntime as ort
-except Exception:  # pragma: no cover
-    ort = None  # type: ignore[assignment]
+    from rapidocr import RapidOCR
+except Exception:  # pragma: no cover - fallback when rapidocr missing
+    RapidOCR = None  # type: ignore[assignment]
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -69,134 +58,14 @@ def _configure_logger(source: str | None) -> None:
     _current_source = source
 
 
-def _available_providers() -> list[str]:
-    if ort is None:  # pragma: no cover
-        return []
-    try:
-        return list(ort.get_available_providers())
-    except Exception:  # pragma: no cover
-        return []
-
-
-def _parse_env_bool(name: str, default: bool) -> bool:
-    v = os.getenv(name)
-    if v is None:
-        return default
-    return v.strip().lower() in ("1", "true", "yes", "y", "on")
-
-
-def _build_providers_from_env() -> tuple[list, list]:
-    """
-    คืนค่า (providers, provider_options) ตามสิ่งที่เครื่องรองรับ + ค่า ENV
-    ลำดับดีฟอลต์: TensorRT -> CUDA -> CPU
-    สามารถ override ด้วย RAPIDOCR_PROVIDERS (คอมม่า-คั่น)
-    """
-    avail = _available_providers()
-    if avail:
-        logger.info(f"ONNX Runtime available providers: {avail}")
-    else:
-        logger.info("ONNX Runtime providers not available or ORT not installed; will fall back to defaults.")
-
-    # อ่าน override จาก ENV (ถ้ามี)
-    override = os.getenv("RAPIDOCR_PROVIDERS")
-    if override:
-        desired = [x.strip() for x in override.split(",") if x.strip()]
-    else:
-        desired = ["TensorrtExecutionProvider", "CUDAExecutionProvider", "CPUExecutionProvider"]
-
-    # กรองเฉพาะที่มีอยู่จริง (แต่คง CPUExecutionProvider ไว้เป็น fallback แม้ ORT รายงานไม่ครบ)
-    providers: list = []
-    provider_options: list = []
-    for p in desired:
-        if p == "CPUExecutionProvider":
-            providers.append(p)
-            provider_options.append({})
-            continue
-        if (not avail) or (p in avail):
-            if p == "TensorrtExecutionProvider":
-                # ตั้งค่า TensorRT EP จาก ENV
-                trt_fp16 = _parse_env_bool("RAPIDOCR_TRT_FP16", True)
-                # หน่วย MB -> bytes
-                trt_ws_mb = int(os.getenv("RAPIDOCR_TRT_WORKSPACE", "2048"))
-                trt_ws = int(trt_ws_mb) * 1024 * 1024
-                providers.append(p)
-                provider_options.append({
-                    "trt_fp16_enable": trt_fp16,
-                    "trt_max_workspace_size": trt_ws,
-                })
-            else:
-                providers.append(p)
-                provider_options.append({})
-        else:
-            logger.info(f"Skip provider '{p}' (not available on this system).")
-
-    # อย่างน้อยต้องมี CPU
-    if "CPUExecutionProvider" not in providers:
-        providers.append("CPUExecutionProvider")
-        provider_options.append({})
-
-    return providers, provider_options
-
-
-def _class_accepts_params(cls, *param_names: str) -> dict[str, bool]:
-    """
-    ตรวจว่า __init__ ของ RapidOCR รองรับพารามิเตอร์ที่เราจะส่งหรือไม่
-    เพื่อความเข้ากันได้กับเวอร์ชันต่าง ๆ
-    """
-    try:
-        sig = signature(cls)
-    except Exception:
-        try:
-            sig = signature(cls.__init__)  # type: ignore[attr-defined]
-        except Exception:
-            return {name: False for name in param_names}
-
-    params = sig.parameters
-    result = {}
-    for name in param_names:
-        result[name] = (name in params) or any(
-            p.kind == Parameter.VAR_KEYWORD for p in params.values()
-        )
-    return result
-
-
 def _get_reader():
-    """สร้างและคืนค่า RapidOCR แบบ singleton (เลือก EP: TensorRT → CUDA → CPU)"""
+    """สร้างและคืนค่า RapidOCR แบบ singleton"""
     if RapidOCR is None:
-        # ยกข้อความ error จากตอน import มาแสดงให้ชัด
-        raise RuntimeError(_rapidocr_err or "rapidocr-onnxruntime library is not installed")
-
+        raise RuntimeError("rapidocr library is not installed")
     global _reader
     with _reader_lock:
-        if _reader is not None:
-            return _reader
-
-        providers, provider_options = _build_providers_from_env()
-        accepts = _class_accepts_params(RapidOCR, "providers", "provider_options", "use_cuda")
-
-        kwargs = {}
-        if accepts.get("providers", False):
-            kwargs["providers"] = providers
-        if accepts.get("provider_options", False):
-            kwargs["provider_options"] = provider_options
-
-        # fallback: บางเวอร์ชันอาจมีเพียง use_cuda (ไม่รองรับ providers)
-        if not kwargs and accepts.get("use_cuda", False):
-            kwargs["use_cuda"] = ("CUDAExecutionProvider" in providers or
-                                  "TensorrtExecutionProvider" in providers)
-
-        try:
-            _reader = RapidOCR(**kwargs)  # type: ignore[misc]
-            chosen = kwargs.get("providers") or (["CUDA" if kwargs.get("use_cuda") else "CPU"])
-            logger.info(f"RapidOCR initialized with providers: {chosen}")
-        except TypeError as e:
-            # ถ้าเวอร์ชันไม่รับ kwargs พวกนี้จริง ๆ ให้ลองเรียกแบบว่าง
-            logger.warning(f"RapidOCR init with providers failed ({e}); falling back to default init().")
-            _reader = RapidOCR()  # type: ignore[call-arg]
-        except Exception as e:
-            logger.exception(f"RapidOCR init error: {e}")
-            raise
-
+        if _reader is None:
+            _reader = RapidOCR()
         return _reader
 
 
@@ -216,52 +85,46 @@ def _save_image_async(path, image) -> None:
         logger.exception(f"Failed to save image {path}: {e}")
 
 
-def _extract_texts(ocr_result) -> str:
-    """รองรับฟอร์แมตผลลัพธ์ RapidOCR หลายแบบ -> รวมเป็นสตริงเดียว"""
-    text_items: list[str] = []
-    if isinstance(ocr_result, (list, tuple)):
-        for res in ocr_result:
-            if isinstance(res, (list, tuple)) and len(res) > 1:
-                text_items.append(str(res[1]))
-            elif isinstance(res, dict) and "text" in res:
-                text_items.append(str(res["text"]))
-    elif isinstance(ocr_result, dict) and "text" in ocr_result:
-        text_items.append(str(ocr_result["text"]))
-    elif hasattr(ocr_result, "text"):
-        text_items.append(str(getattr(ocr_result, "text")))
-    elif hasattr(ocr_result, "texts"):
-        texts_attr = getattr(ocr_result, "texts")
-        if isinstance(texts_attr, (list, tuple)):
-            text_items.extend(str(t) for t in texts_attr)
-        elif texts_attr is not None:
-            text_items.append(str(texts_attr))
-    elif hasattr(ocr_result, "txts"):
-        txts_attr = getattr(ocr_result, "txts")
-        if isinstance(txts_attr, (list, tuple)):
-            text_items.extend(str(t) for t in txts_attr)
-        elif txts_attr is not None:
-            text_items.append(str(txts_attr))
-    return " ".join(text_items)
-
-
 def _run_ocr_async(frame, roi_id, save, source) -> None:
     """ประมวลผล OCR และบันทึกรูปในเธรดแยก"""
     try:
         reader = _get_reader()
+        # RapidOCR อาจคืนผลลัพธ์เป็น tuple (result, time) หรือเพียง result อย่างเดียว
         result = reader(frame)
-
-        # RapidOCR บางรุ่นคืน (result, time) ให้เลือกเฉพาะ result
         if (
             isinstance(result, (list, tuple))
             and len(result) == 2
             and isinstance(result[0], (list, tuple))
             and not isinstance(result[1], (list, tuple, dict))
         ):
-            ocr_result = result[0][1]
+            ocr_result = result[0]
         else:
             ocr_result = result
 
-        text = _extract_texts(ocr_result)
+        text_items: list[str] = []
+        if isinstance(ocr_result, (list, tuple)):
+            for res in ocr_result:
+                if isinstance(res, (list, tuple)) and len(res) > 1:
+                    text_items.append(str(res[1]))
+                elif isinstance(res, dict) and "text" in res:
+                    text_items.append(str(res["text"]))
+        elif isinstance(ocr_result, dict) and "text" in ocr_result:
+            text_items.append(str(ocr_result["text"]))
+        elif hasattr(ocr_result, "text"):
+            text_items.append(str(getattr(ocr_result, "text")))
+        elif hasattr(ocr_result, "texts"):
+            texts_attr = getattr(ocr_result, "texts")
+            if isinstance(texts_attr, (list, tuple)):
+                text_items.extend(str(t) for t in texts_attr)
+            elif texts_attr is not None:
+                text_items.append(str(texts_attr))
+        elif hasattr(ocr_result, "txts"):
+            txts_attr = getattr(ocr_result, "txts")
+            if isinstance(txts_attr, (list, tuple)):
+                text_items.extend(str(t) for t in txts_attr)
+            elif txts_attr is not None:
+                text_items.append(str(txts_attr))
+        text = " ".join(text_items)
 
         logger.info(
             f"roi_id={roi_id} OCR result: {text}" if roi_id is not None else f"OCR result: {text}"
