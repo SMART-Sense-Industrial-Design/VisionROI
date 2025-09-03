@@ -257,7 +257,7 @@ def _run_ocr_async(frame, roi_id, save, source) -> None:
             and isinstance(result[0], (list, tuple))
             and not isinstance(result[1], (list, tuple, dict))
         ):
-            ocr_result = result[0]
+            ocr_result = result[0][1]
         else:
             ocr_result = result
 
