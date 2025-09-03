@@ -22,14 +22,6 @@ import inference_modules.easy_ocr.custom as custom
 
 
 def test_cleanup_resets_state_and_allows_reuse(monkeypatch):
-    class DummyThread:
-        def __init__(self, target, daemon=True):
-            target()
-
-        def start(self):
-            pass
-
-    monkeypatch.setattr(custom.threading, "Thread", DummyThread)
 
     def fake_run(frame, roi_id, save, source):
         reader = custom._get_reader()
@@ -45,6 +37,7 @@ def test_cleanup_resets_state_and_allows_reuse(monkeypatch):
     custom._current_source = "dummy"
 
     custom.process([], roi_id="r1", source="src")
+    custom._roi_queues["r1"].join()
     old_reader = custom._reader
     assert custom.last_ocr_results["r1"] == "text"
 
@@ -55,6 +48,7 @@ def test_cleanup_resets_state_and_allows_reuse(monkeypatch):
     assert handler not in custom.logger.handlers
 
     custom.process([], roi_id="r2", source="src")
+    custom._roi_queues["r2"].join()
     new_reader = custom._reader
     assert new_reader is not None and new_reader is not old_reader
     assert custom.last_ocr_results["r2"] == "text"
