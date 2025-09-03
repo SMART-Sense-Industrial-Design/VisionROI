@@ -69,6 +69,9 @@ main {
   gap: 8px;
   margin-left: 10px;
   padding: 10px;
+  flex: 1 1 auto;
+  overflow-y: auto;
+  min-height: 0;
 }
 
 .roi-item {
@@ -109,24 +112,31 @@ main {
 
 .cam-row {
   display: flex;
-  align-items: flex-start;
+  align-items: stretch;
   gap: 10px;
   margin-bottom: 20px;
   flex-wrap: wrap;
 }
 
 /* video and ROI list layout */
-.video-card {
+
+.video-card,
+.roi-list-card {
   flex: 1 1 auto;
+  height: calc(100vh - 110px);
+  display: flex;
+  flex-direction: column;
 }
 
 .roi-list-card {
   flex: 0 0 250px;
 }
 
+
 .stream-video {
   width: 100%;
-  height: auto;
+  height: 100%;
+  object-fit: contain;
   display: block;
 }
 
@@ -142,7 +152,15 @@ main {
 
 .video-wrapper {
   position: relative;
-  display: inline-block;
+  display: flex;
+  flex: 1 1 auto;
+  height: 100%;
+}
+
+.video-card .cam-cell {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
 }
 
 
