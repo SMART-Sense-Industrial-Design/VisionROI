@@ -121,6 +121,7 @@ main {
   display: flex;
   flex-direction: column;
   gap: 10px;
+  min-width: 0;
 }
 
 /* video and ROI list layout */
@@ -148,9 +149,20 @@ main {
   }
 }
 
+/* log list styling */
 .log-wrapper {
   max-height: 300px;
   overflow-y: auto;
+  overflow-x: auto;
+}
+
+.log-wrapper table {
+  width: 100%;
+  table-layout: fixed;
+}
+
+.log-wrapper td {
+  overflow-wrap: anywhere;
 }
 
 .video-wrapper {
