@@ -116,7 +116,21 @@ main {
 }
 
 /* video and ROI list layout */
+.video-col {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+}
+
 .video-card {
+  flex: 1 1 auto;
+}
+
+.video-col .video-card {
+  margin-bottom: 10px;
+}
+
+.log-card {
   flex: 1 1 auto;
 }
 

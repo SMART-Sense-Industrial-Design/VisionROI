@@ -1153,6 +1153,22 @@ async def roi_stream_status(cam_id: str):
     return jsonify({"running": running, "cam_id": cam_id, "source": source})
 
 
+@app.route('/tail_log/<string:source>', methods=["GET"])
+async def tail_log(source: str):
+    safe_source = Path(source).name
+    log_path = Path('data_sources') / safe_source / 'custom.log'
+
+    def read_tail() -> list[str]:
+        try:
+            with open(log_path, 'r') as f:
+                return f.readlines()[-30:]
+        except FileNotFoundError:
+            return []
+
+    lines = await asyncio.to_thread(read_tail)
+    return jsonify(lines)
+
+
 # =========================
 # Snapshot (safer Response)
 # =========================
