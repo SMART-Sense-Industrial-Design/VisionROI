@@ -991,6 +991,27 @@ async def load_roi_file():
     return jsonify({"rois": rois, "filename": os.path.basename(full_path)})
 
 
+@app.route("/read_log")
+async def read_log():
+    source = request.args.get("source", "")
+    try:
+        lines = int(request.args.get("lines", 20))
+    except ValueError:
+        lines = 20
+    if not source:
+        return jsonify({"lines": []})
+    source = os.path.basename(source.strip())
+    log_path = os.path.realpath(os.path.join(ALLOWED_ROI_DIR, source, "custom.log"))
+    if not _safe_in_base(ALLOWED_ROI_DIR, log_path) or not os.path.exists(log_path):
+        return jsonify({"lines": []})
+    try:
+        with open(log_path, "r") as f:
+            content = f.readlines()[-lines:]
+    except Exception:
+        content = []
+    return jsonify({"lines": [line.rstrip() for line in content]})
+
+
 # =========================
 # Inference controls
 # =========================
