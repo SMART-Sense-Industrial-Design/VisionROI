@@ -239,12 +239,20 @@
                 roiGrid.innerHTML = '';
             }
 
-            const startRes = await fetchWithStatus(`/start_inference/${cam}`, {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ ...camCfg, rois, group: selectedGroup, interval })
-            });
-            const startData = await startRes.json();
+            let startData;
+            try {
+                const startRes = await fetchWithStatus(`/start_inference/${cam}`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ ...camCfg, rois, group: selectedGroup, interval })
+                });
+                startData = await startRes.json();
+            } catch (err) {
+                running = false;
+                startButton.disabled = false;
+                showAlert('Failed to start inference stream', 'error');
+                return;
+            }
             if (startData.status === 'started' || startData.status === 'already_running') {
                 openSocket();
                 if (rois.length > 0) {
@@ -258,7 +266,7 @@
             } else {
                 running = false;
                 startButton.disabled = false;
-                showAlert('Failed to start inference', 'error');
+                showAlert('Failed to start inference stream', 'error');
             }
         }
 

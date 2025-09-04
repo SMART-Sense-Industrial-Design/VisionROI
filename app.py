@@ -1061,7 +1061,11 @@ async def perform_start_inference(cam_id: str, rois=None, group: str | None = No
         except asyncio.QueueEmpty:
             break
 
-    await start_camera_task(cam_id, inference_tasks, run_inference_loop)
+    _, _, status = await start_camera_task(cam_id, inference_tasks, run_inference_loop)
+    if status != 200:
+        inference_rois.pop(cam_id, None)
+        inference_groups.pop(cam_id, None)
+        return False
     if save_state:
         save_service_state()
     return True

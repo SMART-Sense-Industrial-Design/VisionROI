@@ -150,11 +150,19 @@ function createController(cellId){
 
         scoreTableBody.innerHTML='';
 
-        const startRes=await fetchWithStatus(`/start_inference/${cam}`,{
-            method:'POST',headers:{'Content-Type':'application/json'},
-            body:JSON.stringify({...cfg,rois:roiList,interval})
-        });
-        const startData=await startRes.json();
+        let startData;
+        try{
+            const startRes=await fetchWithStatus(`/start_inference/${cam}`,{
+                method:'POST',headers:{'Content-Type':'application/json'},
+                body:JSON.stringify({...cfg,rois:roiList,interval})
+            });
+            startData=await startRes.json();
+        }catch(e){
+            running=false;
+            startButton.disabled=false;
+            showAlert('Failed to start inference stream','error');
+            return;
+        }
         if(startData.status==='started'||startData.status==='already_running'){
             openSocket();
             openRoiSocket();
@@ -165,7 +173,7 @@ function createController(cellId){
         }else{
             running=false;
             startButton.disabled=false;
-            showAlert('Failed to start stream','error');
+            showAlert('Failed to start inference stream','error');
         }
     }
 
