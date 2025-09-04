@@ -115,6 +115,14 @@ main {
   flex-wrap: wrap;
 }
 
+/* left column containing video and log cards */
+.video-col {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
 /* video and ROI list layout */
 .video-card {
   flex: 1 1 auto;
@@ -138,6 +146,11 @@ main {
     flex: 1 1 auto;
     width: 100%;
   }
+}
+
+.log-wrapper {
+  max-height: 300px;
+  overflow-y: auto;
 }
 
 .video-wrapper {
