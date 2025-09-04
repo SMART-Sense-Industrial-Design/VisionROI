@@ -1016,8 +1016,18 @@ async def read_log():
 # Inference controls
 # =========================
 async def perform_start_inference(cam_id: str, rois=None, group: str | None = None, save_state: bool = True):
+    """Start an inference task for the given camera.
+
+    Returns a tuple ``(ok, resp, status)`` where ``ok`` is a boolean indicating
+    success, ``resp`` is the response dictionary from ``start_camera_task`` and
+    ``status`` is the HTTP status code. This mirrors the behaviour of
+    ``start_roi_stream`` which bubbles up the camera start error message (e.g.
+    ``"open_failed"``) to the caller so the frontend can display a more useful
+    alert.
+    """
+
     if roi_tasks.get(cam_id) and not roi_tasks[cam_id].done():
-        return False
+        return False, {"status": "roi_running", "cam_id": cam_id}, 400
     if rois is None:
         source = active_sources.get(cam_id, "")
         source_dir = os.path.join(ALLOWED_ROI_DIR, source)
@@ -1061,14 +1071,14 @@ async def perform_start_inference(cam_id: str, rois=None, group: str | None = No
         except asyncio.QueueEmpty:
             break
 
-    _, _, status = await start_camera_task(cam_id, inference_tasks, run_inference_loop)
+    _task, resp, status = await start_camera_task(cam_id, inference_tasks, run_inference_loop)
     if status != 200:
         inference_rois.pop(cam_id, None)
         inference_groups.pop(cam_id, None)
-        return False
+        return False, resp, status
     if save_state:
         save_service_state()
-    return True
+    return True, resp, status
 
 
 @app.route('/start_inference/<string:cam_id>', methods=["POST"])
@@ -1091,10 +1101,8 @@ async def start_inference(cam_id: str):
         cfg_ok = await apply_camera_settings(cam_id, cfg)
         if not cfg_ok:
             return jsonify({"status": "error", "cam_id": cam_id}), 400
-    ok = await perform_start_inference(cam_id, rois, group)
-    if ok:
-        return jsonify({"status": "started", "cam_id": cam_id}), 200
-    return jsonify({"status": "error", "cam_id": cam_id}), 400
+    ok, resp, status = await perform_start_inference(cam_id, rois, group)
+    return jsonify(resp), status
 
 
 @app.route('/stop_inference/<string:cam_id>', methods=["POST"])
