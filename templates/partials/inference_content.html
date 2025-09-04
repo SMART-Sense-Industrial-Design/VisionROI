@@ -240,19 +240,34 @@
             }
 
             let startData;
+            let startRes;
+            statusEl.innerText = 'กำลังโหลด...';
             try {
-                const startRes = await fetchWithStatus(`/start_inference/${cam}`, {
+                startRes = await fetch(`/start_inference/${cam}`, {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({ ...camCfg, rois, group: selectedGroup, interval })
                 });
-                startData = await startRes.json();
+                startData = await startRes.json().catch(() => ({}));
             } catch (err) {
                 running = false;
                 startButton.disabled = false;
+                statusEl.innerText = 'เกิดข้อผิดพลาด';
                 showAlert('Failed to start inference stream', 'error');
                 return;
             }
+            if (!startRes.ok) {
+                running = false;
+                startButton.disabled = false;
+                statusEl.innerText = 'เกิดข้อผิดพลาด';
+                if (startData.message === 'open_failed') {
+                    showAlert('Failed to open video source', 'error');
+                } else {
+                    showAlert('Failed to start inference stream', 'error');
+                }
+                return;
+            }
+            statusEl.innerText = 'สำเร็จ';
             if (startData.status === 'started' || startData.status === 'already_running') {
                 openSocket();
                 if (rois.length > 0) {

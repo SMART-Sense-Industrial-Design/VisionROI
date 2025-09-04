@@ -5,6 +5,7 @@ def test_inference_group_start_fail_message():
     with open("templates/partials/inference_content.html", encoding="utf-8") as f:
         content = f.read()
     assert "Failed to start inference stream" in content
+    assert "Failed to open video source" in content
     assert re.search(r"catch\s*\([^)]*\)\s*\{[^}]*running\s*=\s*false;[^}]*startButton\.disabled\s*=\s*false;", content, re.DOTALL)
 
 
@@ -12,6 +13,7 @@ def test_inference_page_start_fail_message():
     with open("templates/partials/inference_page_content.html", encoding="utf-8") as f:
         content = f.read()
     assert "Failed to start inference stream" in content
+    assert "Failed to open video source" in content
     assert re.search(r"catch\s*\([^)]*\)\s*\{[^}]*running\s*=\s*false;[^}]*startButton\.disabled\s*=\s*false;", content, re.DOTALL)
 
 
@@ -40,6 +42,8 @@ def test_perform_start_inference_returns_false_on_open_fail():
             pass
 
     cv2_stub.VideoCapture = DummyCap
+    sys.modules.pop("app", None)
+    sys.modules.pop("camera_worker", None)
     import app
     try:
         async def run():
@@ -47,8 +51,10 @@ def test_perform_start_inference_returns_false_on_open_fail():
             app.camera_workers.clear()
             app.inference_tasks.clear()
             app.camera_sources["cam1"] = 0
-            ok = await app.perform_start_inference("cam1")
+            ok, resp, status = await app.perform_start_inference("cam1")
             assert not ok
+            assert resp.get("message") == "open_failed"
+            assert status == 400
             assert app.inference_tasks.get("cam1") is None
         asyncio.run(run())
     finally:
