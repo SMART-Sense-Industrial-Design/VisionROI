@@ -112,7 +112,7 @@ main {
   align-items: flex-start;
   gap: 10px;
   margin-bottom: 20px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
 }
 
 /* left column containing video and log cards */
