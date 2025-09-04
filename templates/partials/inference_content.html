@@ -14,6 +14,11 @@
             <div class="video-wrapper">
                 <img id="cam1-video" class="stream-video" />
             </div>
+            <div class="log-wrapper mt-2">
+                <table id="cam1-logTable" class="table table-sm mb-0">
+                    <tbody></tbody>
+                </table>
+            </div>
         </div>
     </div>
     <div class="card roi-card roi-list-card">
@@ -44,6 +49,8 @@
         const roiGrid = getEl('rois');
         const intervalInput = getEl('intervalInput');
         intervalInput.value = localStorage.getItem(`${cellId}-interval`) || '1';
+        const logBody = getEl('logTable').querySelector('tbody');
+        let logTimer;
 
         sourceSelect.onchange = () => {
             localStorage.setItem(`${cellId}-source`, sourceSelect.value);
@@ -216,6 +223,7 @@
                     showAlert('Camera started', 'success');
                 }
                 setRunningUI();
+                startLogPolling();
             } else {
                 running = false;
                 startButton.disabled = false;
@@ -235,6 +243,7 @@
                 roiSocket.close();
                 roiSocket = null;
             }
+            stopLogPolling();
             // clear last frame and update UI
             video.src = '';
             roiGrid.innerHTML = '';
@@ -275,6 +284,40 @@
             };
         }
 
+        async function fetchLog() {
+            const source = sourceSelect.value;
+            if (!source) return;
+            try {
+                const res = await fetch(`/tail_log/${encodeURIComponent(source)}`);
+                if (!res.ok) return;
+                const lines = await res.json();
+                logBody.innerHTML = '';
+                lines.slice(-30).reverse().forEach(line => {
+                    const tr = document.createElement('tr');
+                    const td = document.createElement('td');
+                    td.textContent = line;
+                    tr.appendChild(td);
+                    logBody.appendChild(tr);
+                });
+            } catch (err) {
+                console.error('log fetch error', err);
+            }
+        }
+
+        function startLogPolling() {
+            stopLogPolling();
+            fetchLog();
+            logTimer = setInterval(fetchLog, 1000);
+        }
+
+        function stopLogPolling() {
+            if (logTimer) {
+                clearInterval(logTimer);
+                logTimer = null;
+            }
+            logBody.innerHTML = '';
+        }
+
         async function checkStatus() {
             const name = sourceSelect.value;
             const res = await fetchWithStatus(`/inference_status/${cam}`);
@@ -310,6 +353,7 @@
                     openRoiSocket();
                 }
                 setRunningUI();
+                startLogPolling();
                 running = true;
             } else {
                 statusEl.innerText = 'Idle';
@@ -317,6 +361,7 @@
                 startButton.disabled = false;
                 stopButton.disabled = true;
                 running = false;
+                stopLogPolling();
             }
         }
 
