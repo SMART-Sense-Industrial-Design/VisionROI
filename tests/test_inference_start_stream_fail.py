@@ -7,6 +7,7 @@ def test_inference_group_start_fail_message():
     assert "Failed to start inference stream" in content
     assert "Failed to open video source" in content
     assert re.search(r"catch\s*\([^)]*\)\s*\{[^}]*running\s*=\s*false;[^}]*startButton\.disabled\s*=\s*false;", content, re.DOTALL)
+    assert "startData.status !== 'started' && startData.status !== 'already_running'" in content
 
 
 def test_inference_page_start_fail_message():
@@ -15,6 +16,7 @@ def test_inference_page_start_fail_message():
     assert "Failed to start inference stream" in content
     assert "Failed to open video source" in content
     assert re.search(r"catch\s*\([^)]*\)\s*\{[^}]*running\s*=\s*false;[^}]*startButton\.disabled\s*=\s*false;", content, re.DOTALL)
+    assert "startData.status!=='started' && startData.status!=='already_running'" in content
 
 
 def test_perform_start_inference_returns_false_on_open_fail():

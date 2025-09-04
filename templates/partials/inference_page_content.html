@@ -166,7 +166,7 @@ function createController(cellId){
             showAlert('Failed to start inference stream','error');
             return;
         }
-        if(!startRes.ok){
+        if(!startRes.ok || (startData.status!=='started' && startData.status!=='already_running')){
             running=false;
             startButton.disabled=false;
             statusEl.innerText='เกิดข้อผิดพลาด';
@@ -178,19 +178,13 @@ function createController(cellId){
             return;
         }
         statusEl.innerText='สำเร็จ';
-        if(startData.status==='started'||startData.status==='already_running'){
-            openSocket();
-            openRoiSocket();
+        openSocket();
+        openRoiSocket();
 
-            setRunningUI();
-            startLogUpdates(cfg.name);
-            showAlert('Stream started','success');
-        }else{
-            running=false;
-            startButton.disabled=false;
-            showAlert('Failed to start inference stream','error');
+        setRunningUI();
+        startLogUpdates(cfg.name);
+        showAlert('Stream started','success');
         }
-    }
 
 
     function openSocket(){
