@@ -256,7 +256,7 @@
                 showAlert('Failed to start inference stream', 'error');
                 return;
             }
-            if (!startRes.ok) {
+            if (!startRes.ok || (startData.status !== 'started' && startData.status !== 'already_running')) {
                 running = false;
                 startButton.disabled = false;
                 statusEl.innerText = 'เกิดข้อผิดพลาด';
@@ -268,21 +268,15 @@
                 return;
             }
             statusEl.innerText = 'สำเร็จ';
-            if (startData.status === 'started' || startData.status === 'already_running') {
-                openSocket();
-                if (rois.length > 0) {
-                    openRoiSocket();
-                    showAlert('Inference started', 'success');
-                } else {
-                    showAlert('Camera started', 'success');
-                }
-                startLogUpdates(cfg.name);
-                setRunningUI();
+            openSocket();
+            if (rois.length > 0) {
+                openRoiSocket();
+                showAlert('Inference started', 'success');
             } else {
-                running = false;
-                startButton.disabled = false;
-                showAlert('Failed to start inference stream', 'error');
+                showAlert('Camera started', 'success');
             }
+            startLogUpdates(cfg.name);
+            setRunningUI();
         }
 
         async function stopInference() {
