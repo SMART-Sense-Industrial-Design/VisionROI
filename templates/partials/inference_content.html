@@ -1,18 +1,28 @@
 
 <div class="cam-row">
-    <div class="card roi-card video-card">
-        <div id="cam1" class="cam-cell">
-            <div class="d-flex align-items-center mb-2 gap-2 menu-select-list">
-                <label for="cam1-sourceSelect" class="form-label mb-0">Source:</label>
-                <select id="cam1-sourceSelect" class="form-select w-auto"></select>
-                <label for="cam1-intervalInput" class="form-label mb-0">Time:</label>
-                <input id="cam1-intervalInput" type="number" class="form-control w-auto" min="0" step="0.1" value="1" />
+    <div class="video-col">
+        <div class="card roi-card video-card">
+            <div id="cam1" class="cam-cell">
+                <div class="d-flex align-items-center mb-2 gap-2 menu-select-list">
+                    <label for="cam1-sourceSelect" class="form-label mb-0">Source:</label>
+                    <select id="cam1-sourceSelect" class="form-select w-auto"></select>
+                    <label for="cam1-intervalInput" class="form-label mb-0">Time:</label>
+                    <input id="cam1-intervalInput" type="number" class="form-control w-auto" min="0" step="0.1" value="1" />
+                </div>
+                <button id="cam1-startButton" class="btn btn-primary me-2">Start</button>
+                <button id="cam1-stopButton" class="btn btn-danger" disabled>Stop</button>
+                <p id="cam1-status"></p>
+                <div class="video-wrapper">
+                    <img id="cam1-video" class="stream-video" />
+                </div>
             </div>
-            <button id="cam1-startButton" class="btn btn-primary me-2">Start</button>
-            <button id="cam1-stopButton" class="btn btn-danger" disabled>Stop</button>
-            <p id="cam1-status"></p>
-            <div class="video-wrapper">
-                <img id="cam1-video" class="stream-video" />
+        </div>
+        <div class="card roi-card log-card">
+            <div class="log-wrapper">
+                <table id="cam1-logTable" class="table">
+                    <thead><tr><th>Log</th></tr></thead>
+                    <tbody id="cam1-logBody"></tbody>
+                </table>
             </div>
         </div>
     </div>
@@ -42,7 +52,9 @@
         const sourceSelect = getEl('sourceSelect');
         const groupSelect = getEl('groupSelect');
         const roiGrid = getEl('rois');
+        const logBody = getEl('logBody');
         const intervalInput = getEl('intervalInput');
+        let logTimer;
         intervalInput.value = localStorage.getItem(`${cellId}-interval`) || '1';
 
         sourceSelect.onchange = () => {
@@ -123,6 +135,31 @@
                 item.appendChild(p);
                 roiGrid.appendChild(item);
             });
+        }
+
+        function startLogUpdates(sourceName){
+            stopLogUpdates();
+            async function fetchLog(){
+                try{
+                    const res=await fetch(`/read_log?source=${encodeURIComponent(sourceName)}&lines=20&_=${Date.now()}`);
+                    const data=await res.json();
+                    logBody.innerHTML='';
+                    (data.lines||[]).slice().reverse().forEach(line=>{
+                        const tr=document.createElement('tr');
+                        const td=document.createElement('td');
+                        td.textContent=line;
+                        tr.appendChild(td);
+                        logBody.appendChild(tr);
+                    });
+                }catch(e){}
+            }
+            fetchLog();
+            logTimer=setInterval(fetchLog,1000);
+        }
+
+        function stopLogUpdates(){
+            if(logTimer){clearInterval(logTimer);logTimer=null;}
+            logBody.innerHTML='';
         }
 
         function loadGroupOptions(list, selected = '') {
@@ -215,6 +252,7 @@
                 } else {
                     showAlert('Camera started', 'success');
                 }
+                startLogUpdates(cfg.name);
                 setRunningUI();
             } else {
                 running = false;
@@ -235,6 +273,7 @@
                 roiSocket.close();
                 roiSocket = null;
             }
+            stopLogUpdates();
             // clear last frame and update UI
             video.src = '';
             roiGrid.innerHTML = '';
@@ -309,6 +348,7 @@
                     renderRoiPlaceholders();
                     openRoiSocket();
                 }
+                startLogUpdates(cfg.name);
                 setRunningUI();
                 running = true;
             } else {
@@ -317,6 +357,7 @@
                 startButton.disabled = false;
                 stopButton.disabled = true;
                 running = false;
+                stopLogUpdates();
             }
         }
 
