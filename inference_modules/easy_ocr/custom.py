@@ -25,6 +25,8 @@ except Exception:  # pragma: no cover - fallback when easyocr missing
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
+MODULE_NAME = "easy_ocr"
+
 _formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
 _handler: TimedRotatingFileHandler | None = None
 _current_source: str | None = None
@@ -91,12 +93,14 @@ def _run_ocr_async(frame, roi_id, save, source) -> None:
         ocr_result = reader.readtext(frame, detail=0)
         text = " ".join(ocr_result)
         logger.info(
-            f"roi_id={roi_id} OCR result: {text}" if roi_id is not None else f"OCR result: {text}"
+            f"roi_id={roi_id} {MODULE_NAME} OCR result: {text}"
+            if roi_id is not None
+            else f"{MODULE_NAME} OCR result: {text}"
         )
         with _last_ocr_lock:
             last_ocr_results[roi_id] = text
     except Exception as e:  # pragma: no cover - log any OCR error
-        logger.exception(f"roi_id={roi_id} OCR error: {e}")
+        logger.exception(f"roi_id={roi_id} {MODULE_NAME} OCR error: {e}")
 
     if save:
         base_dir = _data_sources_root / source if source else Path(__file__).resolve().parent

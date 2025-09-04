@@ -20,6 +20,8 @@ os.environ["TYPHOON_OCR_API_KEY"] = "sk-UgKIYNT2ZaU0Ph3bZ5O8rfHc9QBJLNz5yQtshQld
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
+MODULE_NAME = "typhoon_ocr"
+
 _formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
 _handler: TimedRotatingFileHandler | None = None
 _current_source: str | None = None
@@ -106,14 +108,14 @@ def process(
             base64_string = base64.b64encode(buffer).decode('utf-8')
             markdown = ocr_document(base64_string)
             logger.info(
-                f"roi_id={roi_id} OCR result: {markdown}"
+                f"roi_id={roi_id} {MODULE_NAME} OCR result: {markdown}"
                 if roi_id is not None
-                else f"OCR result: {markdown}"
+                else f"{MODULE_NAME} OCR result: {markdown}"
             )
             result_text = markdown
             last_ocr_results[roi_id] = markdown
         except Exception as e:
-            logger.exception(f"roi_id={roi_id} OCR error: {e}")
+            logger.exception(f"roi_id={roi_id} {MODULE_NAME} OCR error: {e}")
 
         if save:
             base_dir = (
