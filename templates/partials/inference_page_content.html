@@ -243,6 +243,7 @@ function createController(cellId){
                 const data=await res.json();
                 logBody.innerHTML='';
                 (data.lines||[]).slice().reverse().forEach(line=>{
+
                     const tr=document.createElement('tr');
                     const td=document.createElement('td');
                     td.textContent=line;
