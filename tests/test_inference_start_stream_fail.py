@@ -56,3 +56,4 @@ def test_perform_start_inference_returns_false_on_open_fail():
             sys.modules["cv2"] = orig_cv2
         else:
             sys.modules.pop("cv2", None)
+
