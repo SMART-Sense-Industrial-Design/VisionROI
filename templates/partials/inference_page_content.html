@@ -14,6 +14,7 @@
             <p id="cam1-status"></p>
             <div class="video-wrapper">
                 <img id="cam1-video" class="stream-video" />
+                <canvas id="cam1-overlay" style="position:absolute;top:0;left:0;pointer-events:none;"></canvas>
                 <p>page: <span id="cam1-pageName"></span></p>
                 <table id="cam1-pageScores" class="table">
                     <thead><tr><th>Page</th><th>Score</th></tr></thead>
@@ -44,6 +45,30 @@ function createController(cellId){
     const cam=`page_${cellId}`;
     const getEl=suffix=>document.getElementById(`${cellId}-${suffix}`);
     const video=getEl('video');
+    const overlay=getEl('overlay');
+    const ctx=overlay.getContext('2d');
+    let roiBoxes={};
+    function drawBoxes(){
+        ctx.clearRect(0,0,overlay.width,overlay.height);
+        Object.values(roiBoxes).forEach(box=>{
+            const scaleX=overlay.width/box.width;
+            const scaleY=overlay.height/box.height;
+            const pts=box.points.map(p=>({x:p.x*scaleX,y:p.y*scaleY}));
+            ctx.beginPath();
+            ctx.moveTo(pts[0].x,pts[0].y);
+            for(let i=1;i<pts.length;i++)ctx.lineTo(pts[i].x,pts[i].y);
+            ctx.closePath();
+            ctx.strokeStyle='red';
+            ctx.lineWidth=2;
+            ctx.stroke();
+        });
+    }
+    video.onload=()=>{
+        URL.revokeObjectURL(video.src);
+        overlay.width=video.naturalWidth;
+        overlay.height=video.naturalHeight;
+        drawBoxes();
+    };
     const pageNameEl=getEl('pageName');
     const scoreTableBody=getEl('pageScoresBody');
     const roiGrid=getEl('rois');
@@ -116,6 +141,8 @@ function createController(cellId){
         if(running)return;
         running=true;
         startButton.disabled=true;
+        roiBoxes={};
+        drawBoxes();
         const name=sourceSelect.value;
         if(!name){
             statusEl.innerText='Select source first';
@@ -225,6 +252,14 @@ function createController(cellId){
                     if (textEl) {
                         textEl.textContent = data.text || '';
                     }
+                    if (Array.isArray(data.points) && data.width && data.height) {
+                        roiBoxes[data.id] = {
+                            points: data.points,
+                            width: data.width,
+                            height: data.height
+                        };
+                        drawBoxes();
+                    }
 
                 }
             }catch(e){}
@@ -286,6 +321,8 @@ function createController(cellId){
         if(roiSocket){roiSocket.close();roiSocket=null;}
         stopLogUpdates();
         video.src='';
+        roiBoxes={};
+        drawBoxes();
         pageNameEl.innerText='';
         scoreTableBody.innerHTML='';
         startButton.disabled=false;
