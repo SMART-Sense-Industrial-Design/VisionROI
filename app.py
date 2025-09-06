@@ -47,6 +47,7 @@ save_roi_flags: dict[str, bool] = {}
 inference_groups: dict[str, str | None] = {}
 inference_intervals: dict[str, float] = {}
 ocr_frame_queues: dict[str, asyncio.Queue] = {}
+ocr_drawn_frame_queues: dict[str, asyncio.Queue] = {}
 ocr_running: dict[str, bool] = {}
 
 STATE_FILE = "service_state.json"
@@ -132,6 +133,11 @@ def _free_cam_state(cam_id: str):
         with contextlib.suppress(Exception):
             while not oq.empty():
                 oq.get_nowait()
+    dq = ocr_drawn_frame_queues.pop(cam_id, None)
+    if dq is not None:
+        with contextlib.suppress(Exception):
+            while not dq.empty():
+                dq.get_nowait()
     ocr_running.pop(cam_id, None)
 
     # Locks
@@ -367,6 +373,10 @@ def get_ocr_queue(cam_id: str) -> asyncio.Queue:
     return ocr_frame_queues.setdefault(cam_id, asyncio.Queue(maxsize=1))
 
 
+def get_ocr_drawn_queue(cam_id: str) -> asyncio.Queue:
+    return ocr_drawn_frame_queues.setdefault(cam_id, asyncio.Queue(maxsize=1))
+
+
 # =========================
 # Frame readers
 # =========================
@@ -412,12 +422,19 @@ async def read_and_queue_frame(
 async def ocr_worker(cam_id: str):
     module_cache: dict[str, tuple[ModuleType | None, bool, bool, bool]] = {}
     queue = get_ocr_queue(cam_id)
+    drawn_queue = get_ocr_drawn_queue(cam_id)
     try:
         while True:
             frame = await queue.get()
             rois = inference_rois.get(cam_id, [])
             forced_group = inference_groups.get(cam_id)
             if not rois:
+                try:
+                    if drawn_queue.full():
+                        drawn_queue.get_nowait()
+                    await drawn_queue.put(frame)
+                except Exception:
+                    pass
                 continue
 
             save_flag = bool(save_roi_flags.get(cam_id))
@@ -596,6 +613,12 @@ async def ocr_worker(cam_id: str):
                     await q.put(payload)
                 except Exception:
                     pass
+            try:
+                if drawn_queue.full():
+                    drawn_queue.get_nowait()
+                await drawn_queue.put(frame)
+            except Exception:
+                pass
     except asyncio.CancelledError:
         pass
     finally:
@@ -613,6 +636,7 @@ async def ocr_worker(cam_id: str):
 async def run_inference_loop(cam_id: str):
     queue = get_frame_queue(cam_id)
     ocr_queue = get_ocr_queue(cam_id)
+    drawn_queue = get_ocr_drawn_queue(cam_id)
     ocr_running[cam_id] = True
     ocr_task = asyncio.create_task(ocr_worker(cam_id))
     try:
@@ -637,6 +661,11 @@ async def run_inference_loop(cam_id: str):
                 ocr_queue.put_nowait(frame)
             except asyncio.QueueFull:
                 pass
+            try:
+                frame = await drawn_queue.get()
+            except Exception:
+                await asyncio.sleep(0.05)
+                continue
             try:
                 resized = cv2.resize(frame, (0, 0), fx=0.5, fy=0.5)
                 encoded, buffer = cv2.imencode('.jpg', resized, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
