@@ -46,6 +46,8 @@ active_sources: dict[str, str] = {}
 save_roi_flags: dict[str, bool] = {}
 inference_groups: dict[str, str | None] = {}
 inference_intervals: dict[str, float] = {}
+ocr_frame_queues: dict[str, asyncio.Queue] = {}
+ocr_running: dict[str, bool] = {}
 
 STATE_FILE = "service_state.json"
 PAGE_SCORE_THRESHOLD = 0.4
@@ -124,6 +126,13 @@ def _free_cam_state(cam_id: str):
         with contextlib.suppress(Exception):
             while not rres.empty():
                 rres.get_nowait()
+
+    oq = ocr_frame_queues.pop(cam_id, None)
+    if oq is not None:
+        with contextlib.suppress(Exception):
+            while not oq.empty():
+                oq.get_nowait()
+    ocr_running.pop(cam_id, None)
 
     # Locks
     camera_locks.pop(cam_id, None)
@@ -354,6 +363,10 @@ def get_roi_result_queue(cam_id: str) -> asyncio.Queue[str | None]:
     return roi_result_queues.setdefault(cam_id, asyncio.Queue(maxsize=10))
 
 
+def get_ocr_queue(cam_id: str) -> asyncio.Queue:
+    return ocr_frame_queues.setdefault(cam_id, asyncio.Queue(maxsize=1))
+
+
 # =========================
 # Frame readers
 # =========================
@@ -396,196 +409,190 @@ async def read_and_queue_frame(
 # =========================
 # Loops
 # =========================
-async def run_inference_loop(cam_id: str):
+async def ocr_worker(cam_id: str):
     module_cache: dict[str, tuple[ModuleType | None, bool, bool, bool]] = {}
-
-    async def process_frame(frame):
-        rois = inference_rois.get(cam_id, [])
-        forced_group = inference_groups.get(cam_id)
-        if not rois:
-            return cv2.resize(frame, (0, 0), fx=0.5, fy=0.5)
-
-        save_flag = bool(save_roi_flags.get(cam_id))
-        output = None
-        best_score = -1.0
-        scores: list[dict[str, float | str]] = []
-        has_page = False
-
-        # pass 1: evaluate page ROIs
-        for i, r in enumerate(rois):
-            if np is None or r.get('type') != 'page':
-                continue
-            has_page = True
-            pts = r.get('points', [])
-            if len(pts) != 4:
-                continue
-            src = np.array([[p['x'], p['y']] for p in pts], dtype=np.float32)
-            color = (0, 255, 0)
-            width_a = np.linalg.norm(src[0] - src[1])
-            width_b = np.linalg.norm(src[2] - src[3])
-            max_w = int(max(width_a, width_b))
-            height_a = np.linalg.norm(src[0] - src[3])
-            height_b = np.linalg.norm(src[1] - src[2])
-            max_h = int(max(height_a, height_b))
-            dst = np.array([[0, 0], [max_w - 1, 0], [max_w - 1, max_h - 1], [0, max_h - 1]], dtype=np.float32)
-            matrix = cv2.getPerspectiveTransform(src, dst)
-            roi = cv2.warpPerspective(frame, matrix, (max_w, max_h))
-            template = r.get('_template')
-            if template is not None:
-                try:
-                    roi_gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
-                except Exception:
-                    roi_gray = None
-                if roi_gray is not None:
-                    if roi_gray.shape != template.shape:
-                        roi_gray = cv2.resize(roi_gray, (template.shape[1], template.shape[0]))
-                    try:
-                        res = cv2.matchTemplate(roi_gray, template, cv2.TM_CCOEFF_NORMED)
-                        score = float(res[0][0])
-                        scores.append({'page': r.get('page', ''), 'score': score})
-                        if score > best_score:
-                            best_score = score
-                            output = r.get('page', '')
-                    except Exception:
-                        pass
-            cv2.polylines(frame, [src.astype(int)], True, color, 2)
-            label_pt = src[0].astype(int)
-            cv2.putText(
-                frame,
-                str(r.get('id', i + 1)),
-                (int(label_pt[0]), max(0, int(label_pt[1]) - 5)),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.5,
-                color,
-                1,
-                cv2.LINE_AA,
-            )
-
-        if not has_page:
-            output = forced_group or ''
-        elif best_score <= PAGE_SCORE_THRESHOLD:
-            output = ''
-
-        scores.sort(key=lambda x: x['score'], reverse=True)
-
-        if output or scores:
-            try:
-                q = get_roi_result_queue(cam_id)
-                payload = json.dumps({'group': output, 'scores': scores})
-                if q.full():
-                    q.get_nowait()
-                await q.put(payload)
-            except Exception:
-                pass
-
-        futures: list[tuple[asyncio.Future, Any, str | int]] = []
-        loop = asyncio.get_running_loop()
-        for i, r in enumerate(rois):
-            if r.get('type') != 'roi':
-                continue
-            if forced_group != 'all':
-                if not output or r.get('group') != output:
-                    continue
-            if np is None:
-                continue
-            pts = r.get('points', [])
-            if len(pts) != 4:
-                continue
-            src = np.array([[p['x'], p['y']] for p in pts], dtype=np.float32)
-
-            if r.get('module'):
-                mod_name = r.get('module')
-                module_entry = module_cache.get(mod_name)
-                if module_entry is None:
-                    module = load_custom_module(mod_name)
-                    takes_source = False
-                    takes_cam_id = False
-                    takes_interval = False
-                    if module:
-                        proc = getattr(module, 'process', None)
-                        if callable(proc):
-                            params = inspect.signature(proc).parameters
-                            takes_source = 'source' in params
-                            takes_cam_id = 'cam_id' in params
-                            takes_interval = 'interval' in params
-                    module_cache[mod_name] = (module, takes_source, takes_cam_id, takes_interval)
-                else:
-                    module, takes_source, takes_cam_id, takes_interval = module_entry
-                if module is None:
-                    print(f"module '{mod_name}' not found for ROI {r.get('id', i)}")
-                else:
-                    process_fn = getattr(module, 'process', None)
-                    if not callable(process_fn):
-                        print(f"process function not found in module '{mod_name}' for ROI {r.get('id', i)}")
-                    else:
-                        width_a = np.linalg.norm(src[0] - src[1])
-                        width_b = np.linalg.norm(src[2] - src[3])
-                        max_w = int(max(width_a, width_b))
-                        height_a = np.linalg.norm(src[0] - src[3])
-                        height_b = np.linalg.norm(src[1] - src[2])
-                        max_h = int(max(height_a, height_b))
-                        dst = np.array([[0, 0], [max_w - 1, 0], [max_w - 1, max_h - 1], [0, max_h - 1]], dtype=np.float32)
-                        matrix = cv2.getPerspectiveTransform(src, dst)
-                        roi = cv2.warpPerspective(frame, matrix, (max_w, max_h))
-                        args = [roi, r.get('id', str(i)), save_flag]
-                        if takes_source:
-                            args.append(active_sources.get(cam_id, ''))
-                        if takes_cam_id:
-                            args.append(cam_id)
-                        if takes_interval:
-                            args.append(inference_intervals.get(cam_id, 1.0))
-                        fut = loop.create_future()
-                        try:
-                            if _INFERENCE_QUEUE.full():
-                                _INFERENCE_QUEUE.get_nowait()
-                            _INFERENCE_QUEUE.put_nowait((process_fn, tuple(args), fut))
-                            futures.append((fut, roi, r.get('id', i)))
-                        except Exception:
-                            pass
-            else:
-                print(f"module missing for ROI {r.get('id', i)}")
-
-            src_int = src.astype(int)
-            cv2.polylines(frame, [src_int], True, (255, 0, 0), 2)
-            label_pt = src_int[0]
-            cv2.putText(
-                frame,
-                str(r.get('id', i + 1)),
-                (int(label_pt[0]), max(0, int(label_pt[1]) - 5)),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.5,
-                (255, 0, 0),
-                1,
-                cv2.LINE_AA,
-            )
-
-        for fut, roi, roi_id in futures:
-            result_text = ''
-            try:
-                result = await fut
-                if isinstance(result, str):
-                    result_text = result
-                elif isinstance(result, dict) and 'text' in result:
-                    result_text = str(result['text'])
-            except Exception:
-                pass
-            try:
-                _, roi_buf = cv2.imencode('.jpg', roi, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
-                roi_b64 = base64.b64encode(roi_buf).decode('ascii')
-                q = get_roi_result_queue(cam_id)
-                payload = json.dumps({'id': roi_id, 'image': roi_b64, 'text': result_text})
-                if q.full():
-                    q.get_nowait()
-                await q.put(payload)
-            except Exception:
-                pass
-
-        return cv2.resize(frame, (0, 0), fx=0.5, fy=0.5)
-
-    queue = get_frame_queue(cam_id)
+    queue = get_ocr_queue(cam_id)
     try:
         while True:
-            await read_and_queue_frame(cam_id, queue, process_frame)
+            frame = await queue.get()
+            rois = inference_rois.get(cam_id, [])
+            forced_group = inference_groups.get(cam_id)
+            if not rois:
+                continue
+
+            save_flag = bool(save_roi_flags.get(cam_id))
+            output = None
+            best_score = -1.0
+            scores: list[dict[str, float | str]] = []
+            has_page = False
+
+            for i, r in enumerate(rois):
+                if np is None or r.get('type') != 'page':
+                    continue
+                has_page = True
+                pts = r.get('points', [])
+                if len(pts) != 4:
+                    continue
+                src = np.array([[p['x'], p['y']] for p in pts], dtype=np.float32)
+                color = (0, 255, 0)
+                width_a = np.linalg.norm(src[0] - src[1])
+                width_b = np.linalg.norm(src[2] - src[3])
+                max_w = int(max(width_a, width_b))
+                height_a = np.linalg.norm(src[0] - src[3])
+                height_b = np.linalg.norm(src[1] - src[2])
+                max_h = int(max(height_a, height_b))
+                dst = np.array([[0, 0], [max_w - 1, 0], [max_w - 1, max_h - 1], [0, max_h - 1]], dtype=np.float32)
+                matrix = cv2.getPerspectiveTransform(src, dst)
+                roi = cv2.warpPerspective(frame, matrix, (max_w, max_h))
+                template = r.get('_template')
+                if template is not None:
+                    try:
+                        roi_gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+                    except Exception:
+                        roi_gray = None
+                    if roi_gray is not None:
+                        if roi_gray.shape != template.shape:
+                            roi_gray = cv2.resize(roi_gray, (template.shape[1], template.shape[0]))
+                        try:
+                            res = cv2.matchTemplate(roi_gray, template, cv2.TM_CCOEFF_NORMED)
+                            score = float(res[0][0])
+                            scores.append({'page': r.get('page', ''), 'score': score})
+                            if score > best_score:
+                                best_score = score
+                                output = r.get('page', '')
+                        except Exception:
+                            pass
+                cv2.polylines(frame, [src.astype(int)], True, color, 2)
+                label_pt = src[0].astype(int)
+                cv2.putText(
+                    frame,
+                    str(r.get('id', i + 1)),
+                    (int(label_pt[0]), max(0, int(label_pt[1]) - 5)),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.5,
+                    color,
+                    1,
+                    cv2.LINE_AA,
+                )
+
+            if not has_page:
+                output = forced_group or ''
+            elif best_score <= PAGE_SCORE_THRESHOLD:
+                output = ''
+
+            scores.sort(key=lambda x: x['score'], reverse=True)
+
+            if output or scores:
+                try:
+                    q = get_roi_result_queue(cam_id)
+                    payload = json.dumps({'group': output, 'scores': scores})
+                    if q.full():
+                        q.get_nowait()
+                    await q.put(payload)
+                except Exception:
+                    pass
+
+            futures: list[tuple[asyncio.Future, Any, str | int]] = []
+            loop = asyncio.get_running_loop()
+            for i, r in enumerate(rois):
+                if r.get('type') != 'roi':
+                    continue
+                if forced_group != 'all':
+                    if not output or r.get('group') != output:
+                        continue
+                if np is None:
+                    continue
+                pts = r.get('points', [])
+                if len(pts) != 4:
+                    continue
+                src = np.array([[p['x'], p['y']] for p in pts], dtype=np.float32)
+
+                if r.get('module'):
+                    mod_name = r.get('module')
+                    module_entry = module_cache.get(mod_name)
+                    if module_entry is None:
+                        module = load_custom_module(mod_name)
+                        takes_source = False
+                        takes_cam_id = False
+                        takes_interval = False
+                        if module:
+                            proc = getattr(module, 'process', None)
+                            if callable(proc):
+                                params = inspect.signature(proc).parameters
+                                takes_source = 'source' in params
+                                takes_cam_id = 'cam_id' in params
+                                takes_interval = 'interval' in params
+                        module_cache[mod_name] = (module, takes_source, takes_cam_id, takes_interval)
+                    else:
+                        module, takes_source, takes_cam_id, takes_interval = module_entry
+                    if module is None:
+                        print(f"module '{mod_name}' not found for ROI {r.get('id', i)}")
+                    else:
+                        process_fn = getattr(module, 'process', None)
+                        if not callable(process_fn):
+                            print(f"process function not found in module '{mod_name}' for ROI {r.get('id', i)}")
+                        else:
+                            width_a = np.linalg.norm(src[0] - src[1])
+                            width_b = np.linalg.norm(src[2] - src[3])
+                            max_w = int(max(width_a, width_b))
+                            height_a = np.linalg.norm(src[0] - src[3])
+                            height_b = np.linalg.norm(src[1] - src[2])
+                            max_h = int(max(height_a, height_b))
+                            dst = np.array([[0, 0], [max_w - 1, 0], [max_w - 1, max_h - 1], [0, max_h - 1]], dtype=np.float32)
+                            matrix = cv2.getPerspectiveTransform(src, dst)
+                            roi = cv2.warpPerspective(frame, matrix, (max_w, max_h))
+                            args = [roi, r.get('id', str(i)), save_flag]
+                            if takes_source:
+                                args.append(active_sources.get(cam_id, ''))
+                            if takes_cam_id:
+                                args.append(cam_id)
+                            if takes_interval:
+                                args.append(inference_intervals.get(cam_id, 1.0))
+                            fut = loop.create_future()
+                            try:
+                                if _INFERENCE_QUEUE.full():
+                                    _INFERENCE_QUEUE.get_nowait()
+                                _INFERENCE_QUEUE.put_nowait((process_fn, tuple(args), fut))
+                                futures.append((fut, roi, r.get('id', i)))
+                            except Exception:
+                                pass
+                else:
+                    print(f"module missing for ROI {r.get('id', i)}")
+
+                src_int = src.astype(int)
+                cv2.polylines(frame, [src_int], True, (255, 0, 0), 2)
+                label_pt = src_int[0]
+                cv2.putText(
+                    frame,
+                    str(r.get('id', i + 1)),
+                    (int(label_pt[0]), max(0, int(label_pt[1]) - 5)),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.5,
+                    (255, 0, 0),
+                    1,
+                    cv2.LINE_AA,
+                )
+
+            for fut, roi, roi_id in futures:
+                result_text = ''
+                try:
+                    result = await fut
+                    if isinstance(result, str):
+                        result_text = result
+                    elif isinstance(result, dict) and 'text' in result:
+                        result_text = str(result['text'])
+                except Exception:
+                    pass
+                try:
+                    _, roi_buf = cv2.imencode('.jpg', roi, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
+                    roi_b64 = base64.b64encode(roi_buf).decode('ascii')
+                    q = get_roi_result_queue(cam_id)
+                    payload = json.dumps({'id': roi_id, 'image': roi_b64, 'text': result_text})
+                    if q.full():
+                        q.get_nowait()
+                    await q.put(payload)
+                except Exception:
+                    pass
     except asyncio.CancelledError:
         pass
     finally:
@@ -598,6 +605,59 @@ async def run_inference_loop(cam_id: str):
                 sys.modules.pop(f"custom_{mod_name}", None)
         module_cache.clear()
         gc.collect()
+
+
+async def run_inference_loop(cam_id: str):
+    queue = get_frame_queue(cam_id)
+    ocr_queue = get_ocr_queue(cam_id)
+    ocr_running[cam_id] = True
+    ocr_task = asyncio.create_task(ocr_worker(cam_id))
+    try:
+        while True:
+            worker = camera_workers.get(cam_id)
+            if worker is None:
+                await asyncio.sleep(0.05)
+                continue
+            frame = await worker.read()
+            if frame is None:
+                await asyncio.sleep(0.05)
+                continue
+            if np is not None and hasattr(frame, "size") and frame.size == 0:
+                await asyncio.sleep(0.05)
+                continue
+            if ocr_queue.full():
+                try:
+                    ocr_queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    pass
+            try:
+                ocr_queue.put_nowait(frame)
+            except asyncio.QueueFull:
+                pass
+            try:
+                resized = cv2.resize(frame, (0, 0), fx=0.5, fy=0.5)
+                encoded, buffer = cv2.imencode('.jpg', resized, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
+            except Exception:
+                await asyncio.sleep(0.05)
+                continue
+            if not encoded or buffer is None:
+                await asyncio.sleep(0.05)
+                continue
+            frame_bytes = buffer.tobytes() if hasattr(buffer, "tobytes") else buffer
+            if queue.full():
+                try:
+                    queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    pass
+            await queue.put(frame_bytes)
+            await asyncio.sleep(0.04)
+    except asyncio.CancelledError:
+        pass
+    finally:
+        ocr_running[cam_id] = False
+        ocr_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await ocr_task
 
 
 async def run_roi_loop(cam_id: str):
