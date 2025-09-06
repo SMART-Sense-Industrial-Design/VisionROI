@@ -512,7 +512,7 @@ async def ocr_worker(cam_id: str):
                 except Exception:
                     pass
 
-            futures: list[tuple[asyncio.Future, Any, str | int]] = []
+            futures: list[tuple[asyncio.Future, Any, str | int, list[dict[str, float]]]] = []
             loop = asyncio.get_running_loop()
             for i, r in enumerate(rois):
                 if r.get('type') != 'roi':
@@ -573,7 +573,7 @@ async def ocr_worker(cam_id: str):
                                 if _INFERENCE_QUEUE.full():
                                     _INFERENCE_QUEUE.get_nowait()
                                 _INFERENCE_QUEUE.put_nowait((process_fn, tuple(args), fut))
-                                futures.append((fut, roi, r.get('id', i)))
+                                futures.append((fut, roi, r.get('id', i), pts))
                             except Exception:
                                 pass
                 else:
@@ -593,7 +593,7 @@ async def ocr_worker(cam_id: str):
                     cv2.LINE_AA,
                 )
 
-            for fut, roi, roi_id in futures:
+            for fut, roi, roi_id, pts in futures:
                 result_text = ''
                 try:
                     result = await fut
@@ -607,7 +607,15 @@ async def ocr_worker(cam_id: str):
                     _, roi_buf = cv2.imencode('.jpg', roi, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
                     roi_b64 = base64.b64encode(roi_buf).decode('ascii')
                     q = get_roi_result_queue(cam_id)
-                    payload = json.dumps({'id': roi_id, 'image': roi_b64, 'text': result_text})
+                    points = [{'x': float(p['x']), 'y': float(p['y'])} for p in pts]
+                    payload = json.dumps({
+                        'id': roi_id,
+                        'image': roi_b64,
+                        'text': result_text,
+                        'points': points,
+                        'width': int(frame.shape[1]),
+                        'height': int(frame.shape[0]),
+                    })
                     if q.full():
                         q.get_nowait()
                     await q.put(payload)
