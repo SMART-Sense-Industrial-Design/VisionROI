@@ -58,7 +58,7 @@ ALLOWED_ROI_DIR = os.path.realpath("data_sources")
 # Global inference queue & thread pool
 # =========================
 MAX_WORKERS = os.cpu_count() or 1
-_INFERENCE_QUEUE = Queue(maxsize=MAX_WORKERS * 2)
+_INFERENCE_QUEUE = Queue(maxsize=MAX_WORKERS * 10)
 _EXECUTOR = ThreadPoolExecutor(max_workers=MAX_WORKERS)
 
 def _inference_worker():
