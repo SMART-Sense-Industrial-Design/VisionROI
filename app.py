@@ -21,6 +21,7 @@ from pathlib import Path
 import contextlib
 import inspect
 import gc
+import time
 from typing import Callable, Awaitable, Any
 from concurrent.futures import ThreadPoolExecutor
 from queue import Queue, Empty
@@ -46,6 +47,11 @@ active_sources: dict[str, str] = {}
 save_roi_flags: dict[str, bool] = {}
 inference_groups: dict[str, str | None] = {}
 inference_intervals: dict[str, float] = {}
+last_ocr_time: dict[str, float] = {}
+_pending_ocr_frames: dict[str, Any] = {}
+ocr_queue: asyncio.Queue[tuple[str, Any]] = asyncio.Queue()
+_ocr_worker_task: asyncio.Task | None = None
+_ocr_worker_busy = False
 
 STATE_FILE = "service_state.json"
 PAGE_SCORE_THRESHOLD = 0.4
@@ -80,6 +86,33 @@ def _inference_worker():
 
 for _ in range(MAX_WORKERS):
     _EXECUTOR.submit(_inference_worker)
+
+
+# =========================
+# OCR worker
+# =========================
+async def _ocr_worker():
+    global _ocr_worker_busy
+    while True:
+        cam_id, frame = await ocr_queue.get()
+        if cam_id is None:
+            break
+        try:
+            await asyncio.sleep(0)
+        finally:
+            last_ocr_time[cam_id] = time.time()
+            _ocr_worker_busy = False
+            pending = _pending_ocr_frames.pop(cam_id, None)
+            if pending is not None:
+                interval = inference_intervals.get(cam_id, 1.0)
+                if time.time() - last_ocr_time[cam_id] >= interval:
+                    try:
+                        ocr_queue.put_nowait((cam_id, pending))
+                        _ocr_worker_busy = True
+                    except Exception:
+                        _pending_ocr_frames[cam_id] = pending
+                else:
+                    _pending_ocr_frames[cam_id] = pending
 
 
 # =========================
@@ -397,9 +430,27 @@ async def read_and_queue_frame(
 # Loops
 # =========================
 async def run_inference_loop(cam_id: str):
+    global _ocr_worker_task
+    if _ocr_worker_task is None or _ocr_worker_task.done():
+        _ocr_worker_task = asyncio.create_task(_ocr_worker())
     module_cache: dict[str, tuple[ModuleType | None, bool, bool, bool]] = {}
 
     async def process_frame(frame):
+        global _ocr_worker_busy
+        try:
+            ocr_frame = frame.copy()
+        except Exception:
+            ocr_frame = frame
+        _pending_ocr_frames[cam_id] = ocr_frame
+        now = time.time()
+        interval = inference_intervals.get(cam_id, 1.0)
+        if (now - last_ocr_time.get(cam_id, 0.0) >= interval) and not _ocr_worker_busy:
+            candidate = _pending_ocr_frames.pop(cam_id, ocr_frame)
+            try:
+                ocr_queue.put_nowait((cam_id, candidate))
+                _ocr_worker_busy = True
+            except Exception:
+                _pending_ocr_frames[cam_id] = candidate
         rois = inference_rois.get(cam_id, [])
         forced_group = inference_groups.get(cam_id)
         if not rois:
