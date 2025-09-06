@@ -341,10 +341,14 @@
 
         function openRoiSocket() {
             roiSocket = new WebSocket(`ws://${location.host}/ws_roi_result/${cam}`);
-            roiSocket.onmessage = function(event) {
-                try {
-                    const data = JSON.parse(event.data);
-                    if (Object.prototype.hasOwnProperty.call(data, 'id')) {
+
+            const pendingRois = new Map();
+            let scheduled = false;
+
+            function render() {
+                scheduled = false;
+                if (pendingRois.size > 0) {
+                    pendingRois.forEach(data => {
                         const imgEl = document.getElementById(`${cellId}-roi-${data.id}`);
                         if (imgEl) {
                             imgEl.src = `data:image/jpeg;base64,${data.image}`;
@@ -359,8 +363,26 @@
                                 width: data.width,
                                 height: data.height
                             };
-                            drawBoxes();
                         }
+                    });
+                    pendingRois.clear();
+                    drawBoxes();
+                }
+            }
+
+            function schedule() {
+                if (!scheduled) {
+                    scheduled = true;
+                    requestAnimationFrame(render);
+                }
+            }
+
+            roiSocket.onmessage = function(event) {
+                try {
+                    const data = JSON.parse(event.data);
+                    if (Object.prototype.hasOwnProperty.call(data, 'id')) {
+                        pendingRois.set(data.id, data);
+                        schedule();
                     }
                 } catch (e) {
                     console.error('ROI message error', e);

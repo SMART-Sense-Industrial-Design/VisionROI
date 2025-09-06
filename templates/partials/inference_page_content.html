@@ -225,43 +225,72 @@ function createController(cellId){
 
     function openRoiSocket(){
         roiSocket=new WebSocket(`ws://${location.host}/ws_roi_result/${cam}`);
+
+        let pendingGroup=null;
+        let pendingScores=null;
+        const pendingRois=new Map();
+        let scheduled=false;
+
+        function render(){
+            scheduled=false;
+            if(pendingGroup!==null){
+                pageNameEl.innerText=pendingGroup||'';
+                if(Array.isArray(pendingScores)){
+                    scoreTableBody.innerHTML='';
+                    pendingScores.forEach(item=>{
+                        const tr=document.createElement('tr');
+                        const tdPage=document.createElement('td');
+                        tdPage.textContent=item.page||'';
+                        const tdScore=document.createElement('td');
+                        tdScore.textContent=item.score.toFixed(2);
+                        tr.appendChild(tdPage);
+                        tr.appendChild(tdScore);
+                        scoreTableBody.appendChild(tr);
+                    });
+                }
+                pendingGroup=null;
+                pendingScores=null;
+            }
+            if(pendingRois.size>0){
+                pendingRois.forEach(data=>{
+                    const imgEl=document.getElementById(`${cellId}-roi-${data.id}`);
+                    if(imgEl){
+                        imgEl.src=`data:image/jpeg;base64,${data.image}`;
+                    }
+                    const textEl=document.getElementById(`${cellId}-text-${data.id}`);
+                    if(textEl){
+                        textEl.textContent=data.text||'';
+                    }
+                    if(Array.isArray(data.points)&&data.width&&data.height){
+                        roiBoxes[data.id]={
+                            points:data.points,
+                            width:data.width,
+                            height:data.height
+                        };
+                    }
+                });
+                pendingRois.clear();
+                drawBoxes();
+            }
+        }
+
+        function schedule(){
+            if(!scheduled){
+                scheduled=true;
+                requestAnimationFrame(render);
+            }
+        }
+
         roiSocket.onmessage=event=>{
             try{
                 const data=JSON.parse(event.data);
                 if('group' in data){
-                    pageNameEl.innerText=data.group||'';
-                    if(Array.isArray(data.scores)){
-                        scoreTableBody.innerHTML='';
-                        data.scores.forEach(item=>{
-                            const tr=document.createElement('tr');
-                            const tdPage=document.createElement('td');
-                            tdPage.textContent=item.page||'';
-                            const tdScore=document.createElement('td');
-                            tdScore.textContent=item.score.toFixed(2);
-                            tr.appendChild(tdPage);
-                            tr.appendChild(tdScore);
-                            scoreTableBody.appendChild(tr);
-                        });
-                    }
-                } else if (Object.prototype.hasOwnProperty.call(data, 'id')) {
-                    const imgEl = document.getElementById(`${cellId}-roi-${data.id}`);
-                    if (imgEl) {
-                        imgEl.src = `data:image/jpeg;base64,${data.image}`;
-                    }
-                    const textEl = document.getElementById(`${cellId}-text-${data.id}`);
-                    if (textEl) {
-                        textEl.textContent = data.text || '';
-                    }
-                    if (Array.isArray(data.points) && data.width && data.height) {
-                        roiBoxes[data.id] = {
-                            points: data.points,
-                            width: data.width,
-                            height: data.height
-                        };
-                        drawBoxes();
-                    }
-
+                    pendingGroup=data.group;
+                    pendingScores=Array.isArray(data.scores)?data.scores:null;
+                }else if(Object.prototype.hasOwnProperty.call(data,'id')){
+                    pendingRois.set(data.id,data);
                 }
+                schedule();
             }catch(e){}
         };
     }
