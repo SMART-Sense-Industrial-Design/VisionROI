@@ -10,7 +10,6 @@ from datetime import datetime
 import threading
 from pathlib import Path
 import gc
-from queue import Queue, Empty, Full
 
 try:
     import numpy as np
@@ -35,10 +34,6 @@ _data_sources_root = Path(__file__).resolve().parents[2] / "data_sources"
 _reader: easyocr.Reader | None = None
 _reader_lock = threading.Lock()
 
-_roi_queues: dict = {}
-_worker_thread: threading.Thread | None = None
-_worker_stop_event = threading.Event()
-_worker_thread_lock = threading.Lock()
 
 
 def _configure_logger(source: str | None) -> None:
@@ -86,59 +81,6 @@ def _save_image_async(path, image) -> None:
         logger.exception(f"Failed to save image {path}: {e}")
 
 
-def _run_ocr_async(frame, roi_id, save, source) -> None:
-    """ประมวลผล OCR และบันทึกรูปในเธรดแยก"""
-    try:
-        reader = _get_reader()
-        ocr_result = reader.readtext(frame, detail=0)
-        text = " ".join(ocr_result)
-        logger.info(
-            f"roi_id={roi_id} {MODULE_NAME} OCR result: {text}"
-            if roi_id is not None
-            else f"{MODULE_NAME} OCR result: {text}"
-        )
-        with _last_ocr_lock:
-            last_ocr_results[roi_id] = text
-    except Exception as e:  # pragma: no cover - log any OCR error
-        logger.exception(f"roi_id={roi_id} {MODULE_NAME} OCR error: {e}")
-
-    if save:
-        base_dir = _data_sources_root / source if source else Path(__file__).resolve().parent
-        roi_folder = f"{roi_id}" if roi_id is not None else "roi"
-        save_dir = base_dir / "images" / roi_folder
-        os.makedirs(save_dir, exist_ok=True)
-        filename = datetime.now().strftime("%Y%m%d%H%M%S%f") + ".jpg"
-        path = save_dir / filename
-        _save_image_async(str(path), frame)
-
-
-def _worker() -> None:
-    """worker หลักที่ดึงงานจากคิวของแต่ละ ROI"""
-    while not _worker_stop_event.is_set():
-        processed = False
-        for roi_id, q in list(_roi_queues.items()):
-            try:
-                frame, save, source = q.get_nowait()
-            except Empty:
-                continue
-            processed = True
-            try:
-                _run_ocr_async(frame, roi_id, save, source)
-            finally:
-                q.task_done()
-        if not processed:
-            time.sleep(0.01)
-
-
-def _ensure_worker() -> None:
-    global _worker_thread
-    with _worker_thread_lock:
-        if _worker_thread is None or not _worker_thread.is_alive():
-            _worker_stop_event.clear()
-            _worker_thread = threading.Thread(target=_worker, daemon=True)
-            _worker_thread.start()
-
-
 def process(
     frame,
     roi_id=None,
@@ -173,32 +115,36 @@ def process(
     if should_ocr:
         with _last_ocr_lock:
             last_ocr_times[roi_id] = current_time
-        q = _roi_queues.setdefault(roi_id, Queue(maxsize=1))
-        item = (frame.copy(), save, source)
         try:
-            q.put_nowait(item)
-        except Full:
-            try:
-                q.get_nowait()
-            except Empty:
-                pass
-            try:
-                q.put_nowait(item)
-            except Full:
-                pass
-        _ensure_worker()
+            reader = _get_reader()
+            ocr_result = reader.readtext(frame, detail=0)
+            text = " ".join(ocr_result)
+            logger.info(
+                f"roi_id={roi_id} {MODULE_NAME} OCR result: {text}"
+                if roi_id is not None
+                else f"{MODULE_NAME} OCR result: {text}"
+            )
+            with _last_ocr_lock:
+                last_ocr_results[roi_id] = text
+        except Exception as e:  # pragma: no cover - log any OCR error
+            logger.exception(f"roi_id={roi_id} {MODULE_NAME} OCR error: {e}")
+
+        if save:
+            base_dir = _data_sources_root / source if source else Path(__file__).resolve().parent
+            roi_folder = f"{roi_id}" if roi_id is not None else "roi"
+            save_dir = base_dir / "images" / roi_folder
+            os.makedirs(save_dir, exist_ok=True)
+            filename = datetime.now().strftime("%Y%m%d%H%M%S%f") + ".jpg"
+            path = save_dir / filename
+            threading.Thread(target=_save_image_async, args=(str(path), frame), daemon=True).start()
+
+        result_text = last_ocr_results.get(roi_id, "")
 
     return result_text
 
 
 def stop(roi_id) -> None:
-    """ลบข้อมูลและคิวของ ROI ที่หยุดใช้งาน"""
-    q = _roi_queues.pop(roi_id, None)
-    if q:
-        with q.mutex:
-            q.queue.clear()
-            q.unfinished_tasks = 0
-            q.all_tasks_done.notify_all()
+    """ลบข้อมูลของ ROI ที่หยุดใช้งาน"""
     with _last_ocr_lock:
         last_ocr_times.pop(roi_id, None)
         last_ocr_results.pop(roi_id, None)
@@ -206,12 +152,7 @@ def stop(roi_id) -> None:
 
 def cleanup() -> None:
     """รีเซ็ตสถานะของโมดูลและบังคับเก็บขยะ"""
-    global _reader, _handler, _current_source, _worker_thread
-    _worker_stop_event.set()
-    if _worker_thread and _worker_thread.is_alive():
-        _worker_thread.join(timeout=1)
-    _worker_thread = None
-    _roi_queues.clear()
+    global _reader, _handler, _current_source
     with _reader_lock:
         _reader = None
     with _last_ocr_lock:
