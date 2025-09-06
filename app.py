@@ -475,10 +475,13 @@ async def ocr_worker(cam_id: str):
                     cv2.LINE_AA,
                 )
 
-            if not has_page:
-                output = forced_group or ''
-            elif best_score <= PAGE_SCORE_THRESHOLD:
-                output = ''
+            if forced_group and forced_group != 'all':
+                output = forced_group
+            else:
+                if not has_page:
+                    output = forced_group or ''
+                elif best_score <= PAGE_SCORE_THRESHOLD:
+                    output = ''
 
             scores.sort(key=lambda x: x['score'], reverse=True)
 
