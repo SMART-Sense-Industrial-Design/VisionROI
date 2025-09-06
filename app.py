@@ -22,6 +22,8 @@ import contextlib
 import inspect
 import gc
 from typing import Callable, Awaitable, Any
+from concurrent.futures import ThreadPoolExecutor
+from queue import Queue, Empty
 try:
     from websockets.exceptions import ConnectionClosed
 except Exception:
@@ -51,6 +53,33 @@ PAGE_SCORE_THRESHOLD = 0.4
 app = Quart(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 100 * 1024 * 1024
 ALLOWED_ROI_DIR = os.path.realpath("data_sources")
+
+# =========================
+# Global inference queue & thread pool
+# =========================
+MAX_WORKERS = os.cpu_count() or 1
+_INFERENCE_QUEUE = Queue(maxsize=MAX_WORKERS * 2)
+_EXECUTOR = ThreadPoolExecutor(max_workers=MAX_WORKERS)
+
+def _inference_worker():
+    while True:
+        item = _INFERENCE_QUEUE.get()
+        if item is None:
+            _INFERENCE_QUEUE.task_done()
+            break
+        func, args, fut = item
+        try:
+            res = func(*args)
+            if inspect.isawaitable(res):
+                res = asyncio.run(res)
+            fut.set_result(res)
+        except Exception as e:
+            fut.set_exception(e)
+        finally:
+            _INFERENCE_QUEUE.task_done()
+
+for _ in range(MAX_WORKERS):
+    _EXECUTOR.submit(_inference_worker)
 
 
 # =========================
@@ -449,6 +478,8 @@ async def run_inference_loop(cam_id: str):
             except Exception:
                 pass
 
+        futures: list[tuple[asyncio.Future, Any, str | int]] = []
+        loop = asyncio.get_running_loop()
         for i, r in enumerate(rois):
             if r.get('type') != 'roi':
                 continue
@@ -496,32 +527,19 @@ async def run_inference_loop(cam_id: str):
                         dst = np.array([[0, 0], [max_w - 1, 0], [max_w - 1, max_h - 1], [0, max_h - 1]], dtype=np.float32)
                         matrix = cv2.getPerspectiveTransform(src, dst)
                         roi = cv2.warpPerspective(frame, matrix, (max_w, max_h))
-                        result_text = ''
+                        args = [roi, r.get('id', str(i)), save_flag]
+                        if takes_source:
+                            args.append(active_sources.get(cam_id, ''))
+                        if takes_cam_id:
+                            args.append(cam_id)
+                        if takes_interval:
+                            args.append(inference_intervals.get(cam_id, 1.0))
+                        fut = loop.create_future()
                         try:
-                            args = [roi, r.get('id', str(i)), save_flag]
-                            if takes_source:
-                                args.append(active_sources.get(cam_id, ''))
-                            if takes_cam_id:
-                                args.append(cam_id)
-                            if takes_interval:
-                                args.append(inference_intervals.get(cam_id, 1.0))
-                            result = process_fn(*args)
-                            if inspect.isawaitable(result):
-                                result = await result
-                            if isinstance(result, str):
-                                result_text = result
-                            elif isinstance(result, dict) and 'text' in result:
-                                result_text = str(result['text'])
-                        except Exception:
-                            pass
-                        try:
-                            _, roi_buf = cv2.imencode('.jpg', roi, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
-                            roi_b64 = base64.b64encode(roi_buf).decode('ascii')
-                            q = get_roi_result_queue(cam_id)
-                            payload = json.dumps({'id': r.get('id', i), 'image': roi_b64, 'text': result_text})
-                            if q.full():
-                                q.get_nowait()
-                            await q.put(payload)
+                            if _INFERENCE_QUEUE.full():
+                                _INFERENCE_QUEUE.get_nowait()
+                            _INFERENCE_QUEUE.put_nowait((process_fn, tuple(args), fut))
+                            futures.append((fut, roi, r.get('id', i)))
                         except Exception:
                             pass
             else:
@@ -540,6 +558,27 @@ async def run_inference_loop(cam_id: str):
                 1,
                 cv2.LINE_AA,
             )
+
+        for fut, roi, roi_id in futures:
+            result_text = ''
+            try:
+                result = await fut
+                if isinstance(result, str):
+                    result_text = result
+                elif isinstance(result, dict) and 'text' in result:
+                    result_text = str(result['text'])
+            except Exception:
+                pass
+            try:
+                _, roi_buf = cv2.imencode('.jpg', roi, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
+                roi_b64 = base64.b64encode(roi_buf).decode('ascii')
+                q = get_roi_result_queue(cam_id)
+                payload = json.dumps({'id': roi_id, 'image': roi_b64, 'text': result_text})
+                if q.full():
+                    q.get_nowait()
+                await q.put(payload)
+            except Exception:
+                pass
 
         return cv2.resize(frame, (0, 0), fx=0.5, fy=0.5)
 
