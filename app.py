@@ -593,6 +593,13 @@ async def ocr_worker(cam_id: str):
                     cv2.LINE_AA,
                 )
 
+            try:
+                if drawn_queue.full():
+                    drawn_queue.get_nowait()
+                await drawn_queue.put(frame)
+            except Exception:
+                pass
+
             for fut, roi, roi_id, pts in futures:
                 result_text = ''
                 try:
@@ -621,12 +628,6 @@ async def ocr_worker(cam_id: str):
                     await q.put(payload)
                 except Exception:
                     pass
-            try:
-                if drawn_queue.full():
-                    drawn_queue.get_nowait()
-                await drawn_queue.put(frame)
-            except Exception:
-                pass
     except asyncio.CancelledError:
         pass
     finally:
