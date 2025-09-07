@@ -58,6 +58,13 @@ function createController(cellId){
     const intervalInput=getEl('intervalInput');
     intervalInput.value=localStorage.getItem(`${cellId}-interval`)||'1';
 
+    const formatTs=ts=>{
+        if(!ts) return '';
+        const d=new Date(ts*1000);
+        const ms=String(d.getMilliseconds()).padStart(3,'0');
+        return `${d.toLocaleTimeString('th-TH',{hour12:false})}.${ms}`;
+    };
+
     startButton.onclick=startStream;
     stopButton.onclick=stopStream;
     sourceSelect.onchange=()=>{
@@ -202,30 +209,39 @@ function createController(cellId){
             try{
                 const data=JSON.parse(event.data);
                 if('group' in data){
-                    pageNameEl.innerText=data.group||'';
-                    if(Array.isArray(data.scores)){
-                        scoreTableBody.innerHTML='';
-                        data.scores.forEach(item=>{
-                            const tr=document.createElement('tr');
-                            const tdPage=document.createElement('td');
-                            tdPage.textContent=item.page||'';
-                            const tdScore=document.createElement('td');
-                            tdScore.textContent=item.score.toFixed(2);
-                            tr.appendChild(tdPage);
-                            tr.appendChild(tdScore);
-                            scoreTableBody.appendChild(tr);
-                        });
-                    }
+                    setTimeout(()=>{
+                        pageNameEl.innerText=data.group||'';
+                        if(Array.isArray(data.scores)){
+                            scoreTableBody.innerHTML='';
+                            data.scores.forEach(item=>{
+                                const tr=document.createElement('tr');
+                                const tdPage=document.createElement('td');
+                                tdPage.textContent=item.page||'';
+                                const tdScore=document.createElement('td');
+                                tdScore.textContent=item.score.toFixed(2);
+                                tr.appendChild(tdPage);
+                                tr.appendChild(tdScore);
+                                scoreTableBody.appendChild(tr);
+                            });
+                        }
+                    },0);
                 } else if (Object.prototype.hasOwnProperty.call(data, 'id')) {
-                    const imgEl = document.getElementById(`${cellId}-roi-${data.id}`);
-                    if (imgEl) {
-                        imgEl.src = `data:image/jpeg;base64,${data.image}`;
-                    }
-                    const textEl = document.getElementById(`${cellId}-text-${data.id}`);
-                    if (textEl) {
-                        textEl.textContent = data.text || '';
-                    }
-
+                    setTimeout(()=>{
+                        const imgEl = document.getElementById(`${cellId}-roi-${data.id}`);
+                        if (imgEl) {
+                            imgEl.src = `data:image/jpeg;base64,${data.image}`;
+                        }
+                        const textEl = document.getElementById(`${cellId}-text-${data.id}`);
+                        if (textEl) {
+                            textEl.textContent = data.text || '';
+                        }
+                        const timeEl=document.getElementById(`${cellId}-time-${data.id}`);
+                        if(timeEl){
+                            const frameTs=formatTs(data.frame_time);
+                            const resTs=formatTs(data.result_time);
+                            timeEl.textContent=`frame: ${frameTs}, ocr: ${resTs}`;
+                        }
+                    },0);
                 }
             }catch(e){}
         };
@@ -245,9 +261,13 @@ function createController(cellId){
             const p=document.createElement('p');
             p.id=`${cellId}-text-${r.id}`;
             p.className='roi-text';
+            const t=document.createElement('p');
+            t.id=`${cellId}-time-${r.id}`;
+            t.className='roi-time';
             item.appendChild(title);
             item.appendChild(img);
             item.appendChild(p);
+            item.appendChild(t);
             roiGrid.appendChild(item);
         });
     }

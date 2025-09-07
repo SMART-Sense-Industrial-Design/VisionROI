@@ -21,6 +21,7 @@ from pathlib import Path
 import contextlib
 import inspect
 import gc
+import time
 from typing import Callable, Awaitable, Any
 from concurrent.futures import ThreadPoolExecutor
 from queue import Queue, Empty
@@ -407,6 +408,7 @@ async def run_inference_loop(cam_id: str):
 
         save_flag = bool(save_roi_flags.get(cam_id))
         output = None
+        frame_time = time.time()
         best_score = -1.0
         scores: list[dict[str, float | str]] = []
         has_page = False
@@ -546,6 +548,7 @@ async def run_inference_loop(cam_id: str):
                             roi_img=roi,
                             roi_id=r.get('id', i),
                             cam=cam_id,
+                            frame_time=frame_time,
                         ) -> None:
                             result_text = ''
                             try:
@@ -557,13 +560,20 @@ async def run_inference_loop(cam_id: str):
                             except Exception:
                                 pass
                             try:
+                                result_time = time.time()
                                 _, roi_buf = cv2.imencode(
                                     '.jpg', roi_img, [int(cv2.IMWRITE_JPEG_QUALITY), 80]
                                 )
                                 roi_b64 = base64.b64encode(roi_buf).decode('ascii')
                                 q = get_roi_result_queue(cam)
                                 payload = json.dumps(
-                                    {'id': roi_id, 'image': roi_b64, 'text': result_text}
+                                    {
+                                        'id': roi_id,
+                                        'image': roi_b64,
+                                        'text': result_text,
+                                        'frame_time': frame_time,
+                                        'result_time': result_time,
+                                    }
                                 )
                                 if q.full():
                                     q.get_nowait()
