@@ -44,6 +44,7 @@ function createController(cellId){
     const cam=`page_${cellId}`;
     const getEl=suffix=>document.getElementById(`${cellId}-${suffix}`);
     const video=getEl('video');
+    video.onload=()=>URL.revokeObjectURL(video.src);
     const pageNameEl=getEl('pageName');
     const scoreTableBody=getEl('pageScoresBody');
     const roiGrid=getEl('rois');
@@ -194,6 +195,9 @@ function createController(cellId){
         socket=new WebSocket(`ws://${location.host}/ws/${cam}`);
         socket.binaryType='arraybuffer';
         socket.onmessage=event=>{
+            if(video.src && video.src.startsWith('blob:')){
+                URL.revokeObjectURL(video.src);
+            }
             const blob=new Blob([event.data],{type:'image/jpeg'});
             video.src=URL.createObjectURL(blob);
         };
@@ -300,7 +304,12 @@ function createController(cellId){
         if(socket){socket.close();socket=null;}
         if(roiSocket){roiSocket.close();roiSocket=null;}
         stopLogUpdates();
+        if(video.src && video.src.startsWith('blob:')){
+            URL.revokeObjectURL(video.src);
+        }
         video.src='';
+        rois=[];
+        roiGrid.innerHTML='';
         pageNameEl.innerText='';
         scoreTableBody.innerHTML='';
         startButton.disabled=false;

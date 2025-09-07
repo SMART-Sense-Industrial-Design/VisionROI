@@ -298,8 +298,13 @@
                 roiSocket = null;
             }
             stopLogUpdates();
-            // clear last frame and update UI
+            // clear last frame and related data to free memory
+            if (video.src && video.src.startsWith('blob:')) {
+                URL.revokeObjectURL(video.src);
+            }
             video.src = '';
+            rois = [];
+            allRois = [];
             roiGrid.innerHTML = '';
             statusEl.innerText = 'Stopped';
             startButton.innerText = 'Resume';
@@ -312,6 +317,9 @@
             socket = new WebSocket(`ws://${location.host}/ws/${cam}`);
             socket.binaryType = 'arraybuffer';
             socket.onmessage = function(event) {
+                if (video.src && video.src.startsWith('blob:')) {
+                    URL.revokeObjectURL(video.src);
+                }
                 const blob = new Blob([event.data], { type: 'image/jpeg' });
                 video.src = URL.createObjectURL(blob);
             };
