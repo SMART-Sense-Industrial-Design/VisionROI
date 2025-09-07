@@ -59,8 +59,11 @@ ALLOWED_ROI_DIR = os.path.realpath("data_sources")
 # Global inference queue & thread pool
 # =========================
 MAX_WORKERS = os.cpu_count() or 1
-_INFERENCE_QUEUE = Queue(maxsize=MAX_WORKERS * 10)
-_EXECUTOR = ThreadPoolExecutor(max_workers=MAX_WORKERS)
+_INFERENCE_QUEUE: Queue[tuple[Callable, tuple, asyncio.Future] | None] = Queue(
+    maxsize=MAX_WORKERS * 10
+)
+_EXECUTOR: ThreadPoolExecutor | None = None
+
 
 def _inference_worker():
     while True:
@@ -79,8 +82,43 @@ def _inference_worker():
         finally:
             _INFERENCE_QUEUE.task_done()
 
-for _ in range(MAX_WORKERS):
-    _EXECUTOR.submit(_inference_worker)
+
+def _start_inference_workers() -> None:
+    global _EXECUTOR
+    if _EXECUTOR is None:
+        _EXECUTOR = ThreadPoolExecutor(max_workers=MAX_WORKERS)
+        for _ in range(MAX_WORKERS):
+            _EXECUTOR.submit(_inference_worker)
+
+
+def _stop_inference_workers() -> None:
+    global _EXECUTOR
+    if _EXECUTOR is None:
+        return
+    # เคลียร์งานที่ค้างและยกเลิก future
+    while True:
+        try:
+            item = _INFERENCE_QUEUE.get_nowait()
+        except Empty:
+            break
+        if item is None:
+            _INFERENCE_QUEUE.task_done()
+            continue
+        _, _, fut = item
+        if fut and not fut.done():
+            fut.cancel()
+        _INFERENCE_QUEUE.task_done()
+    # ส่งสัญญาณหยุดให้ worker
+    for _ in range(MAX_WORKERS):
+        try:
+            _INFERENCE_QUEUE.put_nowait(None)
+        except Exception:
+            pass
+    _EXECUTOR.shutdown(wait=False, cancel_futures=True)
+    _EXECUTOR = None
+
+
+_start_inference_workers()
 
 
 # =========================
@@ -269,6 +307,7 @@ if hasattr(app, "after_serving"):
             *[_safe_stop(cid, roi_tasks, roi_frame_queues) for cid in list(roi_tasks.keys())],
             return_exceptions=True
         )
+        _stop_inference_workers()
         for cam_id, q in list(roi_result_queues.items()):
             with contextlib.suppress(Exception):
                 await q.put(None)
@@ -398,6 +437,7 @@ async def read_and_queue_frame(
 # Loops
 # =========================
 async def run_inference_loop(cam_id: str):
+    _start_inference_workers()
     module_cache: dict[str, tuple[ModuleType | None, bool, bool, bool]] = {}
 
     async def process_frame(frame):
@@ -709,6 +749,9 @@ async def stop_camera_task(
             del worker
             gc.collect()
             _malloc_trim()
+
+        if not inference_tasks:
+            _stop_inference_workers()
 
         return task, {"status": status, "cam_id": cam_id}, 200
 
