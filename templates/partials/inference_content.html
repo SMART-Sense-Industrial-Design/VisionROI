@@ -123,31 +123,28 @@
             }
         }
 
-        function renderRoiPlaceholders(list = rois) {
-            roiGrid.innerHTML = '';
-            list.forEach(r => {
-                const item = document.createElement('div');
-                item.className = 'roi-item';
-                const title = document.createElement('h4');
-                title.className = 'roi-title';
-                title.textContent = r.name || `ROI ${r.id}`;
-                const img = document.createElement('img');
-                img.id = `${cellId}-roi-${r.id}`;
-                img.className = 'roi-image';
-                const p = document.createElement('p');
-                p.id = `${cellId}-text-${r.id}`;
-                p.className = 'roi-text';
-                p.textContent = 'OCR: ';
-                const t = document.createElement('p');
-                t.id = `${cellId}-time-${r.id}`;
-                t.className = 'roi-time';
-                t.textContent = 'เวลา: ';
-                item.appendChild(title);
-                item.appendChild(img);
-                item.appendChild(p);
-                item.appendChild(t);
-                roiGrid.appendChild(item);
-            });
+        function ensureRoiItem(id) {
+            if (document.getElementById(`${cellId}-roi-${id}`)) return;
+            const r = rois.find(r => r.id === id) || { id };
+            const item = document.createElement('div');
+            item.className = 'roi-item';
+            const title = document.createElement('h4');
+            title.className = 'roi-title';
+            title.textContent = r.name || `ROI ${id}`;
+            const img = document.createElement('img');
+            img.id = `${cellId}-roi-${id}`;
+            img.className = 'roi-image';
+            const p = document.createElement('p');
+            p.id = `${cellId}-text-${id}`;
+            p.className = 'roi-text';
+            const t = document.createElement('p');
+            t.id = `${cellId}-time-${id}`;
+            t.className = 'roi-time';
+            item.appendChild(title);
+            item.appendChild(img);
+            item.appendChild(p);
+            item.appendChild(t);
+            roiGrid.appendChild(item);
         }
 
         function startLogUpdates(sourceName){
@@ -246,11 +243,7 @@
                     ? roiList
 
                     : []);
-            if (rois.length > 0) {
-                renderRoiPlaceholders();
-            } else {
-                roiGrid.innerHTML = '';
-            }
+            roiGrid.innerHTML = '';
 
             let startData;
             let startRes;
@@ -331,6 +324,7 @@
                     const data = JSON.parse(event.data);
                     if (Object.prototype.hasOwnProperty.call(data, 'id')) {
                         setTimeout(() => {
+                            ensureRoiItem(data.id);
                             const imgEl = document.getElementById(`${cellId}-roi-${data.id}`);
                             if (imgEl) {
                                 imgEl.src = `data:image/jpeg;base64,${data.image}`;
@@ -383,7 +377,7 @@
                     body: JSON.stringify({ rois, group: stored, interval })
                 });
                 if (rois.length > 0) {
-                    renderRoiPlaceholders();
+                    roiGrid.innerHTML = '';
                     openRoiSocket();
                 }
                 startLogUpdates(cfg.name);
