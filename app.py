@@ -391,7 +391,7 @@ def get_roi_frame_queue(cam_id: str) -> asyncio.Queue[bytes | None]:
 
 
 def get_roi_result_queue(cam_id: str) -> asyncio.Queue[str | None]:
-    return roi_result_queues.setdefault(cam_id, asyncio.Queue(maxsize=10))
+    return roi_result_queues.setdefault(cam_id, asyncio.Queue(maxsize=100))
 
 
 # =========================
