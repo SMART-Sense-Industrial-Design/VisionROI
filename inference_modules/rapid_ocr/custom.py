@@ -171,16 +171,15 @@ def process(
 
     with _last_ocr_lock:
         last_time = last_ocr_times.get(roi_id)
-        result_text = last_ocr_results.get(roi_id, "")
     diff_time = 0 if last_time is None else current_time - last_time
     should_ocr = last_time is None or diff_time >= interval
 
     if should_ocr:
         with _last_ocr_lock:
             last_ocr_times[roi_id] = current_time
-        result_text = _run_ocr_async(frame, roi_id, save, source)
+        return _run_ocr_async(frame, roi_id, save, source)
 
-    return result_text
+    return None
 
 
 def stop(roi_id) -> None:

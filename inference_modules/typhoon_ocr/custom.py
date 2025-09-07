@@ -99,9 +99,8 @@ def process(
         else:
             should_ocr = False
 
-    result_text = last_ocr_results.get(roi_id, "")
-
     if should_ocr:
+        result_text = last_ocr_results.get(roi_id, "")
         try:
             with _cv_lock:
                 _, buffer = cv2.imencode('.jpg', frame)
@@ -132,4 +131,6 @@ def process(
                 target=_save_image_async, args=(str(path), frame.copy()), daemon=True
             ).start()
 
-    return result_text
+        return result_text
+
+    return None

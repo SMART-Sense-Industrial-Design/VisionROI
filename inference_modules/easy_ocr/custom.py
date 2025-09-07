@@ -111,7 +111,6 @@ def process(
     diff_time = 0 if last_time is None else current_time - last_time
     should_ocr = last_time is None or diff_time >= interval
 
-    result_text = last_ocr_results.get(roi_id, "")
     if should_ocr:
         with _last_ocr_lock:
             last_ocr_times[roi_id] = current_time
@@ -138,9 +137,9 @@ def process(
             path = save_dir / filename
             threading.Thread(target=_save_image_async, args=(str(path), frame), daemon=True).start()
 
-        result_text = last_ocr_results.get(roi_id, "")
+        return last_ocr_results.get(roi_id, "")
 
-    return result_text
+    return None
 
 
 def stop(roi_id) -> None:

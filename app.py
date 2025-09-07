@@ -550,15 +550,18 @@ async def run_inference_loop(cam_id: str):
                             cam=cam_id,
                             frame_time=frame_time,
                         ) -> None:
-                            result_text = ''
                             try:
                                 result = f.result()
+                                if result is None:
+                                    return
                                 if isinstance(result, str):
                                     result_text = result
                                 elif isinstance(result, dict) and 'text' in result:
                                     result_text = str(result['text'])
+                                else:
+                                    return
                             except Exception:
-                                pass
+                                return
                             try:
                                 result_time = time.time()
                                 _, roi_buf = cv2.imencode(
