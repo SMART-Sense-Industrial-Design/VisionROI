@@ -26,7 +26,7 @@
    python app.py --use-uvicorn         # รันด้วย uvicorn
    ```
 
-4. เปิดเบราว์เซอร์ไปที่ `http://localhost:5000/home` (หรือพอร์ตที่กำหนด)
+4. เปิดเบราว์เซอร์ไปที่ `http://localhost:5000/` หรือ `/home` (หรือพอร์ตที่กำหนด)
 
 ## ฟีเจอร์
 - เลือกและบันทึกตำแหน่ง ROI จากกล้องหรือวิดีโอ
@@ -35,7 +35,7 @@
 - รองรับการแจ้งเตือนผ่าน Telegram
 - มาพร้อมโมดูลตัวอย่าง `typhoon_ocr`, `yolo`, `easy_ocr` และ `rapid_ocr` เพื่อเริ่มต้นทดลองใช้งาน
 - บันทึกสถานะกล้องและงาน inference ลงไฟล์ `service_state.json` เพื่อกู้คืนได้หลังรีสตาร์ทเซิร์ฟเวอร์
-- มี endpoint `/_healthz` สำหรับตรวจสอบสถานะ และ `/_quit` สำหรับสั่งปิดเซิร์ฟเวอร์อย่างนุ่มนวล
+- มี endpoint `GET /_healthz` สำหรับตรวจสอบสถานะ และ `POST /_quit` สำหรับสั่งปิดเซิร์ฟเวอร์อย่างนุ่มนวล
 
 ตัวอย่างไฟล์ `vision-roi.service` มีให้สำหรับรันเป็น **systemd service** ซึ่งเรียก `/_quit` เพื่อหยุดแอปอย่างปลอดภัย
 
@@ -239,6 +239,8 @@ tg.start_send_text("สวัสดี")
   GET /load_roi_file?path=data_sources/cam1/rois.json
   ```
 
+- **GET `/read_log`** – อ่านบรรทัดล่าสุดจากไฟล์ `custom.log` ของ source ที่ระบุผ่านพารามิเตอร์ `source` (สามารถกำหนดจำนวนบรรทัดด้วย `lines`, ค่าเริ่มต้น 20)
+
 - **GET `/ws_snapshot/<cam_id>`** – คืนรูป JPEG หนึ่งเฟรมจากกล้อง
 
 - **GET `/data_sources`** – รายชื่อ source ทั้งหมดในระบบ
@@ -250,6 +252,9 @@ tg.start_send_text("สวัสดี")
 - **GET `/source_config`** – คืนค่าคอนฟิกของ source ตามชื่อที่ระบุผ่านพารามิเตอร์ `name`
 
 - **DELETE `/delete_source/<name>`** – ลบโฟลเดอร์และไฟล์ที่เกี่ยวกับ source นั้น
+
+- **GET `/_healthz`** – ตรวจสอบสถานะเซิร์ฟเวอร์
+- **POST `/_quit`** – สั่งปิดเซิร์ฟเวอร์อย่างนุ่มนวล
 
 - **WebSocket `/ws`** – ส่งภาพ JPEG แบบไบนารีต่อเนื่องสำหรับหน้า `/inference`
 
