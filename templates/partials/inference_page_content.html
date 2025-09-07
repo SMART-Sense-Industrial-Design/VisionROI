@@ -238,7 +238,7 @@ function createController(cellId){
                         const timeEl=document.getElementById(`${cellId}-time-${data.id}`);
                         if(timeEl){
                             const frameTs=formatTs(data.frame_time);
-                            timeEl.textContent=`time: ${frameTs}, ocr`;
+                            timeEl.textContent=`time: ${frameTs}`;
                         }
                     },0);
                 }
