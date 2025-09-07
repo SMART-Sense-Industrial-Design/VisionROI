@@ -233,12 +233,12 @@ function createController(cellId){
                         }
                         const textEl = document.getElementById(`${cellId}-text-${data.id}`);
                         if (textEl) {
-                            textEl.textContent = data.text || '';
+                            textEl.textContent = `OCR: ${data.text || ''}`;
                         }
                         const timeEl=document.getElementById(`${cellId}-time-${data.id}`);
                         if(timeEl){
                             const frameTs=formatTs(data.frame_time);
-                            timeEl.textContent=`time: ${frameTs}`;
+                            timeEl.textContent=`เวลา: ${frameTs}`;
                         }
                     },0);
                 }
@@ -260,9 +260,11 @@ function createController(cellId){
             const p=document.createElement('p');
             p.id=`${cellId}-text-${r.id}`;
             p.className='roi-text';
+            p.textContent='OCR: ';
             const t=document.createElement('p');
             t.id=`${cellId}-time-${r.id}`;
             t.className='roi-time';
+            t.textContent='เวลา: ';
             item.appendChild(title);
             item.appendChild(img);
             item.appendChild(p);
