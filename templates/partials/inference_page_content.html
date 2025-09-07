@@ -50,6 +50,26 @@ function createController(cellId){
     const logBody=getEl('logBody');
     let rois=[];
     let logTimer;
+    const roiQueue=[];
+    let roiProcessing=false;
+    function processRoiQueue(){
+        if(roiProcessing || roiQueue.length===0)return;
+        roiProcessing=true;
+        requestAnimationFrame(()=>{
+            const item=roiQueue.shift();
+            if(item){
+                const imgEl=document.getElementById(`${cellId}-roi-${item.id}`);
+                if(imgEl){imgEl.src=`data:image/jpeg;base64,${item.image}`;}
+                const textEl=document.getElementById(`${cellId}-text-${item.id}`);
+                if(textEl){
+                    const time=new Date().toLocaleTimeString();
+                    textEl.textContent=`[${time}] ${item.text||''}`;
+                }
+            }
+            roiProcessing=false;
+            if(roiQueue.length>0)processRoiQueue();
+        });
+    }
 
     const startButton=getEl('startButton');
     const stopButton=getEl('stopButton');
@@ -217,15 +237,8 @@ function createController(cellId){
                         });
                     }
                 } else if (Object.prototype.hasOwnProperty.call(data, 'id')) {
-                    const imgEl = document.getElementById(`${cellId}-roi-${data.id}`);
-                    if (imgEl) {
-                        imgEl.src = `data:image/jpeg;base64,${data.image}`;
-                    }
-                    const textEl = document.getElementById(`${cellId}-text-${data.id}`);
-                    if (textEl) {
-                        textEl.textContent = data.text || '';
-                    }
-
+                    roiQueue.push(data);
+                    processRoiQueue();
                 }
             }catch(e){}
         };
