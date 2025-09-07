@@ -340,8 +340,7 @@
                             const timeEl = document.getElementById(`${cellId}-time-${data.id}`);
                             if (timeEl) {
                                 const frameTs = formatTs(data.frame_time);
-                                const resTs = formatTs(data.result_time);
-                                timeEl.textContent = `frame: ${frameTs}, ocr: ${resTs}`;
+                                timeEl.textContent = `time: ${frameTs}, ocr`;
                             }
                         }, 0);
                     }
