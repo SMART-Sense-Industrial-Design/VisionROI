@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 import base64
+import logging
+import os
+from datetime import datetime
 import threading
 from pathlib import Path
-from src.utils.image import save_image_async
+from src.utils.logger import get_logger
+
 try:
     import numpy as np
 except Exception:  # pragma: no cover - fallback when numpy missing
@@ -11,35 +15,10 @@ except Exception:  # pragma: no cover - fallback when numpy missing
 
 os.environ["TYPHOON_OCR_API_KEY"] = "sk-UgKIYNT2ZaU0Ph3bZ5O8rfHc9QBJLNz5yQtshQldHf5Gw8gD"  # หรือใส่ TYPHOON_OCR_API_KEY ก็ได้
 
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
-
 MODULE_NAME = "typhoon_ocr"
-
-_formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
-_handler: TimedRotatingFileHandler | None = None
-_current_source: str | None = None
+logger = logging.getLogger(MODULE_NAME)
+logger.setLevel(logging.INFO)
 _data_sources_root = Path(__file__).resolve().parents[2] / "data_sources"
-
-
-def _configure_logger(source: str | None) -> None:
-    """ตั้งค่า handler ของ logger ให้บันทึกตามโฟลเดอร์ของ source"""
-    global _handler, _current_source
-    source = source or ""
-    if _current_source == source:
-        return
-    log_dir = _data_sources_root / source if source else Path(__file__).resolve().parent
-    log_dir.mkdir(parents=True, exist_ok=True)
-    log_path = log_dir / "custom.log"
-    if _handler:
-        logger.removeHandler(_handler)
-        _handler.close()
-    _handler = TimedRotatingFileHandler(
-        str(log_path), when="D", interval=1, backupCount=7
-    )
-    _handler.setFormatter(_formatter)
-    logger.addHandler(_handler)
-    _current_source = source
 
 
 # โหลดโมเดล (ถ้ามี)
@@ -60,8 +39,7 @@ def process(
 ):
     """ประมวลผล ROI และเรียก OCR เมื่อเวลาห่างจากครั้งก่อน >= 2 วินาที
     บันทึกรูปภาพแบบไม่บล็อกเมื่อระบุให้บันทึก"""
-
-    _configure_logger(source)
+    logger = get_logger(MODULE_NAME, source)
 
     if cam_id is not None:
         try:
