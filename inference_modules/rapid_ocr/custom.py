@@ -11,10 +11,9 @@ from pathlib import Path
 import gc
 from src.utils.logger import get_logger
 
-try:
-    import numpy as np
-except Exception:  # pragma: no cover - fallback when numpy missing
-    np = None
+
+
+from inference_modules.base_ocr import BaseOCR, np, Image, cv2
 
 try:
     from rapidocr import RapidOCR
@@ -41,20 +40,13 @@ def _get_reader():
         return _reader
 
 
+class RapidOCR(BaseOCR):
+    MODULE_NAME = "rapid_ocr"
+
 # ตัวแปรควบคุมเวลาเรียก OCR แยกตาม roi พร้อมตัวล็อกป้องกันการเข้าถึงพร้อมกัน
 last_ocr_times: dict = {}
 last_ocr_results: dict = {}
 _last_ocr_lock = threading.Lock()
-_imwrite_lock = threading.Lock()
-
-
-def _save_image_async(path, image) -> None:
-    """บันทึกรูปภาพแบบแยกเธรด"""
-    try:
-        with _imwrite_lock:
-            cv2.imwrite(path, image)
-    except Exception as e:  # pragma: no cover
-        logger.exception(f"Failed to save image {path}: {e}")
 
 
 def _run_ocr_async(frame, roi_id, save, source) -> str:
@@ -116,7 +108,7 @@ def _run_ocr_async(frame, roi_id, save, source) -> str:
         os.makedirs(save_dir, exist_ok=True)
         filename = datetime.now().strftime("%Y%m%d%H%M%S%f") + ".jpg"
         path = save_dir / filename
-        _save_image_async(str(path), frame)
+        save_image_async(str(path), frame)
 
     return text
 
@@ -177,3 +169,4 @@ def cleanup() -> None:
         last_ocr_results.clear()
 
     gc.collect()
+

@@ -1,8 +1,5 @@
-import time
-from src.packages.models.yolov8.yolov8onnx.yolov8object.YOLOv8 import YOLOv8
-from typhoon_ocr import ocr_document
-from PIL import Image
-import cv2
+from __future__ import annotations
+
 import base64
 import logging
 import os
@@ -10,6 +7,7 @@ from datetime import datetime
 import threading
 from pathlib import Path
 from src.utils.logger import get_logger
+
 try:
     import numpy as np
 except Exception:  # pragma: no cover - fallback when numpy missing
@@ -30,15 +28,6 @@ _data_sources_root = Path(__file__).resolve().parents[2] / "data_sources"
 last_ocr_times = {}
 last_ocr_results = {}
 _last_ocr_lock = threading.Lock()
-_cv_lock = threading.Lock()
-
-def _save_image_async(path, image):
-    """บันทึกรูปภาพแบบแยกเธรด"""
-    try:
-        with _cv_lock:
-            cv2.imwrite(path, image)
-    except Exception as e:  # pragma: no cover
-        logger.exception(f"Failed to save image {path}: {e}")
 
 
 def process(
@@ -59,52 +48,45 @@ def process(
         except Exception:  # pragma: no cover
             pass
 
-    if isinstance(frame, Image.Image) and np is not None:
-        frame = cv2.cvtColor(np.array(frame), cv2.COLOR_RGB2BGR)
 
-    current_time = time.monotonic()
 
-    with _last_ocr_lock:
-        last_time = last_ocr_times.get(roi_id)
-        diff_time = 0 if last_time is None else current_time - last_time
-        if last_time is None or diff_time >= 2:
-            last_ocr_times[roi_id] = current_time
-            should_ocr = True
-        else:
-            should_ocr = False
+class TyphoonOCR(BaseOCR):
+    MODULE_NAME = "typhoon_ocr"
 
-    if should_ocr:
-        result_text = last_ocr_results.get(roi_id, "")
+    def __init__(self) -> None:
+        super().__init__()
+        self._cv_lock = threading.Lock()
+
+    def _run_ocr(self, frame, roi_id, save: bool, source: str) -> str:
+        result_text = ""
         try:
-            with _cv_lock:
-                _, buffer = cv2.imencode('.jpg', frame)
+            _, buffer = cv2.imencode('.jpg', frame)
             base64_string = base64.b64encode(buffer).decode('utf-8')
             markdown = ocr_document(base64_string)
             logger.info(
                 f"roi_id={roi_id} {MODULE_NAME} OCR result: {markdown}"
-                if roi_id is not None
-                else f"{MODULE_NAME} OCR result: {markdown}"
-            )
-            result_text = markdown
-            last_ocr_results[roi_id] = markdown
-        except Exception as e:
-            logger.exception(f"roi_id={roi_id} {MODULE_NAME} OCR error: {e}")
 
-        if save:
-            base_dir = (
-                _data_sources_root / source
-                if source
-                else Path(__file__).resolve().parent
+                if roi_id is not None
+                else f"{self.MODULE_NAME} OCR result: {result_text}"
+            )
+        except Exception as e:  # pragma: no cover
+            self.logger.exception(
+                f"roi_id={roi_id} {self.MODULE_NAME} OCR error: {e}"
             )
             roi_folder = f"{roi_id}" if roi_id is not None else "roi"
             save_dir = base_dir / "images" / roi_folder
             os.makedirs(save_dir, exist_ok=True)
             filename = datetime.now().strftime("%Y%m%d%H%M%S%f") + ".jpg"
             path = save_dir / filename
-            threading.Thread(
-                target=_save_image_async, args=(str(path), frame.copy()), daemon=True
-            ).start()
+            save_image_async(str(path), frame.copy())
+
 
         return result_text
 
-    return None
+    def _update_save_flag(self, cam_id: int | None) -> None:
+        if cam_id is not None:
+            try:
+                import app  # type: ignore
+                app.save_roi_flags[cam_id] = True
+            except Exception:  # pragma: no cover
+                pass

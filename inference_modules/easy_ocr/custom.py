@@ -11,10 +11,9 @@ from pathlib import Path
 import gc
 from src.utils.logger import get_logger
 
-try:
-    import numpy as np
-except Exception:  # pragma: no cover - fallback when numpy missing
-    np = None
+
+
+from inference_modules.base_ocr import BaseOCR, np, Image, cv2
 
 try:
     import easyocr
@@ -45,16 +44,6 @@ def _get_reader() -> easyocr.Reader:
 last_ocr_times: dict = {}
 last_ocr_results: dict = {}
 _last_ocr_lock = threading.Lock()
-_imwrite_lock = threading.Lock()
-
-
-def _save_image_async(path, image) -> None:
-    """บันทึกรูปภาพแบบแยกเธรด"""
-    try:
-        with _imwrite_lock:
-            cv2.imwrite(path, image)
-    except Exception as e:  # pragma: no cover
-        logger.exception(f"Failed to save image {path}: {e}")
 
 
 def process(
@@ -103,6 +92,32 @@ def process(
         except Exception as e:  # pragma: no cover - log any OCR error
             logger.exception(f"roi_id={roi_id} {MODULE_NAME} OCR error: {e}")
 
+
+class EasyOCR(BaseOCR):
+    MODULE_NAME = "easy_ocr"
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._reader: easyocr.Reader | None = None  # type: ignore[name-defined]
+        self._reader_lock = threading.Lock()
+
+    def _get_reader(self) -> easyocr.Reader:
+        if easyocr is None:
+            raise RuntimeError("easyocr library is not installed")
+        with self._reader_lock:
+            if self._reader is None:
+                self._reader = easyocr.Reader(["en", "th"], gpu=False)
+            return self._reader
+
+    def _run_ocr(self, frame, roi_id, save: bool, source: str) -> str:
+        reader = self._get_reader()
+        ocr_result = reader.readtext(frame, detail=0)
+        text = " ".join(ocr_result)
+        self.logger.info(
+            f"roi_id={roi_id} {self.MODULE_NAME} OCR result: {text}"
+            if roi_id is not None
+            else f"{self.MODULE_NAME} OCR result: {text}"
+        )
         if save:
             base_dir = _data_sources_root / source if source else Path(__file__).resolve().parent
             roi_folder = f"{roi_id}" if roi_id is not None else "roi"
@@ -110,7 +125,7 @@ def process(
             os.makedirs(save_dir, exist_ok=True)
             filename = datetime.now().strftime("%Y%m%d%H%M%S%f") + ".jpg"
             path = save_dir / filename
-            threading.Thread(target=_save_image_async, args=(str(path), frame), daemon=True).start()
+            save_image_async(str(path), frame)
 
         return last_ocr_results.get(roi_id, "")
 
@@ -133,3 +148,4 @@ def cleanup() -> None:
         last_ocr_times.clear()
         last_ocr_results.clear()
     gc.collect()
+

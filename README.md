@@ -314,6 +314,15 @@ ROI ปกติสามารถกำหนด `group` สำหรับเ�
 - `easy_ocr` – OCR ด้วยไลบรารี EasyOCR
 - `rapid_ocr` – OCR ด้วยไลบรารี RapidOCR
 
+ตัวอย่างการใช้งานคลาส OCR:
+
+```python
+from inference_modules.easy_ocr.custom import EasyOCR
+
+ocr = EasyOCR()
+text = ocr.process(frame, roi_id="1", save=True, source="demo")
+```
+
 ## ข้อมูลเพิ่มเติม
 - `config.json` เก็บข้อมูล source และไฟล์ ROI
 

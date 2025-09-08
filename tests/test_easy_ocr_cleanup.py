@@ -17,7 +17,7 @@ _easyocr_stub = types.ModuleType("easyocr")
 _easyocr_stub.Reader = DummyReader
 sys.modules["easyocr"] = _easyocr_stub
 
-import inference_modules.easy_ocr.custom as custom
+from inference_modules.easy_ocr.custom import EasyOCR
 
 
 def test_cleanup_resets_state_and_allows_reuse(monkeypatch):
@@ -33,5 +33,6 @@ def test_cleanup_resets_state_and_allows_reuse(monkeypatch):
 
     custom.process([], roi_id="r2", source="src")
     new_reader = custom._reader
+
     assert new_reader is not None and new_reader is not old_reader
-    assert custom.last_ocr_results["r2"] == "text"
+    assert ocr.last_ocr_results["r2"] == "text"
