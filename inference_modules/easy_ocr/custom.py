@@ -10,6 +10,7 @@ from datetime import datetime
 import threading
 from pathlib import Path
 import gc
+from src.utils.image import save_image_async
 
 try:
     import numpy as np
@@ -69,16 +70,6 @@ def _get_reader() -> easyocr.Reader:
 last_ocr_times: dict = {}
 last_ocr_results: dict = {}
 _last_ocr_lock = threading.Lock()
-_imwrite_lock = threading.Lock()
-
-
-def _save_image_async(path, image) -> None:
-    """บันทึกรูปภาพแบบแยกเธรด"""
-    try:
-        with _imwrite_lock:
-            cv2.imwrite(path, image)
-    except Exception as e:  # pragma: no cover
-        logger.exception(f"Failed to save image {path}: {e}")
 
 
 def process(
@@ -135,7 +126,7 @@ def process(
             os.makedirs(save_dir, exist_ok=True)
             filename = datetime.now().strftime("%Y%m%d%H%M%S%f") + ".jpg"
             path = save_dir / filename
-            threading.Thread(target=_save_image_async, args=(str(path), frame), daemon=True).start()
+            save_image_async(str(path), frame)
 
         return last_ocr_results.get(roi_id, "")
 

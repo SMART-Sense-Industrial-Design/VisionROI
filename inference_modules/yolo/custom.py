@@ -10,6 +10,7 @@ import os
 from datetime import datetime
 import threading
 from pathlib import Path
+from src.utils.image import save_image_async
 try:
     import numpy as np
 except Exception:  # pragma: no cover - fallback when numpy missing
@@ -51,17 +52,6 @@ def _configure_logger(source: str | None) -> None:
 # ตัวแปรควบคุมเวลาเรียก OCR แยกตาม roi พร้อมตัวล็อกป้องกันการเข้าถึงพร้อมกัน
 last_ocr_times = {}
 _last_ocr_lock = threading.Lock()
-_imwrite_lock = threading.Lock()
-
-
-
-def _save_image_async(path, image):
-    """บันทึกรูปภาพแบบแยกเธรด"""
-    try:
-        with _imwrite_lock:
-            cv2.imwrite(path, image)
-    except Exception as e:  # pragma: no cover
-        logger.exception(f"Failed to save image {path}: {e}")
 
 
 def process(
@@ -110,9 +100,7 @@ def process(
             os.makedirs(save_dir, exist_ok=True)
             filename = datetime.now().strftime("%Y%m%d%H%M%S%f") + ".jpg"
             path = save_dir / filename
-            threading.Thread(
-                target=_save_image_async, args=(str(path), frame.copy()), daemon=True
-            ).start()
+            save_image_async(str(path), frame.copy())
 
     # else:
     #     logger.info(f"OCR skipped for ROI {roi_id} (throttled)")

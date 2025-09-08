@@ -10,6 +10,7 @@ import os
 from datetime import datetime
 import threading
 from pathlib import Path
+from src.utils.image import save_image_async
 try:
     import numpy as np
 except Exception:  # pragma: no cover - fallback when numpy missing
@@ -55,15 +56,6 @@ def _configure_logger(source: str | None) -> None:
 last_ocr_times = {}
 last_ocr_results = {}
 _last_ocr_lock = threading.Lock()
-_cv_lock = threading.Lock()
-
-def _save_image_async(path, image):
-    """บันทึกรูปภาพแบบแยกเธรด"""
-    try:
-        with _cv_lock:
-            cv2.imwrite(path, image)
-    except Exception as e:  # pragma: no cover
-        logger.exception(f"Failed to save image {path}: {e}")
 
 
 def process(
@@ -102,8 +94,7 @@ def process(
     if should_ocr:
         result_text = last_ocr_results.get(roi_id, "")
         try:
-            with _cv_lock:
-                _, buffer = cv2.imencode('.jpg', frame)
+            _, buffer = cv2.imencode('.jpg', frame)
             base64_string = base64.b64encode(buffer).decode('utf-8')
             markdown = ocr_document(base64_string)
             logger.info(
@@ -127,9 +118,7 @@ def process(
             os.makedirs(save_dir, exist_ok=True)
             filename = datetime.now().strftime("%Y%m%d%H%M%S%f") + ".jpg"
             path = save_dir / filename
-            threading.Thread(
-                target=_save_image_async, args=(str(path), frame.copy()), daemon=True
-            ).start()
+            save_image_async(str(path), frame.copy())
 
         return result_text
 
