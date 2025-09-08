@@ -10,8 +10,7 @@ import threading
 from pathlib import Path
 import gc
 from src.utils.logger import get_logger
-
-
+from src.utils.image import save_image_async
 
 from inference_modules.base_ocr import BaseOCR, np, Image, cv2
 
@@ -91,6 +90,20 @@ def process(
                 last_ocr_results[roi_id] = text
         except Exception as e:  # pragma: no cover - log any OCR error
             logger.exception(f"roi_id={roi_id} {MODULE_NAME} OCR error: {e}")
+            text = ""
+        if save:
+            base_dir = (
+                _data_sources_root / source
+                if source
+                else Path(__file__).resolve().parent
+            )
+            roi_folder = f"{roi_id}" if roi_id is not None else "roi"
+            save_dir = base_dir / "images" / roi_folder
+            os.makedirs(save_dir, exist_ok=True)
+            filename = datetime.now().strftime("%Y%m%d%H%M%S%f") + ".jpg"
+            path = save_dir / filename
+            save_image_async(str(path), frame)
+        return text
 
 
 class EasyOCR(BaseOCR):
@@ -110,26 +123,25 @@ class EasyOCR(BaseOCR):
             return self._reader
 
     def _run_ocr(self, frame, roi_id, save: bool, source: str) -> str:
-        reader = self._get_reader()
-        ocr_result = reader.readtext(frame, detail=0)
-        text = " ".join(ocr_result)
-        self.logger.info(
-            f"roi_id={roi_id} {self.MODULE_NAME} OCR result: {text}"
-            if roi_id is not None
-            else f"{self.MODULE_NAME} OCR result: {text}"
-        )
+        text = ""
+        if easyocr is not None:
+            try:
+                reader = self._get_reader()
+                ocr_result = reader.readtext(frame, detail=0)
+                text = " ".join(ocr_result)
+                self.logger.info(
+                    f"roi_id={roi_id} {self.MODULE_NAME} OCR result: {text}"
+                    if roi_id is not None
+                    else f"{self.MODULE_NAME} OCR result: {text}"
+                )
+            except Exception as e:  # pragma: no cover - log any OCR error
+                self.logger.exception(
+                    f"roi_id={roi_id} {self.MODULE_NAME} OCR error: {e}"
+                )
         if save:
-            base_dir = _data_sources_root / source if source else Path(__file__).resolve().parent
-            roi_folder = f"{roi_id}" if roi_id is not None else "roi"
-            save_dir = base_dir / "images" / roi_folder
-            os.makedirs(save_dir, exist_ok=True)
-            filename = datetime.now().strftime("%Y%m%d%H%M%S%f") + ".jpg"
-            path = save_dir / filename
-            save_image_async(str(path), frame)
+            self._save_image(frame, roi_id, source)
 
-        return last_ocr_results.get(roi_id, "")
-
-    return None
+        return text
 
 
 def stop(roi_id) -> None:
