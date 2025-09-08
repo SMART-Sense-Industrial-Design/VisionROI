@@ -1,167 +1,52 @@
 from __future__ import annotations
 
-import time
-from PIL import Image
-import cv2
-from logging.handlers import TimedRotatingFileHandler
-import logging
-import os
-from datetime import datetime
 import threading
-from pathlib import Path
-import gc
 
-try:
-    import numpy as np
-except Exception:  # pragma: no cover - fallback when numpy missing
-    np = None
+from inference_modules.base_ocr import BaseOCR, np, Image, cv2
 
 try:
     import easyocr
 except Exception:  # pragma: no cover - fallback when easyocr missing
     easyocr = None
 
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
 
-MODULE_NAME = "easy_ocr"
+class EasyOCR(BaseOCR):
+    MODULE_NAME = "easy_ocr"
 
-_formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
-_handler: TimedRotatingFileHandler | None = None
-_current_source: str | None = None
-_data_sources_root = Path(__file__).resolve().parents[2] / "data_sources"
+    def __init__(self) -> None:
+        super().__init__()
+        self._reader: easyocr.Reader | None = None  # type: ignore[name-defined]
+        self._reader_lock = threading.Lock()
 
-_reader: easyocr.Reader | None = None
-_reader_lock = threading.Lock()
+    def _get_reader(self) -> easyocr.Reader:
+        if easyocr is None:
+            raise RuntimeError("easyocr library is not installed")
+        with self._reader_lock:
+            if self._reader is None:
+                self._reader = easyocr.Reader(["en", "th"], gpu=False)
+            return self._reader
 
-
-
-def _configure_logger(source: str | None) -> None:
-    """ตั้งค่า handler ของ logger ให้บันทึกตามโฟลเดอร์ของ source"""
-    global _handler, _current_source
-    source = source or ""
-    if _current_source == source:
-        return
-    log_dir = _data_sources_root / source if source else Path(__file__).resolve().parent
-    log_dir.mkdir(parents=True, exist_ok=True)
-    log_path = log_dir / "custom.log"
-    if _handler:
-        logger.removeHandler(_handler)
-        _handler.close()
-    _handler = TimedRotatingFileHandler(str(log_path), when="D", interval=1, backupCount=7)
-    _handler.setFormatter(_formatter)
-    logger.addHandler(_handler)
-    _current_source = source
-
-
-def _get_reader() -> easyocr.Reader:
-    """สร้างและคืนค่า easyocr.Reader แบบ singleton"""
-    if easyocr is None:
-        raise RuntimeError("easyocr library is not installed")
-    global _reader
-    with _reader_lock:
-        if _reader is None:
-            _reader = easyocr.Reader(["en", "th"], gpu=False)
-        return _reader
-
-
-# ตัวแปรควบคุมเวลาเรียก OCR แยกตาม roi พร้อมตัวล็อกป้องกันการเข้าถึงพร้อมกัน
-last_ocr_times: dict = {}
-last_ocr_results: dict = {}
-_last_ocr_lock = threading.Lock()
-_imwrite_lock = threading.Lock()
-
-
-def _save_image_async(path, image) -> None:
-    """บันทึกรูปภาพแบบแยกเธรด"""
-    try:
-        with _imwrite_lock:
-            cv2.imwrite(path, image)
-    except Exception as e:  # pragma: no cover
-        logger.exception(f"Failed to save image {path}: {e}")
-
-
-def process(
-    frame,
-    roi_id=None,
-    save: bool = False,
-    source: str = "",
-    cam_id: int | None = None,
-    interval: float = 1.0,
-):
-    """ประมวลผล ROI และเรียก OCR เมื่อเวลาห่างจากครั้งก่อน >= interval วินาที
-    (ค่าเริ่มต้น 3 วินาที) บันทึกรูปภาพแบบไม่บล็อกเมื่อระบุให้บันทึก"""
-
-    _configure_logger(source)
-
-    if cam_id is not None:
-        try:
-            import app  # type: ignore
-            app.save_roi_flags[cam_id] = False
-        except Exception:  # pragma: no cover
-            pass
-
-    if isinstance(frame, Image.Image) and np is not None:
-        frame = cv2.cvtColor(np.array(frame), cv2.COLOR_RGB2BGR)
-
-    current_time = time.monotonic()
-
-    with _last_ocr_lock:
-        last_time = last_ocr_times.get(roi_id)
-    diff_time = 0 if last_time is None else current_time - last_time
-    should_ocr = last_time is None or diff_time >= interval
-
-    if should_ocr:
-        with _last_ocr_lock:
-            last_ocr_times[roi_id] = current_time
-        try:
-            reader = _get_reader()
-            ocr_result = reader.readtext(frame, detail=0)
-            text = " ".join(ocr_result)
-            logger.info(
-                f"roi_id={roi_id} {MODULE_NAME} OCR result: {text}"
-                if roi_id is not None
-                else f"{MODULE_NAME} OCR result: {text}"
-            )
-            with _last_ocr_lock:
-                last_ocr_results[roi_id] = text
-        except Exception as e:  # pragma: no cover - log any OCR error
-            logger.exception(f"roi_id={roi_id} {MODULE_NAME} OCR error: {e}")
-
+    def _run_ocr(self, frame, roi_id, save: bool, source: str) -> str:
+        reader = self._get_reader()
+        ocr_result = reader.readtext(frame, detail=0)
+        text = " ".join(ocr_result)
+        self.logger.info(
+            f"roi_id={roi_id} {self.MODULE_NAME} OCR result: {text}"
+            if roi_id is not None
+            else f"{self.MODULE_NAME} OCR result: {text}"
+        )
         if save:
-            base_dir = _data_sources_root / source if source else Path(__file__).resolve().parent
-            roi_folder = f"{roi_id}" if roi_id is not None else "roi"
-            save_dir = base_dir / "images" / roi_folder
-            os.makedirs(save_dir, exist_ok=True)
-            filename = datetime.now().strftime("%Y%m%d%H%M%S%f") + ".jpg"
-            path = save_dir / filename
-            threading.Thread(target=_save_image_async, args=(str(path), frame), daemon=True).start()
+            self._save_image(frame, roi_id, source)
+        return text
 
-        return last_ocr_results.get(roi_id, "")
+    def _update_save_flag(self, cam_id: int | None) -> None:
+        if cam_id is not None:
+            try:
+                import app  # type: ignore
+                app.save_roi_flags[cam_id] = False
+            except Exception:  # pragma: no cover
+                pass
 
-    return None
-
-
-def stop(roi_id) -> None:
-    """ลบข้อมูลของ ROI ที่หยุดใช้งาน"""
-    with _last_ocr_lock:
-        last_ocr_times.pop(roi_id, None)
-        last_ocr_results.pop(roi_id, None)
-
-
-def cleanup() -> None:
-    """รีเซ็ตสถานะของโมดูลและบังคับเก็บขยะ"""
-    global _reader, _handler, _current_source
-    with _reader_lock:
-        _reader = None
-    with _last_ocr_lock:
-        last_ocr_times.clear()
-        last_ocr_results.clear()
-    if _handler:
-        logger.removeHandler(_handler)
-        try:
-            _handler.close()
-        finally:
-            _handler = None
-    _current_source = None
-    gc.collect()
+    def _cleanup_extra(self) -> None:
+        with self._reader_lock:
+            self._reader = None
