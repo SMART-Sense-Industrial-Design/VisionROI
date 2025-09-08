@@ -1,20 +1,22 @@
 import numpy as np
-from inference_modules.rapid_ocr import custom
+from inference_modules.rapid_ocr.custom import RapidOCR
 
 
 def test_rapid_ocr_accepts_dict_results(monkeypatch):
-    custom.last_ocr_results.clear()
+    ocr = RapidOCR()
+    ocr.last_ocr_results.clear()
     class DummyReader:
         def __call__(self, frame):
             return ([{"text": "abc"}, {"text": "123"}], None)
-    monkeypatch.setattr(custom, '_get_reader', lambda: DummyReader())
+    monkeypatch.setattr(ocr, '_get_reader', lambda: DummyReader())
     frame = np.zeros((10,10,3), dtype=np.uint8)
-    custom._run_ocr_async(frame, roi_id='1', save=False, source='')
-    assert custom.last_ocr_results['1'] == 'abc 123'
+    ocr.process(frame, roi_id='1', save=False, source='', interval=0)
+    assert ocr.last_ocr_results['1'] == 'abc 123'
 
 
 def test_rapid_ocr_accepts_object_with_text(monkeypatch):
-    custom.last_ocr_results.clear()
+    ocr = RapidOCR()
+    ocr.last_ocr_results.clear()
 
     class DummyOutput:
         def __init__(self):
@@ -24,14 +26,15 @@ def test_rapid_ocr_accepts_object_with_text(monkeypatch):
         def __call__(self, frame):
             return DummyOutput()
 
-    monkeypatch.setattr(custom, '_get_reader', lambda: DummyReader())
+    monkeypatch.setattr(ocr, '_get_reader', lambda: DummyReader())
     frame = np.zeros((10, 10, 3), dtype=np.uint8)
-    custom._run_ocr_async(frame, roi_id='2', save=False, source='')
-    assert custom.last_ocr_results['2'] == '789'
+    ocr.process(frame, roi_id='2', save=False, source='', interval=0)
+    assert ocr.last_ocr_results['2'] == '789'
 
 
 def test_rapid_ocr_accepts_object_with_txts(monkeypatch):
-    custom.last_ocr_results.clear()
+    ocr = RapidOCR()
+    ocr.last_ocr_results.clear()
 
     class DummyOutput:
         def __init__(self):
@@ -41,7 +44,7 @@ def test_rapid_ocr_accepts_object_with_txts(monkeypatch):
         def __call__(self, frame):
             return DummyOutput()
 
-    monkeypatch.setattr(custom, '_get_reader', lambda: DummyReader())
+    monkeypatch.setattr(ocr, '_get_reader', lambda: DummyReader())
     frame = np.zeros((10, 10, 3), dtype=np.uint8)
-    custom._run_ocr_async(frame, roi_id='3', save=False, source='')
-    assert custom.last_ocr_results['3'] == '329'
+    ocr.process(frame, roi_id='3', save=False, source='', interval=0)
+    assert ocr.last_ocr_results['3'] == '329'
