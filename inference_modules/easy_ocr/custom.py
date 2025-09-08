@@ -3,13 +3,13 @@ from __future__ import annotations
 import time
 from PIL import Image
 import cv2
-from logging.handlers import TimedRotatingFileHandler
 import logging
 import os
 from datetime import datetime
 import threading
 from pathlib import Path
 import gc
+from src.utils.logger import get_logger
 
 try:
     import numpy as np
@@ -21,37 +21,13 @@ try:
 except Exception:  # pragma: no cover - fallback when easyocr missing
     easyocr = None
 
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
-
 MODULE_NAME = "easy_ocr"
-
-_formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
-_handler: TimedRotatingFileHandler | None = None
-_current_source: str | None = None
+logger = logging.getLogger(MODULE_NAME)
+logger.setLevel(logging.INFO)
 _data_sources_root = Path(__file__).resolve().parents[2] / "data_sources"
 
 _reader: easyocr.Reader | None = None
 _reader_lock = threading.Lock()
-
-
-
-def _configure_logger(source: str | None) -> None:
-    """ตั้งค่า handler ของ logger ให้บันทึกตามโฟลเดอร์ของ source"""
-    global _handler, _current_source
-    source = source or ""
-    if _current_source == source:
-        return
-    log_dir = _data_sources_root / source if source else Path(__file__).resolve().parent
-    log_dir.mkdir(parents=True, exist_ok=True)
-    log_path = log_dir / "custom.log"
-    if _handler:
-        logger.removeHandler(_handler)
-        _handler.close()
-    _handler = TimedRotatingFileHandler(str(log_path), when="D", interval=1, backupCount=7)
-    _handler.setFormatter(_formatter)
-    logger.addHandler(_handler)
-    _current_source = source
 
 
 def _get_reader() -> easyocr.Reader:
@@ -91,8 +67,7 @@ def process(
 ):
     """ประมวลผล ROI และเรียก OCR เมื่อเวลาห่างจากครั้งก่อน >= interval วินาที
     (ค่าเริ่มต้น 3 วินาที) บันทึกรูปภาพแบบไม่บล็อกเมื่อระบุให้บันทึก"""
-
-    _configure_logger(source)
+    logger = get_logger(MODULE_NAME, source)
 
     if cam_id is not None:
         try:
@@ -151,17 +126,10 @@ def stop(roi_id) -> None:
 
 def cleanup() -> None:
     """รีเซ็ตสถานะของโมดูลและบังคับเก็บขยะ"""
-    global _reader, _handler, _current_source
+    global _reader
     with _reader_lock:
         _reader = None
     with _last_ocr_lock:
         last_ocr_times.clear()
         last_ocr_results.clear()
-    if _handler:
-        logger.removeHandler(_handler)
-        try:
-            _handler.close()
-        finally:
-            _handler = None
-    _current_source = None
     gc.collect()

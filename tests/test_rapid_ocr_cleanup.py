@@ -7,8 +7,6 @@ def test_cleanup_resets_state_and_calls_gc(monkeypatch):
     custom._reader = object()
     custom.last_ocr_times["roi"] = 1
     custom.last_ocr_results["roi"] = "text"
-    custom._configure_logger("cleanup_test")
-    handler = custom._handler
 
     called = False
 
@@ -24,6 +22,4 @@ def test_cleanup_resets_state_and_calls_gc(monkeypatch):
     assert custom._reader is None
     assert custom.last_ocr_times == {}
     assert custom.last_ocr_results == {}
-    assert custom._handler is None
-    assert handler not in custom.logger.handlers
     assert called
