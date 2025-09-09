@@ -298,7 +298,7 @@ function createController(cellId){
         stopLogUpdates();
         async function fetchLog(){
             try{
-                const res=await fetch(`/read_log?source=${encodeURIComponent(sourceName)}&lines=20&_=${Date.now()}`);
+                const res=await fetch(`/read_log?source=${encodeURIComponent(sourceName)}&lines=40&_=${Date.now()}`);
                 const data=await res.json();
                 logBody.innerHTML='';
                 const filter=logRoiSelect.value;

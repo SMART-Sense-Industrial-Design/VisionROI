@@ -1099,9 +1099,9 @@ async def load_roi_file():
 async def read_log():
     source = request.args.get("source", "")
     try:
-        lines = int(request.args.get("lines", 20))
+        lines = int(request.args.get("lines", 40))
     except ValueError:
-        lines = 20
+        lines = 40
     if not source:
         return jsonify({"lines": []})
     source = os.path.basename(source.strip())
