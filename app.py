@@ -872,7 +872,11 @@ async def list_sources():
 async def list_inference_modules():
     base_dir = Path(__file__).resolve().parent / "inference_modules"
     try:
-        names = [d.name for d in base_dir.iterdir() if d.is_dir()]
+        names = [
+            d.name
+            for d in base_dir.iterdir()
+            if d.is_dir() and not d.name.startswith("__")
+        ]
     except FileNotFoundError:
         names = []
     return jsonify(names)
