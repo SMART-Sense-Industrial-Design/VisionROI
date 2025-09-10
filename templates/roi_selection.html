@@ -480,7 +480,11 @@
                     const h = Math.max(...ys) - y;
                     const tr = document.createElement('tr');
                     const idTd = document.createElement('td');
-                    idTd.textContent = r.id;
+                    const idInput = document.createElement('input');
+                    idInput.className = 'form-control form-control-sm';
+                    idInput.value = r.id;
+                    idInput.addEventListener('change', e => updateRoiId(idx, e.target.value));
+                    idTd.appendChild(idInput);
                     tr.appendChild(idTd);
                     const tdCoords = document.createElement('td');
                     tdCoords.textContent = `(${Math.round(x)},${Math.round(y)},${Math.round(w)},${Math.round(h)})`;
@@ -727,6 +731,16 @@
             });
         }
 
+        function updateRoiId(i, id) {
+            rois[i].id = id;
+            drawAllRois();
+            fetch('/save_roi', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ rois: rois.concat(pageRois).concat(typeof otherRois !== 'undefined' ? otherRois : []), source: currentSource })
+            });
+        }
+
         function updatePageRoiName(i, name) {
             pageRois[i].page = name;
             pageRois[i].name = name;
@@ -823,6 +837,7 @@
         window.clearAllRois = clearAllRois;
         window.updateRoiGroup = updateRoiGroup;
         window.updateRoiModule = updateRoiModule;
+        window.updateRoiId = updateRoiId;
         window.deleteRoi = deleteRoi;
         window.updatePageRoiName = updatePageRoiName;
         window.deletePageRoi = deletePageRoi;
