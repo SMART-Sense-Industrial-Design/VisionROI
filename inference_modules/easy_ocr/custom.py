@@ -144,13 +144,6 @@ class EasyOCR(BaseOCR):
         return text
 
 
-def stop(roi_id) -> None:
-    """ลบข้อมูลของ ROI ที่หยุดใช้งาน"""
-    with _last_ocr_lock:
-        last_ocr_times.pop(roi_id, None)
-        last_ocr_results.pop(roi_id, None)
-
-
 def cleanup() -> None:
     """รีเซ็ตสถานะของโมดูลและบังคับเก็บขยะ"""
     global _reader
