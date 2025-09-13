@@ -5,6 +5,7 @@ import threading
 import asyncio
 import gc
 import subprocess
+import os
 from typing import Optional
 from queue import Queue, Empty
 from contextlib import contextmanager
@@ -13,6 +14,7 @@ try:
     import numpy as np
 except Exception:
     np = None
+
 
 @contextmanager
 def silent():
@@ -31,7 +33,21 @@ def _malloc_trim() -> None:
     except Exception:
         pass
 
+
 class CameraWorker:
+    """
+    ตัวอ่านกล้อง/สตรีมสองโหมด:
+      - backend='opencv' : ใช้ cv2.VideoCapture โดยตรง
+      - backend='ffmpeg' : สร้างโปรเซส ffmpeg แล้ว pipe เฟรมดิบ bgr24 ออกมาอ่านใน Python
+
+    จุดเน้นฝั่ง ffmpeg:
+      - บังคับ RTSP ผ่าน TCP เพื่อลด packet loss
+      - ทิ้งเฟรม/แพ็กเก็ตเสียด้วย -fflags +discardcorrupt
+      - scale ด้วย lanczos (ถ้ากำหนด width/height)
+      - ส่งออก rawvideo + pix_fmt bgr24 ขนาดคงที่ เพื่อ reshape ปลอดภัย
+      - อ่านทีละเฟรมเต็ม (W*H*3) ถ้าไม่ครบให้ทิ้ง ป้องกันภาพแตก
+    """
+
     def __init__(
         self,
         src,
@@ -50,31 +66,81 @@ class CameraWorker:
 
         self._cap = None
         self._proc: subprocess.Popen | None = None
+        self._stderr_thread: Optional[threading.Thread] = None
+
+        self._stop_evt = threading.Event()
+        self._thread: Optional[threading.Thread] = None
+        self._q: Queue = Queue(maxsize=1)
 
         if backend == "ffmpeg":
+            # ถ้ายังไม่รู้ขนาดเฟรม ลอง probe
             if self.width is None or self.height is None:
                 self.width, self.height = self._probe_resolution(src)
-            cmd = [
-                "ffmpeg",
-                "-loglevel",
-                "error",
+
+            # สร้างคำสั่ง ffmpeg แบบเน้นเสถียร/เฟรมคงที่
+            cmd = ["ffmpeg", "-hide_banner", "-loglevel", "warning", "-nostdin"]
+
+            if self._is_rtsp(str(src)):
+                cmd += [
+                    "-rtsp_transport",
+                    "tcp",
+                    "-rtsp_flags",
+                    "prefer_tcp",
+                    "-rw_timeout",
+                    "5000000",  # 5s
+                    "-stimeout",
+                    "5000000",  # 5s
+                    # ชุด reconnect สำหรับ network glitch
+                    "-reconnect",
+                    "1",
+                    "-reconnect_at_eof",
+                    "1",
+                    "-reconnect_streamed",
+                    "1",
+                    "-reconnect_on_network_error",
+                    "1",
+                    "-reconnect_delay_max",
+                    "5",
+                ]
+
+            cmd += [
+                "-fflags",
+                "+discardcorrupt",  # ทิ้งแพ็กเก็ต/เฟรมเสีย ลดโอกาส reshape เพี้ยน
                 "-i",
                 str(src),
+                "-map",
+                "0:v:0",
+                "-an",
             ]
+
             if self.width and self.height:
-                cmd += ["-vf", f"scale={int(self.width)}:{int(self.height)}"]
-            cmd += ["-f", "rawvideo", "-pix_fmt", "bgr24", "-"]
+                cmd += [
+                    "-vf",
+                    f"scale={int(self.width)}:{int(self.height)}:flags=lanczos",
+                ]
+
+            cmd += ["-pix_fmt", "bgr24", "-f", "rawvideo", "pipe:1"]
+
             with silent():
+                # NOTE: เก็บ stderr เป็น PIPE แล้วมี thread ดูดทิ้งกันบล็อก
                 self._proc = subprocess.Popen(
                     cmd,
                     stdout=subprocess.PIPE,
-                    stderr=subprocess.DEVNULL,
+                    stderr=subprocess.PIPE,
                     bufsize=10**8,
+                    preexec_fn=os.setsid,  # ให้เป็น process group แยก (Linux)
                 )
+                if self._proc and self._proc.stderr:
+                    self._stderr_thread = threading.Thread(
+                        target=self._drain_stderr, daemon=True
+                    )
+                    self._stderr_thread.start()
+
         else:
             cap = cv2.VideoCapture(src)
             self._cap = cap
             with silent():
+                # ลด latency โดยให้บัฟเฟอร์เล็ก
                 self._cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
             if width:
                 with silent():
@@ -83,15 +149,28 @@ class CameraWorker:
                 with silent():
                     self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, int(height))
 
-        self._stop_evt = threading.Event()
-        self._thread: Optional[threading.Thread] = None
-        self._q: Queue = Queue(maxsize=1)
+    @staticmethod
+    def _is_rtsp(src: str) -> bool:
+        s = str(src).lower()
+        return s.startswith("rtsp://") or s.startswith("rtsps://")
 
     def _probe_resolution(self, src) -> tuple[Optional[int], Optional[int]]:
-        cmd = [
-            "ffprobe",
-            "-v",
-            "error",
+        """
+        ใช้ ffprobe ดึงขนาดวิดีโอ พร้อมตัวเลือก RTSP/timeout กันค้าง
+        """
+        cmd = ["ffprobe", "-hide_banner", "-loglevel", "error", "-nostdin"]
+
+        if self._is_rtsp(str(src)):
+            cmd += [
+                "-rtsp_transport",
+                "tcp",
+                "-rtsp_flags",
+                "prefer_tcp",
+                "-rw_timeout",
+                "5000000",
+            ]
+
+        cmd += [
             "-select_streams",
             "v:0",
             "-show_entries",
@@ -101,7 +180,9 @@ class CameraWorker:
             str(src),
         ]
         try:
-            res = subprocess.run(cmd, capture_output=True, text=True, check=True)
+            res = subprocess.run(
+                cmd, capture_output=True, text=True, check=True, timeout=6
+            )
             w, h = res.stdout.strip().split("x")
             return int(w), int(h)
         except Exception:
@@ -119,6 +200,22 @@ class CameraWorker:
             self._thread.start()
         return True
 
+    def _drain_stderr(self) -> None:
+        """
+        อ่าน stderr ของ ffmpeg ทิ้งเพื่อป้องกันบัฟเฟอร์เต็มจนบล็อกโปรเซส
+        (ถ้าต้องการเก็บ log สามารถเปลี่ยนมาอ่าน/เขียนไฟล์ได้)
+        """
+        proc = self._proc
+        if not proc or not proc.stderr:
+            return
+        try:
+            while not self._stop_evt.is_set():
+                chunk = proc.stderr.read(1024)
+                if not chunk:
+                    break
+        except Exception:
+            pass
+
     def _run(self) -> None:
         # ป้องกันการ read ต่อหลังถูกสั่งหยุด
         if self.backend == "ffmpeg":
@@ -127,6 +224,7 @@ class CameraWorker:
                 if self.width and self.height
                 else 0
             )
+
         while not self._stop_evt.is_set():
             if self.backend == "ffmpeg":
                 if self._proc is None or self._proc.poll() is not None:
@@ -135,6 +233,8 @@ class CameraWorker:
                 if frame_size <= 0 or np is None:
                     time.sleep(0.02)
                     continue
+
+                # อ่านให้ได้ขนาดเฟรมครบถ้วนเท่านั้น
                 buffer = bytearray()
                 while len(buffer) < frame_size and not self._stop_evt.is_set():
                     chunk = self._proc.stdout.read(frame_size - len(buffer))
@@ -143,12 +243,18 @@ class CameraWorker:
                     buffer.extend(chunk)
 
                 if len(buffer) != frame_size:
+                    # ทิ้งเศษเฟรมที่ไม่ครบ ป้องกันภาพแตกจาก reshape
                     time.sleep(0.02)
                     continue
 
-                frame = np.frombuffer(bytes(buffer), np.uint8).reshape(
-                    (int(self.height), int(self.width), 3)
-                )
+                try:
+                    frame = np.frombuffer(bytes(buffer), np.uint8).reshape(
+                        (int(self.height), int(self.width), 3)
+                    )
+                except Exception:
+                    time.sleep(0.01)
+                    continue
+
             else:
                 if self._cap is None or not self._cap.isOpened():
                     time.sleep(0.02)
@@ -165,6 +271,7 @@ class CameraWorker:
                 time.sleep(0.01)
                 continue
 
+            # เก็บเฟรมล่าสุดลงคิว (ทิ้งของเก่าเพื่อลดค้าง)
             if self._q.full():
                 try:
                     _ = self._q.get_nowait()
@@ -179,6 +286,9 @@ class CameraWorker:
                 time.sleep(self.read_interval)
 
     async def read(self):
+        """
+        ดึงเฟรมล่าสุดจากคิวแบบ non-blocking; ถ้าไม่มี รอเล็กน้อย
+        """
         try:
             return self._q.get_nowait()
         except Empty:
@@ -193,6 +303,8 @@ class CameraWorker:
 
     async def stop(self) -> None:
         self._stop_evt.set()
+
+        # รอเธรดอ่านเฟรมจบ
         with silent():
             if self._thread is not None and self._thread.is_alive():
                 await asyncio.to_thread(self._thread.join, 0.5)
@@ -201,12 +313,22 @@ class CameraWorker:
         if self.backend == "ffmpeg":
             with silent():
                 if self._proc is not None:
-                    self._proc.terminate()
                     try:
-                        self._proc.wait(timeout=0.5)
+                        self._proc.terminate()
+                        self._proc.wait(timeout=0.8)
                     except Exception:
-                        pass
+                        try:
+                            self._proc.kill()
+                        except Exception:
+                            pass
             self._proc = None
+
+            # ปิดและรอ thread ดูด stderr
+            with silent():
+                if self._stderr_thread and self._stderr_thread.is_alive():
+                    self._stderr_thread.join(timeout=0.2)
+            self._stderr_thread = None
+
         else:
             with silent():
                 if self._cap is not None and self._cap.isOpened():
@@ -224,4 +346,3 @@ class CameraWorker:
         # เก็บขยะและคืนหน่วยความจำกลับให้ระบบ
         gc.collect()
         _malloc_trim()
-
