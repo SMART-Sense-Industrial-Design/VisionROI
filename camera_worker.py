@@ -132,11 +132,18 @@ class CameraWorker:
                 if frame_size <= 0 or np is None:
                     time.sleep(0.02)
                     continue
-                raw = self._proc.stdout.read(frame_size)
-                if not raw or len(raw) != frame_size:
+                buffer = bytearray()
+                while len(buffer) < frame_size and not self._stop_evt.is_set():
+                    chunk = self._proc.stdout.read(frame_size - len(buffer))
+                    if not chunk:
+                        break
+                    buffer.extend(chunk)
+
+                if len(buffer) != frame_size:
                     time.sleep(0.02)
                     continue
-                frame = np.frombuffer(raw, np.uint8).reshape(
+
+                frame = np.frombuffer(bytes(buffer), np.uint8).reshape(
                     (int(self.height), int(self.width), 3)
                 )
             else:
