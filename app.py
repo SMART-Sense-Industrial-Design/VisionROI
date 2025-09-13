@@ -413,14 +413,14 @@ async def read_and_queue_frame(
 ) -> None:
     worker = camera_workers.get(cam_id)
     if worker is None:
-        await asyncio.sleep(0.05)
+        await asyncio.sleep(0.01)
         return
     frame = await worker.read()
     if frame is None:
-        await asyncio.sleep(0.05)
+        await asyncio.sleep(0.01)
         return
     if np is not None and hasattr(frame, "size") and frame.size == 0:
-        await asyncio.sleep(0.05)
+        await asyncio.sleep(0.01)
         return
     if frame_processor:
         frame = await frame_processor(frame)
@@ -429,10 +429,10 @@ async def read_and_queue_frame(
     try:
         encoded, buffer = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
     except Exception:
-        await asyncio.sleep(0.05)
+        await asyncio.sleep(0.01)
         return
     if not encoded or buffer is None:
-        await asyncio.sleep(0.05)
+        await asyncio.sleep(0.01)
         return
     frame_bytes = buffer.tobytes() if hasattr(buffer, "tobytes") else buffer
     if queue.full():
@@ -441,7 +441,7 @@ async def read_and_queue_frame(
         except asyncio.QueueEmpty:
             pass
     await queue.put(frame_bytes)
-    await asyncio.sleep(0.04)
+    await asyncio.sleep(0)
 
 
 # =========================
