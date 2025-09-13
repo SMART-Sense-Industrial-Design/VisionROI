@@ -710,6 +710,7 @@ async def start_camera_task(
                     400,
                 )
             camera_workers[cam_id] = worker
+            camera_resolutions[cam_id] = (worker.width, worker.height)
 
         task = asyncio.create_task(loop_func(cam_id))
         task_dict[cam_id] = task
