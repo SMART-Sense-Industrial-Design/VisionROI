@@ -60,7 +60,7 @@ class CameraWorker:
         self._cap = None
         self._proc: subprocess.Popen | None = None
         self._stderr_thread: Optional[threading.Thread] = None
-        self._last_stderr = deque(maxlen=50)  # เก็บบรรทัดล่าสุดไว้ดู error
+        self._last_stderr = deque(maxlen=200)  # เก็บบรรทัดล่าสุดไว้ดู error
 
         self._stop_evt = threading.Event()
         self._thread: Optional[threading.Thread] = None
@@ -83,16 +83,11 @@ class CameraWorker:
                 cmd += [
                     "-rtsp_transport", "tcp",
                     "-rtsp_flags", "prefer_tcp",
-                    "-rw_timeout", "7000000",
-                    "-stimeout", "7000000",
-                    "-reconnect", "1",
-                    "-reconnect_at_eof", "1",
-                    "-reconnect_streamed", "1",
-                    "-reconnect_on_network_error", "1",
-                    "-reconnect_delay_max", "5",
+                    "-rw_timeout", "7000000",   # 7s (microseconds)
+                    "-max_delay", "500000",     # 0.5s (microseconds)
                 ]
 
-            # ช่วยให้วิเคราะห์สตรีมได้ในเครือข่ายที่หน่วง
+            # ช่วยให้วิเคราะห์สตรีมในเครือข่ายที่หน่วง
             cmd += ["-probesize", "32M", "-analyzeduration", "5M"]
 
             cmd += [
@@ -144,7 +139,11 @@ class CameraWorker:
         """ใช้ ffprobe หา width/height พร้อม RTSP/timeout"""
         cmd = ["ffprobe", "-hide_banner", "-loglevel", "error", "-nostdin"]
         if self._is_rtsp(src):
-            cmd += ["-rtsp_transport", "tcp", "-rtsp_flags", "prefer_tcp", "-rw_timeout", "7000000"]
+            cmd += [
+                "-rtsp_transport", "tcp",
+                "-rtsp_flags", "prefer_tcp",
+                "-rw_timeout", "7000000",
+            ]
         cmd += [
             "-select_streams", "v:0",
             "-show_entries", "stream=width,height",
@@ -211,13 +210,12 @@ class CameraWorker:
 
     def _run(self) -> None:
         while not self._stop_evt.is_set():
-            print(self.last_ffmpeg_stderr())
             if self.backend == "ffmpeg":
                 if self._proc is None or self._proc.poll() is not None:
                     time.sleep(0.05)
                     continue
 
-                # คำนวณ frame_size ทุกครั้ง เผื่อ W/H เพิ่งรู้ทีหลัง
+                # ต้องมี W,H ครบก่อนอ่าน
                 if not (self.width and self.height and np is not None):
                     time.sleep(0.03)
                     continue
@@ -293,6 +291,14 @@ class CameraWorker:
         if self.backend == "ffmpeg":
             with silent():
                 if self._proc is not None:
+                    try:
+                        # ปิด stdout/stderr ก่อน เพื่อปลดบล็อก thread/reader
+                        if self._proc.stdout:
+                            self._proc.stdout.close()
+                        if self._proc.stderr:
+                            self._proc.stderr.close()
+                    except Exception:
+                        pass
                     try:
                         self._proc.terminate()
                         self._proc.wait(timeout=0.8)
