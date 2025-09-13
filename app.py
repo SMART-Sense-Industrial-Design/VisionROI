@@ -305,6 +305,8 @@ def _sync_signal_handler(signum, frame):
 # install sync handlers early (more reliable than loop.add_signal_handler for our case)
 signal.signal(signal.SIGTERM, _sync_signal_handler)
 signal.signal(signal.SIGINT,  _sync_signal_handler)
+# Ignore SIGPIPE to avoid spurious Broken pipe errors when downstream closes
+signal.signal(signal.SIGPIPE, signal.SIG_IGN)
 
 
 # Close all tasks/cameras concurrently at shutdown (Quart lifespan)
