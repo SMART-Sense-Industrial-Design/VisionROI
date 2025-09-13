@@ -252,6 +252,7 @@ tg.start_send_text("สวัสดี")
 - **GET `/source_config`** – คืนค่าคอนฟิกของ source ตามชื่อที่ระบุผ่านพารามิเตอร์ `name`
 
 - **DELETE `/delete_source/<name>`** – ลบโฟลเดอร์และไฟล์ที่เกี่ยวกับ source นั้น
+- **PATCH `/update_stream_type/<name>`** – ปรับชนิดการสตรีม (`opencv` หรือ `ffmpeg`) ของ source ที่ระบุ
 
 - **GET `/_healthz`** – ตรวจสอบสถานะเซิร์ฟเวอร์
 - **POST `/_quit`** – สั่งปิดเซิร์ฟเวอร์อย่างนุ่มนวล
