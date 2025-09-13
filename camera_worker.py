@@ -66,7 +66,10 @@ class CameraWorker:
             cmd += ["-f", "rawvideo", "-pix_fmt", "bgr24", "-"]
             with silent():
                 self._proc = subprocess.Popen(
-                    cmd, stdout=subprocess.PIPE, bufsize=10**8
+                    cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.DEVNULL,
+                    bufsize=10**8,
                 )
         else:
             cap = cv2.VideoCapture(src)
