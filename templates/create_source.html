@@ -17,6 +17,13 @@
       <label for="source" class="form-label">Source:</label>
       <input type="text" id="source" name="source" class="form-control" required>
     </div>
+    <div class="mb-3">
+      <label for="stream_type" class="form-label">Stream Type:</label>
+      <select id="stream_type" name="stream_type" class="form-select">
+        <option value="opencv" selected>OpenCV</option>
+        <option value="ffmpeg">FFmpeg</option>
+      </select>
+    </div>
     <div class="row mb-3">
       <div class="col-md-6 d-flex align-items-center">
         <div class="form-check me-2">
@@ -47,6 +54,7 @@
       <tr>
         <th>Name</th>
         <th>Source</th>
+        <th>Stream</th>
         <th>Width</th>
         <th>Height</th>
         <th>Actions</th>
@@ -87,6 +95,8 @@
                 nameTd.textContent = src.name;
                 const sourceTd = document.createElement('td');
                 sourceTd.textContent = src.source;
+                const streamTd = document.createElement('td');
+                streamTd.textContent = src.stream_type ?? '';
                 const widthTd = document.createElement('td');
                 widthTd.textContent = src.width ?? '';
                 const heightTd = document.createElement('td');
@@ -110,6 +120,7 @@
                 actionTd.appendChild(delBtn);
                 tr.appendChild(nameTd);
                 tr.appendChild(sourceTd);
+                tr.appendChild(streamTd);
                 tr.appendChild(widthTd);
                 tr.appendChild(heightTd);
                 tr.appendChild(actionTd);

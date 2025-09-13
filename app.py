@@ -36,6 +36,7 @@ import signal  # signals
 camera_workers: dict[str, CameraWorker | None] = {}
 camera_sources: dict[str, int | str] = {}
 camera_resolutions: dict[str, tuple[int | None, int | None]] = {}
+camera_backends: dict[str, str] = {}
 camera_locks: dict[str, asyncio.Lock] = {}
 frame_queues: dict[str, asyncio.Queue[bytes]] = {}
 inference_tasks: dict[str, asyncio.Task | None] = {}
@@ -139,6 +140,7 @@ def _free_cam_state(cam_id: str):
     # Drop conf/state that may hold refs
     camera_sources.pop(cam_id, None)
     camera_resolutions.pop(cam_id, None)
+    camera_backends.pop(cam_id, None)
     active_sources.pop(cam_id, None)
     save_roi_flags.pop(cam_id, None)
     inference_groups.pop(cam_id, None)
@@ -189,11 +191,17 @@ def get_cam_lock(cam_id: str) -> asyncio.Lock:
 
 
 def save_service_state() -> None:
-    cam_ids = set(camera_sources) | set(active_sources) | set(inference_tasks)
+    cam_ids = (
+        set(camera_sources)
+        | set(active_sources)
+        | set(inference_tasks)
+        | set(camera_backends)
+    )
     data = {
         str(cam_id): {
             "source": camera_sources.get(cam_id),
             "resolution": list(camera_resolutions.get(cam_id, (None, None))),
+            "backend": camera_backends.get(cam_id, "opencv"),
             "active_source": active_sources.get(cam_id, ""),
             "inference_running": bool(
                 inference_tasks.get(cam_id) and not inference_tasks[cam_id].done()
@@ -235,6 +243,7 @@ async def restore_service_state() -> None:
         camera_sources[cam_id] = cfg.get("source")
         res = cfg.get("resolution") or [None, None]
         camera_resolutions[cam_id] = (res[0], res[1])
+        camera_backends[cam_id] = cfg.get("backend", "opencv")
         active_sources[cam_id] = cfg.get("active_source", "")
         group = cfg.get("inference_group")
         inference_intervals[cam_id] = cfg.get("interval", 1.0)
@@ -688,7 +697,10 @@ async def start_camera_task(
         if worker is None:
             src = camera_sources.get(cam_id, 0)
             width, height = camera_resolutions.get(cam_id, (None, None))
-            worker = CameraWorker(src, asyncio.get_running_loop(), width, height)
+            backend = camera_backends.get(cam_id, "opencv")
+            worker = CameraWorker(
+                src, asyncio.get_running_loop(), width, height, backend=backend
+            )
             if not worker.start():
                 await worker.stop()
                 camera_workers.pop(cam_id, None)
@@ -819,6 +831,7 @@ async def apply_camera_settings(cam_id: str, data: dict) -> bool:
         source_val = data.get("source", "")
         width_val = data.get("width")
         height_val = data.get("height")
+        backend = data.get("stream_type", "opencv")
         try:
             w = int(width_val) if width_val not in (None, "") else None
         except ValueError:
@@ -828,6 +841,7 @@ async def apply_camera_settings(cam_id: str, data: dict) -> bool:
         except ValueError:
             h = None
         camera_resolutions[cam_id] = (w, h)
+        camera_backends[cam_id] = backend
 
         worker = camera_workers.pop(cam_id, None)
         if worker:
@@ -844,7 +858,11 @@ async def apply_camera_settings(cam_id: str, data: dict) -> bool:
         ):
             width, height = camera_resolutions.get(cam_id, (None, None))
             worker = CameraWorker(
-                camera_sources[cam_id], asyncio.get_running_loop(), width, height
+                camera_sources[cam_id],
+                asyncio.get_running_loop(),
+                width,
+                height,
+                backend=backend,
             )
             if not worker.start():
                 save_service_state()
@@ -928,6 +946,7 @@ async def source_list():
                     "source": cfg.get("source", ""),
                     "width": cfg.get("width"),
                     "height": cfg.get("height"),
+                    "stream_type": cfg.get("stream_type", "opencv"),
                 }
             )
     except FileNotFoundError:
@@ -959,6 +978,7 @@ async def create_source():
     source = form.get("source", "").strip()
     width = form.get("width")
     height = form.get("height")
+    stream_type = form.get("stream_type", "opencv")
     if not name or not source:
         return jsonify({"status": "error", "message": "missing data"}), 400
 
@@ -976,6 +996,7 @@ async def create_source():
             "name": name,
             "source": source,
             "rois": "rois.json",
+            "stream_type": stream_type,
         }
         if width:
             try:
