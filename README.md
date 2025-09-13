@@ -34,10 +34,29 @@
 - ตรวจจับหน้ากระดาษและ ROI แบบเพจผ่านหน้า Inference Page (`/inference_page`)
 - รองรับการแจ้งเตือนผ่าน Telegram
 - มาพร้อมโมดูลตัวอย่าง `typhoon_ocr`, `yolo`, `easy_ocr` และ `rapid_ocr` เพื่อเริ่มต้นทดลองใช้งาน
+- มี `CameraWorker` สำหรับดึงเฟรมจากสตรีมวิดีโอทั้งผ่าน OpenCV และ `ffmpeg`
+- รวมแพ็กเกจโมเดลเสริมใน `src/packages/models` เช่น `rtdetr` และ `yolov8`
 - บันทึกสถานะกล้องและงาน inference ลงไฟล์ `service_state.json` เพื่อกู้คืนได้หลังรีสตาร์ทเซิร์ฟเวอร์
 - มี endpoint `GET /_healthz` สำหรับตรวจสอบสถานะ และ `POST /_quit` สำหรับสั่งปิดเซิร์ฟเวอร์อย่างนุ่มนวล
 
 ตัวอย่างไฟล์ `vision-roi.service` มีให้สำหรับรันเป็น **systemd service** ซึ่งเรียก `/_quit` เพื่อหยุดแอปอย่างปลอดภัย
+
+## โครงสร้างโปรเจ็กต์
+
+```
+VisionROI/
+├── app.py                # แอปหลัก
+├── camera_worker.py      # worker จัดการสตรีมวิดีโอ
+├── data_sources/         # คอนฟิกและไฟล์ ROI ของแต่ละ source
+├── inference_modules/    # โมดูล inference เช่น typhoon_ocr, yolo, easy_ocr, rapid_ocr
+├── src/
+│   └── packages/
+│       ├── models/       # โมเดลเสริม เช่น rtdetr, yolov8
+│       └── notification/ # ฟังก์ชันแจ้งเตือน
+├── static/               # ไฟล์ front-end
+├── templates/            # เทมเพลต HTML
+└── tests/                # เทสต์ด้วย pytest
+```
 
 ## Backend การสตรีม
 
