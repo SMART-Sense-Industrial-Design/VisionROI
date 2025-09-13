@@ -211,6 +211,7 @@ class CameraWorker:
 
     def _run(self) -> None:
         while not self._stop_evt.is_set():
+            print(self.last_ffmpeg_stderr())
             if self.backend == "ffmpeg":
                 if self._proc is None or self._proc.poll() is not None:
                     time.sleep(0.05)
