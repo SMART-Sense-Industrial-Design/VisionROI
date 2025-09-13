@@ -60,7 +60,7 @@ class CameraWorker:
         self._cap = None
         self._proc: subprocess.Popen | None = None
         self._stderr_thread: Optional[threading.Thread] = None
-        self._last_stderr = deque(maxlen=200)  # เก็บบรรทัดล่าสุดไว้ดู error
+        self._last_stderr = deque(maxlen=200)  # เก็บบรรทัด stderr ล่าสุดไว้ดู error
 
         self._stop_evt = threading.Event()
         self._thread: Optional[threading.Thread] = None
@@ -83,15 +83,13 @@ class CameraWorker:
                 cmd += [
                     "-rtsp_transport", "tcp",
                     "-rtsp_flags", "prefer_tcp",
-                    "-rw_timeout", "7000000",   # 7s (microseconds)
-                    "-max_delay", "500000",     # 0.5s (microseconds)
                 ]
 
-            # ช่วยให้วิเคราะห์สตรีมในเครือข่ายที่หน่วง
+            # ช่วยให้วิเคราะห์สตรีมในเครือข่ายที่หน่วง (ออปชันเก่า ๆ ก็มี)
             cmd += ["-probesize", "32M", "-analyzeduration", "5M"]
 
             cmd += [
-                "-fflags", "+discardcorrupt",
+                "-fflags", "+discardcorrupt",  # ทิ้งเฟรม/แพ็กเก็ตเสีย
                 "-i", str(src),
                 "-map", "0:v:0",
                 "-an",
@@ -136,14 +134,10 @@ class CameraWorker:
         return s.startswith("rtsp://") or s.startswith("rtsps://")
 
     def _probe_resolution(self, src: str) -> Tuple[Optional[int], Optional[int]]:
-        """ใช้ ffprobe หา width/height พร้อม RTSP/timeout"""
+        """ใช้ ffprobe หา width/height พร้อม RTSP (ไม่ใช้ rw_timeout/stimeout)"""
         cmd = ["ffprobe", "-hide_banner", "-loglevel", "error", "-nostdin"]
         if self._is_rtsp(src):
-            cmd += [
-                "-rtsp_transport", "tcp",
-                "-rtsp_flags", "prefer_tcp",
-                "-rw_timeout", "7000000",
-            ]
+            cmd += ["-rtsp_transport", "tcp", "-rtsp_flags", "prefer_tcp"]
         cmd += [
             "-select_streams", "v:0",
             "-show_entries", "stream=width,height",
