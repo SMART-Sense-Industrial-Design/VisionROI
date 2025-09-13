@@ -251,14 +251,8 @@ class CameraWorker:
             else:
                 raise ValueError(f"Unknown backend: {self.backend}")
 
-            # ตัดขาดบัฟเฟอร์เดิม
-            try:
-                frame_copy = frame.copy()
-            except Exception:
-                time.sleep(0.005)
-                continue
-
-            # เก็บเฟรมล่าสุดลงคิว
+            # เก็บเฟรมล่าสุดลงคิว โดยไม่สร้างสำเนาเพิ่มเพื่อความเร็วและประหยัดหน่วยความจำ
+            frame_copy = frame
             if self._q.full():
                 with silent():
                     _ = self._q.get_nowait()
