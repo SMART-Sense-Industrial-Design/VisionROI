@@ -96,7 +96,35 @@
                 const sourceTd = document.createElement('td');
                 sourceTd.textContent = src.source;
                 const streamTd = document.createElement('td');
-                streamTd.textContent = src.stream_type ?? '';
+                const streamSelect = document.createElement('select');
+                streamSelect.className = 'form-select form-select-sm';
+                ['opencv', 'ffmpeg'].forEach(opt => {
+                    const option = document.createElement('option');
+                    option.value = opt;
+                    option.textContent = opt;
+                    if ((src.stream_type ?? 'opencv') === opt) option.selected = true;
+                    streamSelect.appendChild(option);
+                });
+                streamSelect.addEventListener('change', async (e) => {
+                    const newType = e.target.value;
+                    try {
+                        const res = await fetch(`/update_stream_type/${encodeURIComponent(src.name)}`, {
+                            method: 'PATCH',
+                            headers: {'Content-Type': 'application/json'},
+                            body: JSON.stringify({stream_type: newType})
+                        });
+                        const data = await res.json();
+                        if (res.ok && data.status === 'updated') {
+                            showAlert('Stream type updated', 'success');
+                            await loadSources();
+                        } else {
+                            showAlert(data.message || 'Update failed', 'error');
+                        }
+                    } catch (err) {
+                        showAlert('Update failed', 'error');
+                    }
+                });
+                streamTd.appendChild(streamSelect);
                 const widthTd = document.createElement('td');
                 widthTd.textContent = src.width ?? '';
                 const heightTd = document.createElement('td');
