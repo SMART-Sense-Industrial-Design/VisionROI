@@ -15,9 +15,6 @@ def silent():
     except Exception:
         pass
 
-def _is_rtsp(src) -> bool:
-    return isinstance(src, str) and src.strip().lower().startswith("rtsp://")
-
 
 def _malloc_trim() -> None:
     """คืนพื้นที่ heap ให้ OS ถ้าเป็นไปได้ (Linux/glibc)."""
@@ -29,19 +26,23 @@ def _malloc_trim() -> None:
         pass
 
 class CameraWorker:
-    def __init__(self, src,
-                 loop: Optional[asyncio.AbstractEventLoop] = None,
-                 width: Optional[int] = None,
-                 height: Optional[int] = None,
-                 read_interval: float = 0.0) -> None:
+    def __init__(
+        self,
+        src,
+        loop: Optional[asyncio.AbstractEventLoop] = None,
+        width: Optional[int] = None,
+        height: Optional[int] = None,
+        read_interval: float = 0.0,
+        backend: str = "opencv",
+    ) -> None:
         self.src = src
         self.loop = loop
         self.width = width
         self.height = height
         self.read_interval = read_interval
+        self.backend = backend
 
-        # บน macOS/RTSP ลองใช้ FFMPEG backend ก่อน (ช่วยลด segfault จาก AVFoundation)
-        if _is_rtsp(src):
+        if backend == "ffmpeg":
             cap = cv2.VideoCapture(src, cv2.CAP_FFMPEG)
             if not cap or not cap.isOpened():
                 cap = cv2.VideoCapture(src)
