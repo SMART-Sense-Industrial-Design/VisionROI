@@ -39,6 +39,15 @@
 
 ตัวอย่างไฟล์ `vision-roi.service` มีให้สำหรับรันเป็น **systemd service** ซึ่งเรียก `/_quit` เพื่อหยุดแอปอย่างปลอดภัย
 
+## Backend การสตรีม
+
+ระบบรองรับ backend การอ่านสตรีมวิดีโอ 2 แบบหลัก ๆ:
+
+- `opencv` – ใช้ `cv2.VideoCapture` เหมาะสำหรับการทดสอบทั่วไปและอุปกรณ์ที่รองรับ OpenCV โดยตรง
+- `ffmpeg` – ใช้คำสั่ง `ffmpeg` เพื่อส่งเฟรมแบบ `bgr24` ผ่าน `stdout` ให้ความเสถียรกับสตรีม RTSP และสามารถปรับขนาดภาพล่วงหน้าได้
+
+สามารถกำหนด backend ได้จากคีย์ `stream_type` ในไฟล์ `data_sources/<name>/config.json`, ผ่านหน้าเว็บ `/create_source` หรือ API `PATCH /update_stream_type/<name>` หากไม่ระบุจะใช้ `opencv` เป็นค่าเริ่มต้น
+
 ## ข้อกำหนดระบบ
 - Python ≥3.10
 - dependencies ถูกกำหนดใน `pyproject.toml`
