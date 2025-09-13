@@ -114,7 +114,7 @@ class CameraWorker:
                     )
                     self._stderr_thread.start()
 
-        else:
+        elif backend == "opencv":
             cap = cv2.VideoCapture(src)
             self._cap = cap
             with silent():
@@ -125,6 +125,9 @@ class CameraWorker:
             if height:
                 with silent():
                     self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, int(height))
+
+        else:
+            raise ValueError(f"Unknown backend: {backend}")
 
     # ---------- helpers ----------
 
@@ -194,9 +197,11 @@ class CameraWorker:
         if self.backend == "ffmpeg":
             if self._proc is None or self._proc.poll() is not None:
                 return False
-        else:
+        elif self.backend == "opencv":
             if not self._cap or not self._cap.isOpened():
                 return False
+        else:
+            raise ValueError(f"Unknown backend: {self.backend}")
         if self._thread is None or not self._thread.is_alive():
             self._thread = threading.Thread(target=self._run, daemon=True)
             self._thread.start()
@@ -204,7 +209,6 @@ class CameraWorker:
 
     def _run(self) -> None:
         while not self._stop_evt.is_set():
-            
             if self.backend == "ffmpeg":
                 if self._proc is None or self._proc.poll() is not None:
                     time.sleep(0.05)
@@ -236,7 +240,7 @@ class CameraWorker:
                     time.sleep(0.01)
                     continue
 
-            else:
+            elif self.backend == "opencv":
                 if self._cap is None or not self._cap.isOpened():
                     time.sleep(0.05)
                     continue
@@ -244,6 +248,8 @@ class CameraWorker:
                 if not ok or frame is None:
                     time.sleep(0.01)
                     continue
+            else:
+                raise ValueError(f"Unknown backend: {self.backend}")
 
             # ตัดขาดบัฟเฟอร์เดิม
             try:
@@ -309,12 +315,14 @@ class CameraWorker:
                     self._stderr_thread.join(timeout=0.2)
             self._stderr_thread = None
 
-        else:
+        elif self.backend == "opencv":
             with silent():
                 if self._cap is not None and self._cap.isOpened():
                     await asyncio.to_thread(self._cap.release)
             await asyncio.sleep(0.05)
             self._cap = None
+        else:
+            raise ValueError(f"Unknown backend: {self.backend}")
 
         # ล้างคิว
         while True:
