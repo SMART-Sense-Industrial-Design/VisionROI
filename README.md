@@ -11,10 +11,11 @@
    source .venv/bin/activate  # บน Windows ใช้ .venv\\Scripts\\activate
    ```
 
-2. ติดตั้งแพ็กเกจของโปรเจ็กต์:
+2. ติดตั้งแพ็กเกจของโปรเจ็กต์ (หากต้องการใช้เซิร์ฟเวอร์ **uvicorn** ให้ติดตั้งเพิ่ม):
 
    ```bash
    pip install "."
+   pip install uvicorn  # ติดตั้ง uvicorn
    ```
 
 3. รันแอปพลิเคชัน (ค่าเริ่มต้นใช้พอร์ต `5000` หากต้องการกำหนดพอร์ตเองให้เพิ่ม `--port`).
@@ -111,10 +112,12 @@ python -m venv .venv
   .venv\\Scripts\\activate
   ```
 
-เมื่อ environment ถูก activate แล้วจึงติดตั้งแพ็กเกจและ dependencies ด้วย `pip`:
+เมื่อ environment ถูก activate แล้วจึงติดตั้งแพ็กเกจและ dependencies ด้วย `pip`
+(และหากต้องการใช้เซิร์ฟเวอร์ **uvicorn** ให้ติดตั้งเพิ่ม):
 
 ```bash
 pip install "."
+pip install uvicorn  # ติดตั้ง uvicorn
 ```
 
 หากต้องการ dependencies เพิ่มเติม เช่น `onnxruntime`, `requests`, `tensorflow`, `torch`, `websockets`, `onnx`, `torchvision`, `pycuda` หรือ `tensorrt` สามารถติดตั้งผ่าน extras ได้:
