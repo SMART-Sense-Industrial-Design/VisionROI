@@ -63,9 +63,25 @@ function createController(cellId){
     const logRoiSelect=getEl('logRoiSelect');
     let rois=[];
     let logTimer;
-    let frameTimer;
     let frameController;
+    let latestFrameData;
+    let framePending=false;
 
+    function displayFrame(){
+        if(latestFrameData){
+            const data=latestFrameData;
+            latestFrameData=null;
+            if(video.src && video.src.startsWith('blob:')){
+                URL.revokeObjectURL(video.src);
+            }
+            video.src=URL.createObjectURL(data);
+        }
+        if(latestFrameData){
+            requestAnimationFrame(displayFrame);
+        }else{
+            framePending=false;
+        }
+    }
     function populateLogRoiSelect(){
         logRoiSelect.innerHTML='';
         const optAll=document.createElement('option');
@@ -224,24 +240,25 @@ function createController(cellId){
 
 
     function startFrameLoop(){
-        if(frameTimer){clearInterval(frameTimer);frameTimer=null;}
         function requestFrame(){
             if(!running) return;
-            if(frameController) frameController.abort();
             frameController=new AbortController();
             fetch(`/ws_snapshot/${cam}?_=${Date.now()}`,{signal:frameController.signal})
                 .then(res=>res.blob())
                 .then(blob=>{
                     if(!running) return;
-                    if(video.src && video.src.startsWith('blob:')){
-                        URL.revokeObjectURL(video.src);
+                    latestFrameData=blob;
+                    if(!framePending){
+                        framePending=true;
+                        requestAnimationFrame(displayFrame);
                     }
-                    video.src=URL.createObjectURL(blob);
                 })
-                .catch(()=>{});
+                .catch(()=>{})
+                .finally(()=>{
+                    if(running) requestAnimationFrame(requestFrame);
+                });
         }
-        requestFrame();
-        frameTimer=setInterval(requestFrame,100);
+        requestAnimationFrame(requestFrame);
     }
 
     function openRoiSocket(){
@@ -344,8 +361,9 @@ function createController(cellId){
         running=false;
         await fetchWithStatus(`/stop_inference/${cam}`,{method:'POST'});
         if(roiSocket){roiSocket.close();roiSocket=null;}
-        if(frameTimer){clearInterval(frameTimer);frameTimer=null;}
         if(frameController){frameController.abort();frameController=null;}
+        framePending=false;
+        latestFrameData=null;
         stopLogUpdates();
         showBlackScreen();
         rois=[];
