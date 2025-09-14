@@ -13,7 +13,7 @@
             <button id="cam1-stopButton" class="btn btn-danger" disabled>Stop</button>
             <p id="cam1-status"></p>
             <div class="video-wrapper">
-                <img id="cam1-video" class="stream-video" />
+                <canvas id="cam1-video" class="stream-video"></canvas>
                 <p>page: <span id="cam1-pageName"></span></p>
                 <table id="cam1-pageScores" class="table">
                     <thead><tr><th>Page</th><th>Score</th></tr></thead>
@@ -48,7 +48,7 @@ function createController(cellId){
     const cam=`page_${cellId}`;
     const getEl=suffix=>document.getElementById(`${cellId}-${suffix}`);
     const video=getEl('video');
-    video.onload=()=>URL.revokeObjectURL(video.src);
+    const videoCtx=video.getContext('2d');
     const pageNameEl=getEl('pageName');
     const scoreTableBody=getEl('pageScoresBody');
     const roiGrid=getEl('rois');
@@ -216,13 +216,15 @@ function createController(cellId){
 
     function openSocket(){
         socket=new WebSocket(`ws://${location.host}/ws/${cam}`);
-        socket.binaryType='arraybuffer';
-        socket.onmessage=event=>{
-            if(video.src && video.src.startsWith('blob:')){
-                URL.revokeObjectURL(video.src);
+        socket.binaryType='blob';
+        socket.onmessage=async event=>{
+            const bitmap=await createImageBitmap(event.data);
+            if(video.width!==bitmap.width||video.height!==bitmap.height){
+                video.width=bitmap.width;
+                video.height=bitmap.height;
             }
-            const blob=new Blob([event.data],{type:'image/jpeg'});
-            video.src=URL.createObjectURL(blob);
+            videoCtx.drawImage(bitmap,0,0);
+            bitmap.close();
         };
     }
 
@@ -328,10 +330,7 @@ function createController(cellId){
         if(socket){socket.close();socket=null;}
         if(roiSocket){roiSocket.close();roiSocket=null;}
         stopLogUpdates();
-        if(video.src && video.src.startsWith('blob:')){
-            URL.revokeObjectURL(video.src);
-        }
-        video.src='';
+        videoCtx.clearRect(0,0,video.width,video.height);
         rois=[];
         populateLogRoiSelect();
         roiGrid.innerHTML='';
