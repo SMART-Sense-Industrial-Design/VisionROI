@@ -176,10 +176,6 @@
                     clearInterval(frameTimer);
                     frameTimer = null;
                 }
-                isStreaming = false;
-                stopBtn.disabled = true;
-                startBtn.disabled = false;
-                hasStarted = false;
                 console.log("ROI stream closed");
             };
             frameTimer = setInterval(() => {
