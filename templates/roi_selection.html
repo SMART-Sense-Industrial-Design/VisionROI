@@ -157,6 +157,10 @@
             socket.binaryType = "arraybuffer";
             socket.onmessage = function(event) {
                 const blob = new Blob([event.data], { type: "image/jpeg" });
+                const oldUrl = video.src;
+                if (oldUrl && oldUrl.startsWith('blob:')) {
+                    URL.revokeObjectURL(oldUrl);
+                }
                 video.src = URL.createObjectURL(blob);
             };
             socket.onclose = function() {
