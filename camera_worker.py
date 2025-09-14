@@ -90,6 +90,8 @@ class CameraWorker:
 
             cmd += [
                 "-fflags", "+discardcorrupt",  # ทิ้งเฟรม/แพ็กเก็ตเสีย
+                "-flags", "low_delay",  # ลดการหน่วงของสตรีม
+                "-fflags", "nobuffer",  # ไม่สะสมเฟรมในบัฟเฟอร์
                 "-i", str(src),
                 "-map", "0:v:0",
                 "-an",
