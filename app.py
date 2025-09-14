@@ -783,9 +783,12 @@ async def ws(cam_id: str):
             if frame_bytes is None:
                 await websocket.close(code=1000)
                 break
-            await websocket.send(frame_bytes)
-    except ConnectionClosed:
-        pass
+            if websocket.closed:
+                break
+            try:
+                await websocket.send(frame_bytes)
+            except (ConnectionClosed, RuntimeError):
+                break
     finally:
         with contextlib.suppress(Exception):
             await websocket.close()
@@ -800,9 +803,12 @@ async def ws_roi(cam_id: str):
             if frame_bytes is None:
                 await websocket.close(code=1000)
                 break
-            await websocket.send(frame_bytes)
-    except ConnectionClosed:
-        pass
+            if websocket.closed:
+                break
+            try:
+                await websocket.send(frame_bytes)
+            except (ConnectionClosed, RuntimeError):
+                break
     finally:
         with contextlib.suppress(Exception):
             await websocket.close()
@@ -817,9 +823,12 @@ async def ws_roi_result(cam_id: str):
             if data is None:
                 await websocket.close(code=1000)
                 break
-            await websocket.send(data)
-    except ConnectionClosed:
-        pass
+            if websocket.closed:
+                break
+            try:
+                await websocket.send(data)
+            except (ConnectionClosed, RuntimeError):
+                break
     finally:
         with contextlib.suppress(Exception):
             await websocket.close()
