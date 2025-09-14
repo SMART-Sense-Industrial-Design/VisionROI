@@ -50,6 +50,14 @@
         const getEl = suffix => document.getElementById(`${cellId}-${suffix}`);
         const video = getEl('video');
         video.onload = () => URL.revokeObjectURL(video.src);
+        const BLACK_FRAME = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/wwAAgMBgNUNGMkAAAAASUVORK5CYII=';
+        function showBlackScreen() {
+            if (video.src && video.src.startsWith('blob:')) {
+                URL.revokeObjectURL(video.src);
+            }
+            video.src = BLACK_FRAME;
+        }
+        showBlackScreen();
         const startButton = getEl('startButton');
         const stopButton = getEl('stopButton');
         const statusEl = getEl('status');
@@ -337,10 +345,7 @@
             }
             stopLogUpdates();
             // clear last frame and related data to free memory
-            if (video.src && video.src.startsWith('blob:')) {
-                URL.revokeObjectURL(video.src);
-            }
-            video.src = '';
+            showBlackScreen();
             rois = [];
             allRois = [];
             roiGrid.innerHTML = '';
@@ -364,6 +369,7 @@
                 video.src = URL.createObjectURL(blob);
             };
             socket.onclose = () => {
+                showBlackScreen();
                 if (frameTimer) {
                     clearInterval(frameTimer);
                     frameTimer = null;
@@ -371,6 +377,7 @@
             };
             frameTimer = setInterval(() => {
                 if (Date.now() - lastFrameTime > 2000) {
+                    showBlackScreen();
                     try { socket.close(); } catch (e) {}
                     openSocket();
                 }
