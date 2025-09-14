@@ -49,6 +49,14 @@ function createController(cellId){
     const getEl=suffix=>document.getElementById(`${cellId}-${suffix}`);
     const video=getEl('video');
     video.onload=()=>URL.revokeObjectURL(video.src);
+    const BLACK_FRAME='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/wwAAgMBgNUNGMkAAAAASUVORK5CYII=';
+    function showBlackScreen(){
+        if(video.src && video.src.startsWith('blob:')){
+            URL.revokeObjectURL(video.src);
+        }
+        video.src=BLACK_FRAME;
+    }
+    showBlackScreen();
     const pageNameEl=getEl('pageName');
     const scoreTableBody=getEl('pageScoresBody');
     const roiGrid=getEl('rois');
@@ -229,10 +237,12 @@ function createController(cellId){
             video.src=URL.createObjectURL(blob);
         };
         socket.onclose=()=>{
+            showBlackScreen();
             if(frameTimer){clearInterval(frameTimer);frameTimer=null;}
         };
         frameTimer=setInterval(()=>{
             if(Date.now()-lastFrameTime>2000){
+                showBlackScreen();
                 try{socket.close();}catch(e){}
                 openSocket();
             }
@@ -342,10 +352,7 @@ function createController(cellId){
         if(roiSocket){roiSocket.close();roiSocket=null;}
         if(frameTimer){clearInterval(frameTimer);frameTimer=null;}
         stopLogUpdates();
-        if(video.src && video.src.startsWith('blob:')){
-            URL.revokeObjectURL(video.src);
-        }
-        video.src='';
+        showBlackScreen();
         rois=[];
         populateLogRoiSelect();
         roiGrid.innerHTML='';

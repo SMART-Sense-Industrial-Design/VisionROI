@@ -56,6 +56,16 @@
         const pickBtn = document.getElementById("pickBtn");
         const rectBtn = document.getElementById("rectBtn");
         const pageBtn = document.getElementById("pageBtn");
+        let frameTimer;
+        let lastFrameTime = 0;
+        const BLACK_FRAME = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/wwAAgMBgNUNGMkAAAAASUVORK5CYII=';
+        function showBlackScreen() {
+            if (video.src && video.src.startsWith('blob:')) {
+                URL.revokeObjectURL(video.src);
+            }
+            video.src = BLACK_FRAME;
+        }
+        showBlackScreen();
         function setMode(mode, type = 'roi') {
             currentMode = mode;
             currentType = type;
@@ -150,18 +160,35 @@
         function openSocket() {
             socket = new WebSocket(`ws://${location.host}/ws_roi/${cam}`);
             socket.binaryType = "arraybuffer";
+            lastFrameTime = Date.now();
             socket.onmessage = function(event) {
+                lastFrameTime = Date.now();
+                if (video.src && video.src.startsWith('blob:')) {
+                    URL.revokeObjectURL(video.src);
+                }
                 const blob = new Blob([event.data], { type: "image/jpeg" });
                 video.src = URL.createObjectURL(blob);
             };
             socket.onclose = function() {
+                showBlackScreen();
                 socket = null;
+                if (frameTimer) {
+                    clearInterval(frameTimer);
+                    frameTimer = null;
+                }
                 isStreaming = false;
                 stopBtn.disabled = true;
                 startBtn.disabled = false;
                 hasStarted = false;
                 console.log("ROI stream closed");
             };
+            frameTimer = setInterval(() => {
+                if (Date.now() - lastFrameTime > 2000) {
+                    showBlackScreen();
+                    try { socket.close(); } catch (e) {}
+                    openSocket();
+                }
+            }, 1000);
         }
 
         async function checkStatus() {
@@ -235,11 +262,16 @@
                 socket.close();
                 socket = null;
             }
+            if (frameTimer) {
+                clearInterval(frameTimer);
+                frameTimer = null;
+            }
             try {
                 await fetch(`/stop_roi_stream/${cam}`, { method: 'POST', keepalive: true });
             } catch (err) {
                 console.error('Failed to stop ROI stream', err);
             }
+            showBlackScreen();
             isStreaming = false;
             hasStarted = false;
             stopBtn.disabled = true;
