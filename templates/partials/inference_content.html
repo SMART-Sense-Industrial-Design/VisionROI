@@ -61,6 +61,8 @@
         const intervalInput = getEl('intervalInput');
         let logTimer;
         let currentLogSource;
+        let frameTimer;
+        let lastFrameTime = 0;
         intervalInput.value = localStorage.getItem(`${cellId}-interval`) || '1';
 
         const formatTs = ts => {
@@ -329,6 +331,10 @@
                 roiSocket.close();
                 roiSocket = null;
             }
+            if (frameTimer) {
+                clearInterval(frameTimer);
+                frameTimer = null;
+            }
             stopLogUpdates();
             // clear last frame and related data to free memory
             if (video.src && video.src.startsWith('blob:')) {
@@ -348,13 +354,27 @@
         function openSocket() {
             socket = new WebSocket(`ws://${location.host}/ws/${cam}`);
             socket.binaryType = 'arraybuffer';
+            lastFrameTime = Date.now();
             socket.onmessage = function(event) {
+                lastFrameTime = Date.now();
                 if (video.src && video.src.startsWith('blob:')) {
                     URL.revokeObjectURL(video.src);
                 }
                 const blob = new Blob([event.data], { type: 'image/jpeg' });
                 video.src = URL.createObjectURL(blob);
             };
+            socket.onclose = () => {
+                if (frameTimer) {
+                    clearInterval(frameTimer);
+                    frameTimer = null;
+                }
+            };
+            frameTimer = setInterval(() => {
+                if (Date.now() - lastFrameTime > 2000) {
+                    try { socket.close(); } catch (e) {}
+                    openSocket();
+                }
+            }, 1000);
         }
 
         function openRoiSocket() {
