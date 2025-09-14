@@ -788,7 +788,10 @@ async def ws(cam_id: str):
             if frame_bytes is None:
                 await websocket.close(code=1000)
                 break
-            await websocket.send(frame_bytes)
+            try:
+                await asyncio.wait_for(websocket.send(frame_bytes), timeout=1)
+            except asyncio.TimeoutError:
+                break
     except ConnectionClosed:
         pass
     finally:
@@ -810,7 +813,10 @@ async def ws_roi(cam_id: str):
             if frame_bytes is None:
                 await websocket.close(code=1000)
                 break
-            await websocket.send(frame_bytes)
+            try:
+                await asyncio.wait_for(websocket.send(frame_bytes), timeout=1)
+            except asyncio.TimeoutError:
+                break
     except ConnectionClosed:
         pass
     finally:
@@ -832,7 +838,10 @@ async def ws_roi_result(cam_id: str):
             if data is None:
                 await websocket.close(code=1000)
                 break
-            await websocket.send(data)
+            try:
+                await asyncio.wait_for(websocket.send(data), timeout=1)
+            except asyncio.TimeoutError:
+                break
     except ConnectionClosed:
         pass
     finally:
