@@ -58,12 +58,12 @@
         const pageBtn = document.getElementById("pageBtn");
         let frameTimer;
         let lastFrameTime = 0;
-        const BLACK_FRAME = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/wwAAgMBgNUNGMkAAAAASUVORK5CYII=';
         function showBlackScreen() {
             if (video.src && video.src.startsWith('blob:')) {
                 URL.revokeObjectURL(video.src);
             }
-            video.src = BLACK_FRAME;
+            video.removeAttribute('src');
+            video.style.display = 'none';
         }
         showBlackScreen();
         function setMode(mode, type = 'roi') {
@@ -167,6 +167,9 @@
                     URL.revokeObjectURL(video.src);
                 }
                 const blob = new Blob([event.data], { type: "image/jpeg" });
+                if (video.style.display === 'none') {
+                    video.style.display = '';
+                }
                 video.src = URL.createObjectURL(blob);
             };
             socket.onclose = function() {

@@ -49,12 +49,12 @@ function createController(cellId){
     const getEl=suffix=>document.getElementById(`${cellId}-${suffix}`);
     const video=getEl('video');
     video.onload=()=>URL.revokeObjectURL(video.src);
-    const BLACK_FRAME='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/wwAAgMBgNUNGMkAAAAASUVORK5CYII=';
     function showBlackScreen(){
         if(video.src && video.src.startsWith('blob:')){
             URL.revokeObjectURL(video.src);
         }
-        video.src=BLACK_FRAME;
+        video.removeAttribute('src');
+        video.style.display='none';
     }
     showBlackScreen();
     const pageNameEl=getEl('pageName');
@@ -234,6 +234,7 @@ function createController(cellId){
                 URL.revokeObjectURL(video.src);
             }
             const blob=new Blob([event.data],{type:'image/jpeg'});
+            if(video.style.display==='none'){video.style.display='';}
             video.src=URL.createObjectURL(blob);
         };
         socket.onclose=()=>{
