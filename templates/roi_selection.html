@@ -56,8 +56,27 @@
         const pickBtn = document.getElementById("pickBtn");
         const rectBtn = document.getElementById("rectBtn");
         const pageBtn = document.getElementById("pageBtn");
-        let frameTimer;
-        let lastFrameTime = 0;
+    let frameTimer;
+    let lastFrameTime = 0;
+    let latestFrameData;
+    let framePending = false;
+
+    function displayFrame(){
+        if(latestFrameData){
+            const data = latestFrameData;
+            latestFrameData = null;
+            if(video.src && video.src.startsWith('blob:')){
+                URL.revokeObjectURL(video.src);
+            }
+            const blob = new Blob([data],{type:'image/jpeg'});
+            video.src = URL.createObjectURL(blob);
+        }
+        if(latestFrameData){
+            requestAnimationFrame(displayFrame);
+        }else{
+            framePending = false;
+        }
+    }
         const BLACK_FRAME = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/wwAAgMBgNUNGMkAAAAASUVORK5CYII=';
         function showBlackScreen() {
             if (video.src && video.src.startsWith('blob:')) {
@@ -161,14 +180,14 @@
             socket = new WebSocket(`ws://${location.host}/ws_roi/${cam}`);
             socket.binaryType = "arraybuffer";
             lastFrameTime = Date.now();
-            socket.onmessage = function(event) {
-                lastFrameTime = Date.now();
-                if (video.src && video.src.startsWith('blob:')) {
-                    URL.revokeObjectURL(video.src);
-                }
-                const blob = new Blob([event.data], { type: "image/jpeg" });
-                video.src = URL.createObjectURL(blob);
-            };
+        socket.onmessage = function(event) {
+            lastFrameTime = Date.now();
+            latestFrameData = event.data;
+            if (!framePending) {
+                framePending = true;
+                requestAnimationFrame(displayFrame);
+            }
+        };
             socket.onclose = function() {
                 showBlackScreen();
                 socket = null;
