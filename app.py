@@ -780,6 +780,11 @@ async def ws(cam_id: str):
     try:
         while True:
             frame_bytes = await queue.get()
+            while True:
+                try:
+                    frame_bytes = queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    break
             if frame_bytes is None:
                 await websocket.close(code=1000)
                 break
@@ -797,6 +802,11 @@ async def ws_roi(cam_id: str):
     try:
         while True:
             frame_bytes = await queue.get()
+            while True:
+                try:
+                    frame_bytes = queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    break
             if frame_bytes is None:
                 await websocket.close(code=1000)
                 break
@@ -814,6 +824,11 @@ async def ws_roi_result(cam_id: str):
     try:
         while True:
             data = await queue.get()
+            while True:
+                try:
+                    data = queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    break
             if data is None:
                 await websocket.close(code=1000)
                 break
