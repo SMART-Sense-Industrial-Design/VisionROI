@@ -1380,7 +1380,11 @@ async def ws_snapshot(cam_id: str):
     ok, buffer = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
     if not ok:
         return "Encode error", 500
-    return Response(buffer.tobytes(), mimetype="image/jpeg")
+    # return Response(buffer.tobytes(), mimetype="image/jpeg")
+    resp = Response(buffer.tobytes(), mimetype="image/jpeg")
+    resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    resp.headers["Pragma"] = "no-cache"
+    return resp
 
 
 # =========================
