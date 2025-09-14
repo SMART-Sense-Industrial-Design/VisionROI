@@ -42,7 +42,6 @@
 <script>
 (function(){
 function createController(cellId){
-    let socket;
     let roiSocket;
     let running=false;
     const cam=`page_${cellId}`;
@@ -65,7 +64,7 @@ function createController(cellId){
     let rois=[];
     let logTimer;
     let frameTimer;
-    let lastFrameTime=0;
+    let frameController;
 
     function populateLogRoiSelect(){
         logRoiSelect.innerHTML='';
@@ -215,7 +214,7 @@ function createController(cellId){
             return;
         }
         statusEl.innerText='สำเร็จ';
-        openSocket();
+        startFrameLoop();
         openRoiSocket();
 
         setRunningUI();
@@ -224,29 +223,25 @@ function createController(cellId){
         }
 
 
-    function openSocket(){
-        socket=new WebSocket(`ws://${location.host}/ws/${cam}`);
-        socket.binaryType='arraybuffer';
-        lastFrameTime=Date.now();
-        socket.onmessage=event=>{
-            lastFrameTime=Date.now();
-            if(video.src && video.src.startsWith('blob:')){
-                URL.revokeObjectURL(video.src);
-            }
-            const blob=new Blob([event.data],{type:'image/jpeg'});
-            video.src=URL.createObjectURL(blob);
-        };
-        socket.onclose=()=>{
-            showBlackScreen();
-            if(frameTimer){clearInterval(frameTimer);frameTimer=null;}
-        };
-        frameTimer=setInterval(()=>{
-            if(Date.now()-lastFrameTime>2000){
-                showBlackScreen();
-                try{socket.close();}catch(e){}
-                openSocket();
-            }
-        },1000);
+    function startFrameLoop(){
+        if(frameTimer){clearInterval(frameTimer);frameTimer=null;}
+        function requestFrame(){
+            if(!running) return;
+            if(frameController) frameController.abort();
+            frameController=new AbortController();
+            fetch(`/ws_snapshot/${cam}?_=${Date.now()}`,{signal:frameController.signal})
+                .then(res=>res.blob())
+                .then(blob=>{
+                    if(!running) return;
+                    if(video.src && video.src.startsWith('blob:')){
+                        URL.revokeObjectURL(video.src);
+                    }
+                    video.src=URL.createObjectURL(blob);
+                })
+                .catch(()=>{});
+        }
+        requestFrame();
+        frameTimer=setInterval(requestFrame,100);
     }
 
     function openRoiSocket(){
@@ -348,9 +343,9 @@ function createController(cellId){
         if(!running)return;
         running=false;
         await fetchWithStatus(`/stop_inference/${cam}`,{method:'POST'});
-        if(socket){socket.close();socket=null;}
         if(roiSocket){roiSocket.close();roiSocket=null;}
         if(frameTimer){clearInterval(frameTimer);frameTimer=null;}
+        if(frameController){frameController.abort();frameController=null;}
         stopLogUpdates();
         showBlackScreen();
         rois=[];
@@ -386,7 +381,7 @@ function createController(cellId){
             }catch(e){}
             if(data.running){
                 const name=sourceSelect.value;
-                openSocket();
+                startFrameLoop();
                 openRoiSocket();
                 scoreTableBody.innerHTML='';
                 if(name){
