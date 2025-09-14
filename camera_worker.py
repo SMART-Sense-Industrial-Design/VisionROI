@@ -65,6 +65,9 @@ class CameraWorker:
         self._stop_evt = threading.Event()
         self._thread: Optional[threading.Thread] = None
         self._q: Queue = Queue(maxsize=1)
+        self._last_frame = None
+        self._fail_count = 0
+        self._ffmpeg_cmd = None
 
         if backend == "ffmpeg":
             # ถ้ายังไม่รู้ขนาด ลอง probe; ถ้าไม่ได้จะ fallback ไป OpenCV 1 เฟรม
@@ -102,9 +105,10 @@ class CameraWorker:
 
             cmd += ["-pix_fmt", "bgr24", "-f", "rawvideo", "pipe:1"]
 
+            self._ffmpeg_cmd = cmd
             with silent():
                 self._proc = subprocess.Popen(
-                    cmd,
+                    self._ffmpeg_cmd,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
                     bufsize=10**8,
@@ -193,6 +197,51 @@ class CameraWorker:
         except Exception:
             pass
 
+    def _restart_backend(self) -> None:
+        """พยายามเชื่อมต่อสตรีมใหม่เมื่ออ่านไม่ได้"""
+        with silent():
+            if self.backend == "ffmpeg":
+                if self._proc is not None:
+                    try:
+                        if self._proc.stdout:
+                            self._proc.stdout.close()
+                        if self._proc.stderr:
+                            self._proc.stderr.close()
+                        self._proc.terminate()
+                        self._proc.wait(timeout=0.5)
+                    except Exception:
+                        try:
+                            self._proc.kill()
+                        except Exception:
+                            pass
+                if self._ffmpeg_cmd is not None:
+                    self._proc = subprocess.Popen(
+                        self._ffmpeg_cmd,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        bufsize=10**8,
+                        preexec_fn=os.setsid,
+                    )
+                    if self._proc and self._proc.stderr:
+                        self._stderr_thread = threading.Thread(
+                            target=self._drain_stderr, daemon=True
+                        )
+                        self._stderr_thread.start()
+            elif self.backend == "opencv":
+                if self._cap is not None and self._cap.isOpened():
+                    try:
+                        self._cap.release()
+                    except Exception:
+                        pass
+                self._cap = cv2.VideoCapture(self.src)
+                with silent():
+                    self._cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+                    if self.width:
+                        self._cap.set(cv2.CAP_PROP_FRAME_WIDTH, int(self.width))
+                    if self.height:
+                        self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, int(self.height))
+        self._fail_count = 0
+
     # ---------- lifecycle ----------
 
     def start(self) -> bool:
@@ -211,12 +260,15 @@ class CameraWorker:
 
     def _run(self) -> None:
         while not self._stop_evt.is_set():
+            frame = None
             if self.backend == "ffmpeg":
                 if self._proc is None or self._proc.poll() is not None:
+                    self._fail_count += 1
+                    if self._fail_count > 100:
+                        self._restart_backend()
                     time.sleep(0.05)
                     continue
 
-                # ต้องมี W,H ครบก่อนอ่าน
                 if not (self.width and self.height and np is not None):
                     time.sleep(0.03)
                     continue
@@ -230,7 +282,9 @@ class CameraWorker:
                     buffer.extend(chunk)
 
                 if len(buffer) != frame_size:
-                    # ยังไม่ครบเฟรม ทิ้ง
+                    self._fail_count += 1
+                    if self._fail_count > 100:
+                        self._restart_backend()
                     time.sleep(0.01)
                     continue
 
@@ -239,21 +293,31 @@ class CameraWorker:
                         (int(self.height), int(self.width), 3)
                     )
                 except Exception:
+                    self._fail_count += 1
+                    if self._fail_count > 100:
+                        self._restart_backend()
                     time.sleep(0.01)
                     continue
 
             elif self.backend == "opencv":
                 if self._cap is None or not self._cap.isOpened():
+                    self._fail_count += 1
+                    if self._fail_count > 100:
+                        self._restart_backend()
                     time.sleep(0.05)
                     continue
                 ok, frame = self._cap.read()
                 if not ok or frame is None:
+                    self._fail_count += 1
+                    if self._fail_count > 100:
+                        self._restart_backend()
                     time.sleep(0.01)
                     continue
             else:
                 raise ValueError(f"Unknown backend: {self.backend}")
 
-            # เก็บเฟรมล่าสุดลงคิว โดยไม่สร้างสำเนาเพิ่มเพื่อความเร็วและประหยัดหน่วยความจำ
+            self._fail_count = 0
+            self._last_frame = frame
             frame_copy = frame
             if self._q.full():
                 with silent():
@@ -276,7 +340,7 @@ class CameraWorker:
                 return self._q.get_nowait()
             except Empty:
                 continue
-        return None
+        return self._last_frame
 
     async def stop(self) -> None:
         self._stop_evt.set()
