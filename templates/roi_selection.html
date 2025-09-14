@@ -107,6 +107,11 @@
             URL.revokeObjectURL(video.src);
         };
 
+        function clearFrame() {
+            video.src = '';
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+        }
+
         async function loadSources() {
             const res = await fetch("/source_list");
             const data = await res.json();
@@ -160,6 +165,7 @@
                 stopBtn.disabled = true;
                 startBtn.disabled = false;
                 hasStarted = false;
+                clearFrame();
                 console.log("ROI stream closed");
             };
         }
@@ -184,6 +190,7 @@
                 startBtn.disabled = false;
                 startBtn.textContent = "Start";
                 stopBtn.disabled = true;
+                clearFrame();
             }
         }
 
@@ -191,6 +198,7 @@
             if (hasStarted) return;
             if (isStreaming) return;
             hasStarted = true;
+            clearFrame();
             const name = document.getElementById("sourceSelect").value;
             if (!name) {
                 if (typeof showAlert === 'function') showAlert('Select source first', 'error');
@@ -244,6 +252,7 @@
             hasStarted = false;
             stopBtn.disabled = true;
             startBtn.disabled = false;
+            clearFrame();
         }
 
         frameContainer.addEventListener('click', (e) => {
