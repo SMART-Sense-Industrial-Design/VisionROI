@@ -1,7 +1,7 @@
 import faulthandler
 faulthandler.enable()
 
-from quart import Quart, render_template, websocket, request, jsonify, send_file, redirect, Response
+from quart import Quart, render_template, websocket, request, jsonify, redirect, Response
 import asyncio
 import cv2
 from camera_worker import CameraWorker

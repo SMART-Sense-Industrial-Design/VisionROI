@@ -1,4 +1,3 @@
-import logging
 from tests.stubs import stub_cv2
 
 stub_cv2()
