@@ -208,11 +208,14 @@ tg.start_send_text("สวัสดี")
 
 ## API/Endpoints
 
-- **POST `/start_inference/<cam_id>`** – เริ่มอ่านภาพและประมวลผล ROI ที่ส่งมา (หากไม่ส่ง `rois` จะโหลดจากไฟล์ของ source) พร้อมตั้งค่ากล้องจากข้อมูลใน body (`name`, `source`, `width`, `height`) โดย `cam_id` สามารถเป็นสตริงใด ๆ เพื่อแยกกล้องแต่ละหน้าตามต้องการ
+- **POST `/start_inference/<cam_id>`** – เริ่มอ่านภาพและประมวลผล ROI ที่ส่งมา (หากไม่ส่ง `rois` จะโหลดจากไฟล์ของ source) พร้อมตั้งค่ากล้องจากข้อมูลใน body (`name`, `source`, `width`, `height`, `stream_type`) และสามารถระบุ `group` เพื่อบังคับเลือก ROI group รวมถึง `interval` (หน่วยวินาที) เพื่อกำหนดช่วงเวลาการประมวลผล โดย `cam_id` สามารถเป็นสตริงใด ๆ เพื่อแยกกล้องแต่ละหน้าตามต้องการ
   ```json
   {
     "name": "cam1",
     "source": "0",
+    "stream_type": "ffmpeg",
+    "group": "p1",
+    "interval": 0.5,
     "rois": [
       {
         "id": "1",
@@ -230,7 +233,7 @@ tg.start_send_text("สวัสดี")
 
 - **POST `/stop_inference/<cam_id>`** – หยุดงาน inference
 
-- **POST `/start_roi_stream/<cam_id>`** – เริ่มส่งภาพสดสำหรับหน้าเลือก ROI พร้อมตั้งค่ากล้องจากข้อมูลใน body (`name`, `source`, `width`, `height`)
+- **POST `/start_roi_stream/<cam_id>`** – เริ่มส่งภาพสดสำหรับหน้าเลือก ROI พร้อมตั้งค่ากล้องจากข้อมูลใน body (`name`, `source`, `width`, `height`, `stream_type`)
 
 - **POST `/stop_roi_stream/<cam_id>`** – หยุดส่งภาพ ROI
 
