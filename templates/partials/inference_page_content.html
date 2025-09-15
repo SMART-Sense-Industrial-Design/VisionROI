@@ -214,6 +214,25 @@ function createController(cellId){
         }
 
 
+    function drawRois(){
+        if(!rois.length)return;
+        videoCtx.strokeStyle='red';
+        videoCtx.lineWidth=2;
+        rois.forEach(r=>{
+            if(Array.isArray(r.points)&&r.points.length){
+                videoCtx.beginPath();
+                videoCtx.moveTo(r.points[0].x,r.points[0].y);
+                for(let i=1;i<r.points.length;i++){
+                    videoCtx.lineTo(r.points[i].x,r.points[i].y);
+                }
+                videoCtx.closePath();
+                videoCtx.stroke();
+            }else if('x'in r&&'y'in r&&'width'in r&&'height'in r){
+                videoCtx.strokeRect(r.x,r.y,r.width,r.height);
+            }
+        });
+    }
+
     function openSocket(){
         socket=new WebSocket(`ws://${location.host}/ws/${cam}`);
         socket.binaryType='blob';
@@ -224,6 +243,7 @@ function createController(cellId){
                 video.height=bitmap.height;
             }
             videoCtx.drawImage(bitmap,0,0);
+            drawRois();
             bitmap.close();
         };
     }

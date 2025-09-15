@@ -13,7 +13,7 @@
                 <button id="cam1-stopButton" class="btn btn-danger" disabled>Stop</button>
                 <p id="cam1-status"></p>
                 <div class="video-wrapper">
-                    <img id="cam1-video" class="stream-video" />
+                    <canvas id="cam1-video" class="stream-video"></canvas>
                 </div>
             </div>
         </div>
@@ -49,7 +49,7 @@
         const cam = `inf_${cellId}`;
         const getEl = suffix => document.getElementById(`${cellId}-${suffix}`);
         const video = getEl('video');
-        video.onload = () => URL.revokeObjectURL(video.src);
+        const videoCtx = video.getContext('2d');
         const startButton = getEl('startButton');
         const stopButton = getEl('stopButton');
         const statusEl = getEl('status');
@@ -330,11 +330,8 @@
                 roiSocket = null;
             }
             stopLogUpdates();
-            // clear last frame and related data to free memory
-            if (video.src && video.src.startsWith('blob:')) {
-                URL.revokeObjectURL(video.src);
-            }
-            video.src = '';
+            // clear last frame
+            videoCtx.clearRect(0, 0, video.width, video.height);
             rois = [];
             allRois = [];
             roiGrid.innerHTML = '';
@@ -345,15 +342,37 @@
             showAlert('Inference stopped', 'info');
         }
 
+        function drawRois() {
+            if (!rois.length) return;
+            videoCtx.strokeStyle = 'red';
+            videoCtx.lineWidth = 2;
+            rois.forEach(r => {
+                if (Array.isArray(r.points) && r.points.length) {
+                    videoCtx.beginPath();
+                    videoCtx.moveTo(r.points[0].x, r.points[0].y);
+                    for (let i = 1; i < r.points.length; i++) {
+                        videoCtx.lineTo(r.points[i].x, r.points[i].y);
+                    }
+                    videoCtx.closePath();
+                    videoCtx.stroke();
+                } else if ('x' in r && 'y' in r && 'width' in r && 'height' in r) {
+                    videoCtx.strokeRect(r.x, r.y, r.width, r.height);
+                }
+            });
+        }
+
         function openSocket() {
             socket = new WebSocket(`ws://${location.host}/ws/${cam}`);
-            socket.binaryType = 'arraybuffer';
-            socket.onmessage = function(event) {
-                if (video.src && video.src.startsWith('blob:')) {
-                    URL.revokeObjectURL(video.src);
+            socket.binaryType = 'blob';
+            socket.onmessage = async function(event) {
+                const bitmap = await createImageBitmap(event.data);
+                if (video.width !== bitmap.width || video.height !== bitmap.height) {
+                    video.width = bitmap.width;
+                    video.height = bitmap.height;
                 }
-                const blob = new Blob([event.data], { type: 'image/jpeg' });
-                video.src = URL.createObjectURL(blob);
+                videoCtx.drawImage(bitmap, 0, 0);
+                drawRois();
+                bitmap.close();
             };
         }
 
