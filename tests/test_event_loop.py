@@ -72,3 +72,35 @@ def test_event_loop_responsive():
     assert ticks > 20
     # ยืนยันว่ามีการอ่านเฟรมจำนวนมาก
     assert frames >= 9
+
+
+def test_event_loop_responsive_heavy_imencode():
+    async def main():
+        worker = app.CameraWorker(0, asyncio.get_running_loop())
+        assert worker.start()
+        app.camera_workers["0"] = worker
+        app.inference_rois["0"] = []
+        app.active_sources["0"] = ""
+
+        def heavy_imencode(ext, frame):
+            time.sleep(0.05)
+            return True, b"data"
+
+        app.cv2.imencode = heavy_imencode
+
+        loop_task = asyncio.create_task(app.run_inference_loop("0"))
+        tick_task = asyncio.create_task(ticker())
+
+        ticks = await tick_task
+        loop_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await loop_task
+
+        frames = worker._cap.frames_read
+        await worker.stop()
+        app.camera_workers["0"] = None
+        return ticks, frames
+
+    ticks, frames = asyncio.run(main())
+    assert ticks > 20
+    assert frames >= 9
