@@ -328,19 +328,20 @@ class CameraWorker:
             if self.read_interval > 0:
                 time.sleep(self.read_interval)
 
-    async def read(self):
-        """อ่านเฟรมล่าสุดแบบ non-blocking"""
+    async def read(self, timeout: float = 0.1):
+        """อ่านเฟรมล่าสุดแบบ non-blocking; คืน ``None`` เมื่อรอเกินกำหนด"""
         try:
             return self._q.get_nowait()
         except Empty:
             pass
-        for _ in range(3):
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
             await asyncio.sleep(0.03)
             try:
                 return self._q.get_nowait()
             except Empty:
                 continue
-        return self._last_frame
+        return None
 
     async def stop(self) -> None:
         self._stop_evt.set()
