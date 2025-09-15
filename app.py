@@ -60,10 +60,15 @@ ALLOWED_ROI_DIR = os.path.realpath("data_sources")
 # Global inference queue & thread pool
 # =========================
 MAX_WORKERS = os.cpu_count() or 1
+# ขนาดคิวสามารถปรับได้ผ่านตัวแปรสภาพแวดล้อม INFERENCE_QUEUE_SIZE
+INFERENCE_QUEUE_SIZE = int(os.getenv("INFERENCE_QUEUE_SIZE", MAX_WORKERS * 10))
 _INFERENCE_QUEUE: Queue[
     tuple[Callable, tuple, asyncio.Future, asyncio.AbstractEventLoop] | None
-] = Queue(maxsize=MAX_WORKERS * 10)
+] = Queue(maxsize=INFERENCE_QUEUE_SIZE)
 _EXECUTOR: ThreadPoolExecutor | None = None
+
+# นับจำนวน ROI ที่ถูกทิ้งเมื่อคิวเต็ม
+dropped_roi_count = 0
 
 
 def _inference_worker():
@@ -454,6 +459,7 @@ async def run_inference_loop(cam_id: str):
     module_cache: dict[str, tuple[ModuleType | None, bool, bool, bool]] = {}
 
     async def process_frame(frame):
+        global dropped_roi_count
         rois = inference_rois.get(cam_id, [])
         forced_group = inference_groups.get(cam_id)
         if not rois:
@@ -589,19 +595,19 @@ async def run_inference_loop(cam_id: str):
                         if takes_interval:
                             args.append(inference_intervals.get(cam_id, 1.0))
                         fut = loop.create_future()
-                        enqueued = False
-                        while not enqueued:
-                            try:
-                                _INFERENCE_QUEUE.put_nowait(
-                                    (process_fn, tuple(args), fut, loop)
-                                )
-                                enqueued = True
-                            except Full:
-                                await asyncio.sleep(0.01)
-                            except Exception:
-                                fut.cancel()
-                                break
-                        if not enqueued:
+                        try:
+                            _INFERENCE_QUEUE.put_nowait(
+                                (process_fn, tuple(args), fut, loop)
+                            )
+                        except Full:
+                            dropped_roi_count += 1
+                            fut.cancel()
+                            print(
+                                f"inference queue full, drop ROI {r.get('id', i)} (total dropped: {dropped_roi_count})"
+                            )
+                            continue
+                        except Exception:
+                            fut.cancel()
                             continue
 
                         def _on_done(
