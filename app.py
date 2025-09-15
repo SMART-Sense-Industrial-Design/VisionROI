@@ -476,6 +476,17 @@ def get_roi_result_queue(cam_id: str) -> asyncio.Queue[str | None]:
 
 
 # =========================
+# ROI utilities
+# =========================
+def encode_roi(roi_img: "np.ndarray") -> str:
+    """Encode ROI image to base64 JPEG string."""
+    _, roi_buf = cv2.imencode(
+        '.jpg', roi_img, [int(cv2.IMWRITE_JPEG_QUALITY), 80]
+    )
+    return base64.b64encode(roi_buf).decode('ascii')
+
+
+# =========================
 # Frame readers
 # =========================
 async def read_and_queue_frame(
@@ -684,10 +695,12 @@ async def run_inference_loop(cam_id: str):
                                 if q.full():
                                     q.get_nowait()
                                 q.put_nowait(payload)
+
                             except asyncio.CancelledError:
                                 return
                             except Exception:
                                 return
+
 
                         fut.add_done_callback(_on_done)
             else:
