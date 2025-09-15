@@ -2,7 +2,7 @@ import asyncio
 from queue import Queue
 
 def test_camera_worker_read_returns_none_on_timeout():
-    import sys, importlib
+    import sys
     import camera_worker
 
     worker = camera_worker.CameraWorker.__new__(camera_worker.CameraWorker)
