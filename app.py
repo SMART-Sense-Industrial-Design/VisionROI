@@ -589,19 +589,15 @@ async def run_inference_loop(cam_id: str):
                         if takes_interval:
                             args.append(inference_intervals.get(cam_id, 1.0))
                         fut = loop.create_future()
-                        enqueued = False
-                        while not enqueued:
-                            try:
-                                _INFERENCE_QUEUE.put_nowait(
-                                    (process_fn, tuple(args), fut, loop)
-                                )
-                                enqueued = True
-                            except Full:
-                                await asyncio.sleep(0.01)
-                            except Exception:
-                                fut.cancel()
-                                break
-                        if not enqueued:
+                        try:
+                            _INFERENCE_QUEUE.put_nowait(
+                                (process_fn, tuple(args), fut, loop)
+                            )
+                        except Full:
+                            fut.cancel()
+                            continue
+                        except Exception:
+                            fut.cancel()
                             continue
 
                         def _on_done(
