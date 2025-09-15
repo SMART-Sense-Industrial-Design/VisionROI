@@ -48,6 +48,7 @@ active_sources: dict[str, str] = {}
 save_roi_flags: dict[str, bool] = {}
 inference_groups: dict[str, str | None] = {}
 inference_intervals: dict[str, float] = {}
+last_inference_times: dict[str, float] = {}
 
 STATE_FILE = "service_state.json"
 PAGE_SCORE_THRESHOLD = 0.4
@@ -146,6 +147,7 @@ def _free_cam_state(cam_id: str):
     inference_groups.pop(cam_id, None)
     inference_rois.pop(cam_id, None)
     inference_intervals.pop(cam_id, None)
+    last_inference_times.pop(cam_id, None)
 
     # Queues: drain & drop
     q = frame_queues.pop(cam_id, None)
@@ -458,6 +460,11 @@ async def run_inference_loop(cam_id: str):
         forced_group = inference_groups.get(cam_id)
         if not rois:
             return cv2.resize(frame, (0, 0), fx=0.5, fy=0.5)
+        now = time.time()
+        interval = inference_intervals.get(cam_id, 1.0)
+        if now - last_inference_times.get(cam_id, 0.0) < interval:
+            return cv2.resize(frame, (0, 0), fx=0.5, fy=0.5)
+        last_inference_times[cam_id] = now
 
         save_flag = bool(save_roi_flags.get(cam_id))
         output = None
@@ -484,18 +491,18 @@ async def run_inference_loop(cam_id: str):
             max_h = int(max(height_a, height_b))
             dst = np.array([[0, 0], [max_w - 1, 0], [max_w - 1, max_h - 1], [0, max_h - 1]], dtype=np.float32)
             matrix = cv2.getPerspectiveTransform(src, dst)
-            roi = cv2.warpPerspective(frame, matrix, (max_w, max_h))
+            roi = await asyncio.to_thread(cv2.warpPerspective, frame, matrix, (max_w, max_h))
             template = r.get('_template')
             if template is not None:
                 try:
-                    roi_gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+                    roi_gray = await asyncio.to_thread(cv2.cvtColor, roi, cv2.COLOR_BGR2GRAY)
                 except Exception:
                     roi_gray = None
                 if roi_gray is not None:
                     if roi_gray.shape != template.shape:
-                        roi_gray = cv2.resize(roi_gray, (template.shape[1], template.shape[0]))
+                        roi_gray = await asyncio.to_thread(cv2.resize, roi_gray, (template.shape[1], template.shape[0]))
                     try:
-                        res = cv2.matchTemplate(roi_gray, template, cv2.TM_CCOEFF_NORMED)
+                        res = await asyncio.to_thread(cv2.matchTemplate, roi_gray, template, cv2.TM_CCOEFF_NORMED)
                         score = float(res[0][0])
                         scores.append({'page': r.get('page', ''), 'score': score})
                         if score > best_score:
@@ -580,7 +587,7 @@ async def run_inference_loop(cam_id: str):
                         max_h = int(max(height_a, height_b))
                         dst = np.array([[0, 0], [max_w - 1, 0], [max_w - 1, max_h - 1], [0, max_h - 1]], dtype=np.float32)
                         matrix = cv2.getPerspectiveTransform(src, dst)
-                        roi = cv2.warpPerspective(frame, matrix, (max_w, max_h))
+                        roi = await asyncio.to_thread(cv2.warpPerspective, frame, matrix, (max_w, max_h))
                         args = [roi, r.get('id', str(i)), save_flag]
                         if takes_source:
                             args.append(active_sources.get(cam_id, ''))
@@ -1296,6 +1303,7 @@ async def stop_inference(cam_id: str):
     inference_groups.pop(cam_id, None)
     save_roi_flags.pop(cam_id, None)
     inference_intervals.pop(cam_id, None)
+    last_inference_times.pop(cam_id, None)
 
     # NEW: fully free per-camera state & trim memory
     _free_cam_state(cam_id)
