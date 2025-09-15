@@ -123,6 +123,76 @@ _start_inference_workers()
 
 
 # =========================
+# ROI processing helpers
+# =========================
+ROI_MATRIX_CACHE: dict[tuple[float, ...], tuple[np.ndarray, tuple[int, int]]] = {}
+
+
+def _process_roi_worker(
+    process_fn: Callable,
+    frame,
+    points,
+    roi_id,
+    save_flag,
+    frame_time,
+    source=None,
+    cam_id=None,
+    interval=None,
+):
+    pts = np.array(points, dtype=np.float32)
+    key = tuple(pts.flatten())
+    entry = ROI_MATRIX_CACHE.get(key)
+    if entry is None:
+        width_a = np.linalg.norm(pts[0] - pts[1])
+        width_b = np.linalg.norm(pts[2] - pts[3])
+        max_w = int(max(width_a, width_b))
+        height_a = np.linalg.norm(pts[0] - pts[3])
+        height_b = np.linalg.norm(pts[1] - pts[2])
+        max_h = int(max(height_a, height_b))
+        dst = np.array(
+            [[0, 0], [max_w - 1, 0], [max_w - 1, max_h - 1], [0, max_h - 1]],
+            dtype=np.float32,
+        )
+        matrix = cv2.getPerspectiveTransform(pts, dst)
+        entry = (matrix, (max_w, max_h))
+        ROI_MATRIX_CACHE[key] = entry
+    matrix, (max_w, max_h) = entry
+    roi = cv2.warpPerspective(frame, matrix, (max_w, max_h))
+    args = [roi, roi_id, save_flag]
+    if source is not None:
+        args.append(source)
+    if cam_id is not None:
+        args.append(cam_id)
+    if interval is not None:
+        args.append(interval)
+    res = process_fn(*args)
+    if inspect.isawaitable(res):
+        res = asyncio.run(res)
+    if res is None:
+        return None
+    if isinstance(res, str):
+        result_text = res
+    elif isinstance(res, dict) and 'text' in res:
+        result_text = str(res['text'])
+    else:
+        return None
+    _, roi_buf = cv2.imencode(
+        '.jpg', roi, [int(cv2.IMWRITE_JPEG_QUALITY), 80]
+    )
+    roi_b64 = base64.b64encode(roi_buf).decode('ascii')
+    payload = json.dumps(
+        {
+            'id': roi_id,
+            'image': roi_b64,
+            'text': result_text,
+            'frame_time': frame_time,
+            'result_time': time.time(),
+        }
+    )
+    return payload
+
+
+# =========================
 # Memory helpers (free & trim)
 # =========================
 def _malloc_trim():
@@ -572,16 +642,14 @@ async def run_inference_loop(cam_id: str):
                     if not callable(process_fn):
                         print(f"process function not found in module '{mod_name}' for ROI {r.get('id', i)}")
                     else:
-                        width_a = np.linalg.norm(src[0] - src[1])
-                        width_b = np.linalg.norm(src[2] - src[3])
-                        max_w = int(max(width_a, width_b))
-                        height_a = np.linalg.norm(src[0] - src[3])
-                        height_b = np.linalg.norm(src[1] - src[2])
-                        max_h = int(max(height_a, height_b))
-                        dst = np.array([[0, 0], [max_w - 1, 0], [max_w - 1, max_h - 1], [0, max_h - 1]], dtype=np.float32)
-                        matrix = cv2.getPerspectiveTransform(src, dst)
-                        roi = cv2.warpPerspective(frame, matrix, (max_w, max_h))
-                        args = [roi, r.get('id', str(i)), save_flag]
+                        args = [
+                            process_fn,
+                            frame,
+                            src,
+                            r.get('id', str(i)),
+                            save_flag,
+                            frame_time,
+                        ]
                         if takes_source:
                             args.append(active_sources.get(cam_id, ''))
                         if takes_cam_id:
@@ -593,7 +661,7 @@ async def run_inference_loop(cam_id: str):
                         while not enqueued:
                             try:
                                 _INFERENCE_QUEUE.put_nowait(
-                                    (process_fn, tuple(args), fut, loop)
+                                    (_process_roi_worker, tuple(args), fut, loop)
                                 )
                                 enqueued = True
                             except Full:
@@ -606,46 +674,20 @@ async def run_inference_loop(cam_id: str):
 
                         def _on_done(
                             f: asyncio.Future,
-                            roi_img=roi,
-                            roi_id=r.get('id', i),
                             cam=cam_id,
-                            frame_time=frame_time,
                         ) -> None:
                             try:
-                                result = f.result()
-                                if result is None:
+                                payload = f.result()
+                                if not payload:
                                     return
-                                if isinstance(result, str):
-                                    result_text = result
-                                elif isinstance(result, dict) and 'text' in result:
-                                    result_text = str(result['text'])
-                                else:
-                                    return
+                                q = get_roi_result_queue(cam)
+                                if q.full():
+                                    q.get_nowait()
+                                q.put_nowait(payload)
                             except asyncio.CancelledError:
                                 return
                             except Exception:
                                 return
-                            try:
-                                result_time = time.time()
-                                _, roi_buf = cv2.imencode(
-                                    '.jpg', roi_img, [int(cv2.IMWRITE_JPEG_QUALITY), 80]
-                                )
-                                roi_b64 = base64.b64encode(roi_buf).decode('ascii')
-                                q = get_roi_result_queue(cam)
-                                payload = json.dumps(
-                                    {
-                                        'id': roi_id,
-                                        'image': roi_b64,
-                                        'text': result_text,
-                                        'frame_time': frame_time,
-                                        'result_time': result_time,
-                                    }
-                                )
-                                if q.full():
-                                    q.get_nowait()
-                                q.put_nowait(payload)
-                            except Exception:
-                                pass
 
                         fut.add_done_callback(_on_done)
             else:
