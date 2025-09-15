@@ -424,8 +424,8 @@ async def read_and_queue_frame(
         return
     if frame_processor:
         frame = await frame_processor(frame)
-    if frame is None:
-        return
+        if frame is None:
+            return
     try:
         encoded, buffer = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
     except Exception:
