@@ -406,6 +406,17 @@ def get_roi_result_queue(cam_id: str) -> asyncio.Queue[str | None]:
 
 
 # =========================
+# ROI utilities
+# =========================
+def encode_roi(roi_img: "np.ndarray") -> str:
+    """Encode ROI image to base64 JPEG string."""
+    _, roi_buf = cv2.imencode(
+        '.jpg', roi_img, [int(cv2.IMWRITE_JPEG_QUALITY), 80]
+    )
+    return base64.b64encode(roi_buf).decode('ascii')
+
+
+# =========================
 # Frame readers
 # =========================
 async def read_and_queue_frame(
@@ -625,27 +636,29 @@ async def run_inference_loop(cam_id: str):
                                 return
                             except Exception:
                                 return
-                            try:
-                                result_time = time.time()
-                                _, roi_buf = cv2.imencode(
-                                    '.jpg', roi_img, [int(cv2.IMWRITE_JPEG_QUALITY), 80]
-                                )
-                                roi_b64 = base64.b64encode(roi_buf).decode('ascii')
-                                q = get_roi_result_queue(cam)
-                                payload = json.dumps(
-                                    {
-                                        'id': roi_id,
-                                        'image': roi_b64,
-                                        'text': result_text,
-                                        'frame_time': frame_time,
-                                        'result_time': result_time,
-                                    }
-                                )
-                                if q.full():
-                                    q.get_nowait()
-                                q.put_nowait(payload)
-                            except Exception:
-                                pass
+                            async def _send_result() -> None:
+                                try:
+                                    result_time = time.time()
+                                    roi_b64 = await asyncio.to_thread(
+                                        encode_roi, roi_img
+                                    )
+                                    q = get_roi_result_queue(cam)
+                                    payload = json.dumps(
+                                        {
+                                            'id': roi_id,
+                                            'image': roi_b64,
+                                            'text': result_text,
+                                            'frame_time': frame_time,
+                                            'result_time': result_time,
+                                        }
+                                    )
+                                    if q.full():
+                                        q.get_nowait()
+                                    q.put_nowait(payload)
+                                except Exception:
+                                    pass
+
+                            asyncio.create_task(_send_result())
 
                         fut.add_done_callback(_on_done)
             else:
