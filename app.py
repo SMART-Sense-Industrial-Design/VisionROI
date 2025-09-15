@@ -24,7 +24,7 @@ import gc
 import time
 from typing import Callable, Awaitable, Any
 from concurrent.futures import ThreadPoolExecutor
-from queue import Queue, Empty
+from queue import Queue, Empty, Full
 try:
     from websockets.exceptions import ConnectionClosed
 except Exception:
@@ -60,9 +60,9 @@ ALLOWED_ROI_DIR = os.path.realpath("data_sources")
 # Global inference queue & thread pool
 # =========================
 MAX_WORKERS = os.cpu_count() or 1
-_INFERENCE_QUEUE: Queue[tuple[Callable, tuple, asyncio.Future] | None] = Queue(
-    maxsize=MAX_WORKERS * 10
-)
+_INFERENCE_QUEUE: Queue[
+    tuple[Callable, tuple, asyncio.Future, asyncio.AbstractEventLoop] | None
+] = Queue(maxsize=MAX_WORKERS * 10)
 _EXECUTOR: ThreadPoolExecutor | None = None
 
 
@@ -72,14 +72,14 @@ def _inference_worker():
         if item is None:
             _INFERENCE_QUEUE.task_done()
             break
-        func, args, fut = item
+        func, args, fut, loop = item
         try:
             res = func(*args)
             if inspect.isawaitable(res):
                 res = asyncio.run(res)
-            fut.set_result(res)
+            loop.call_soon_threadsafe(fut.set_result, res)
         except Exception as e:
-            fut.set_exception(e)
+            loop.call_soon_threadsafe(fut.set_exception, e)
         finally:
             _INFERENCE_QUEUE.task_done()
 
@@ -105,9 +105,9 @@ def _stop_inference_workers() -> None:
         if item is None:
             _INFERENCE_QUEUE.task_done()
             continue
-        _, _, fut = item
+        _, _, fut, loop = item
         if fut and not fut.done():
-            fut.cancel()
+            loop.call_soon_threadsafe(fut.cancel)
         _INFERENCE_QUEUE.task_done()
     # ส่งสัญญาณหยุดให้ worker
     for _ in range(MAX_WORKERS):
@@ -589,11 +589,19 @@ async def run_inference_loop(cam_id: str):
                         if takes_interval:
                             args.append(inference_intervals.get(cam_id, 1.0))
                         fut = loop.create_future()
-                        try:
-                            if _INFERENCE_QUEUE.full():
-                                _INFERENCE_QUEUE.get_nowait()
-                            _INFERENCE_QUEUE.put_nowait((process_fn, tuple(args), fut))
-                        except Exception:
+                        enqueued = False
+                        while not enqueued:
+                            try:
+                                _INFERENCE_QUEUE.put_nowait(
+                                    (process_fn, tuple(args), fut, loop)
+                                )
+                                enqueued = True
+                            except Full:
+                                await asyncio.sleep(0.01)
+                            except Exception:
+                                fut.cancel()
+                                break
+                        if not enqueued:
                             continue
 
                         def _on_done(
