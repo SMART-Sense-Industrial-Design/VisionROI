@@ -427,7 +427,9 @@ async def read_and_queue_frame(
     if frame is None:
         return
     try:
-        encoded, buffer = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
+        encoded, buffer = await asyncio.to_thread(
+            cv2.imencode, '.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 80]
+        )
     except Exception:
         await asyncio.sleep(0.01)
         return
