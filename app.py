@@ -621,6 +621,8 @@ async def run_inference_loop(cam_id: str):
                                     result_text = str(result['text'])
                                 else:
                                     return
+                            except asyncio.CancelledError:
+                                return
                             except Exception:
                                 return
                             try:
