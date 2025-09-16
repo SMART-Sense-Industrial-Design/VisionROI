@@ -158,6 +158,29 @@
             roiGrid.appendChild(item);
         }
 
+        function applyRoiResult(result, fallbackFrameTime) {
+            if (!result) return;
+            const roiId = result.id;
+            if (roiId === undefined || roiId === null) return;
+            ensureRoiItem(roiId);
+            const imgEl = document.getElementById(`${cellId}-roi-${roiId}`);
+            if (imgEl && Object.prototype.hasOwnProperty.call(result, 'image')) {
+                imgEl.src = result.image ? `data:image/jpeg;base64,${result.image}` : '';
+            }
+            const textEl = document.getElementById(`${cellId}-text-${roiId}`);
+            if (textEl) {
+                const text = result.text ?? '';
+                textEl.textContent = `OCR: ${text}`;
+            }
+            const timeEl = document.getElementById(`${cellId}-time-${roiId}`);
+            if (timeEl) {
+                const ts = typeof result.frame_time === 'number'
+                    ? result.frame_time
+                    : fallbackFrameTime;
+                timeEl.textContent = ts ? `เวลา: ${formatTs(ts)}` : '';
+            }
+        }
+
         function startLogUpdates(sourceName){
             currentLogSource = sourceName;
             stopLogUpdates();
@@ -276,6 +299,11 @@
 
                     : []);
             roiGrid.innerHTML = '';
+            rois.forEach(r => {
+                if (r && r.id !== undefined && r.id !== null) {
+                    ensureRoiItem(r.id);
+                }
+            });
 
             let startData;
             let startRes;
@@ -362,22 +390,15 @@
             roiSocket.onmessage = function(event) {
                 try {
                     const data = JSON.parse(event.data);
-                    if (Object.prototype.hasOwnProperty.call(data, 'id')) {
+                    if (Array.isArray(data.results)) {
+                        const fallbackFrameTime =
+                            typeof data.frame_time === 'number' ? data.frame_time : undefined;
                         setTimeout(() => {
-                            ensureRoiItem(data.id);
-                            const imgEl = document.getElementById(`${cellId}-roi-${data.id}`);
-                            if (imgEl) {
-                                imgEl.src = `data:image/jpeg;base64,${data.image}`;
-                            }
-                            const textEl = document.getElementById(`${cellId}-text-${data.id}`);
-                            if (textEl) {
-                                textEl.textContent = `OCR: ${data.text || ''}`;
-                            }
-                            const timeEl = document.getElementById(`${cellId}-time-${data.id}`);
-                            if (timeEl) {
-                                const frameTs = formatTs(data.frame_time);
-                                timeEl.textContent = `เวลา: ${frameTs}`;
-                            }
+                            data.results.forEach(item => applyRoiResult(item, fallbackFrameTime));
+                        }, 0);
+                    } else if (Object.prototype.hasOwnProperty.call(data, 'id')) {
+                        setTimeout(() => {
+                            applyRoiResult(data);
                         }, 0);
                     }
                 } catch (e) {
@@ -418,6 +439,11 @@
                 });
                 if (rois.length > 0) {
                     roiGrid.innerHTML = '';
+                    rois.forEach(r => {
+                        if (r && r.id !== undefined && r.id !== null) {
+                            ensureRoiItem(r.id);
+                        }
+                    });
                     openRoiSocket();
                 }
                 startLogUpdates(cfg.name);
