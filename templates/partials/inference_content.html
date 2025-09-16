@@ -61,6 +61,14 @@
         const intervalInput = getEl('intervalInput');
         let logTimer;
         let currentLogSource;
+        const roiUpdateQueue = [];
+        const scheduleRoiFrame = typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function'
+            ? cb => window.requestAnimationFrame(cb)
+            : cb => cb();
+        const cancelRoiFrame = typeof window !== 'undefined' && typeof window.cancelAnimationFrame === 'function'
+            ? id => window.cancelAnimationFrame(id)
+            : () => {};
+        let roiRafId = null;
         intervalInput.value = localStorage.getItem(`${cellId}-interval`) || '1';
 
         const formatTs = ts => {
@@ -317,6 +325,35 @@
             setRunningUI();
         }
 
+        function flushRoiQueue() {
+            roiRafId = null;
+            while (roiUpdateQueue.length > 0) {
+                const data = roiUpdateQueue.shift();
+                if (!data || !Object.prototype.hasOwnProperty.call(data, 'id')) continue;
+                ensureRoiItem(data.id);
+                const imgEl = document.getElementById(`${cellId}-roi-${data.id}`);
+                if (imgEl && data.image) {
+                    imgEl.src = `data:image/jpeg;base64,${data.image}`;
+                }
+                const textEl = document.getElementById(`${cellId}-text-${data.id}`);
+                if (textEl) {
+                    textEl.textContent = `OCR: ${data.text || ''}`;
+                }
+                const timeEl = document.getElementById(`${cellId}-time-${data.id}`);
+                if (timeEl) {
+                    const frameTs = formatTs(data.frame_time);
+                    timeEl.textContent = `เวลา: ${frameTs}`;
+                }
+            }
+        }
+
+        function enqueueRoiUpdate(data) {
+            roiUpdateQueue.push(data);
+            if (roiRafId === null) {
+                roiRafId = scheduleRoiFrame(flushRoiQueue);
+            }
+        }
+
         async function stopInference() {
             if (!running) return;
             running = false;
@@ -329,6 +366,11 @@
                 roiSocket.close();
                 roiSocket = null;
             }
+            if (roiRafId !== null) {
+                cancelRoiFrame(roiRafId);
+                roiRafId = null;
+            }
+            roiUpdateQueue.length = 0;
             stopLogUpdates();
             // clear last frame and related data to free memory
             if (video.src && video.src.startsWith('blob:')) {
@@ -363,22 +405,7 @@
                 try {
                     const data = JSON.parse(event.data);
                     if (Object.prototype.hasOwnProperty.call(data, 'id')) {
-                        setTimeout(() => {
-                            ensureRoiItem(data.id);
-                            const imgEl = document.getElementById(`${cellId}-roi-${data.id}`);
-                            if (imgEl) {
-                                imgEl.src = `data:image/jpeg;base64,${data.image}`;
-                            }
-                            const textEl = document.getElementById(`${cellId}-text-${data.id}`);
-                            if (textEl) {
-                                textEl.textContent = `OCR: ${data.text || ''}`;
-                            }
-                            const timeEl = document.getElementById(`${cellId}-time-${data.id}`);
-                            if (timeEl) {
-                                const frameTs = formatTs(data.frame_time);
-                                timeEl.textContent = `เวลา: ${frameTs}`;
-                            }
-                        }, 0);
+                        enqueueRoiUpdate(data);
                     }
                 } catch (e) {
                     console.error('ROI message error', e);
