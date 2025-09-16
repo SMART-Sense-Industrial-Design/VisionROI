@@ -171,6 +171,47 @@ VisionROI/
 1. รัน `python app.py` (ระบุพอร์ตเองได้ด้วย `--port`; ระหว่างพัฒนาอาจใช้ `quart --app app:app run --reload --port 12000`)
 2. เปิดเบราว์เซอร์ไปที่ `http://localhost:5000/` หรือพอร์ตที่กำหนด (ระบบจะรีไดเรกต์ไปหน้า `/home`)
 
+### ตัวอย่าง: ทดสอบด้วยไฟล์ภาพนิ่ง (`example.jpg`)
+ในกรณีที่ต้องการทดสอบฟีเจอร์ของ VisionROI โดยไม่มีสตรีมวิดีโอหรือกล้องจริง สามารถใช้ไฟล์ภาพนิ่งเพื่อจำลองแหล่งภาพได้ตามขั้นตอนนี้ (สมมติว่ามีไฟล์ `example.jpg` อยู่ในโฟลเดอร์โปรเจ็กต์แล้ว):
+
+1. รันเซิร์ฟเวอร์ด้วย `python app.py` ตามปกติ
+2. เปิดเทอร์มินัลอีกหน้าหนึ่ง แล้วลงทะเบียน source ชื่อ `demo_image` (สั่งครั้งแรกครั้งเดียว หากสร้างไว้แล้วสามารถข้ามได้)
+
+   ```bash
+   curl -X POST "http://localhost:5000/create_source" \
+        -F "name=demo_image" \
+        -F "source=/absolute/path/to/example.jpg" \
+        -F "stream_type=opencv"
+   ```
+
+   > **หมายเหตุ**: แทนที่ `/absolute/path/to/example.jpg` ด้วยพาธแบบ *absolute* ของไฟล์ในเครื่องคุณ (บน Windows สามารถใช้รูปแบบ `C:\\path\\to\\example.jpg`)
+
+3. สั่งให้ worker อ่านไฟล์ภาพนิ่งเพื่อจำลองสตรีมวิดีโอ
+
+   ```bash
+   curl -X POST "http://localhost:5000/start_roi_stream/demo_image" \
+        -H "Content-Type: application/json" \
+        -d '{
+              "name": "demo_image",
+              "source": "/absolute/path/to/example.jpg",
+              "stream_type": "opencv"
+            }'
+   ```
+
+4. ขอภาพตัวอย่างจาก worker เพื่อยืนยันว่าอ่านภาพนิ่งได้แล้ว (ไฟล์ `snapshot.jpg` จะมีเนื้อหาเดียวกับ `example.jpg`)
+
+   ```bash
+   curl "http://localhost:5000/ws_snapshot/demo_image" --output snapshot.jpg
+   ```
+
+5. เมื่อทดลองเสร็จให้หยุดการอ่านภาพนิ่ง
+
+   ```bash
+   curl -X POST "http://localhost:5000/stop_roi_stream/demo_image"
+   ```
+
+เมื่อมีการสร้าง source `demo_image` แล้ว สามารถเปิดหน้า `/roi` หรือ `/inference` เพื่อทดลองเลือก ROI หรือเรียกใช้โมดูลต่าง ๆ กับภาพนิ่งดังกล่าวได้ทันที (ระบบจะใช้เฟรมเดิมจากไฟล์ `example.jpg` ซ้ำ)
+
 ## โฟลว์การทำงานจากการสร้าง Source ถึงการรัน Inference Group
 1. ไปที่หน้า `/create_source` เพื่อสร้าง source ใหม่ โดยกรอกชื่อและแหล่งกล้อง
 2. เลือก source ที่ต้องการในหน้า UI (ระบบจะตั้งค่ากล้องให้อัตโนมัติเมื่อเริ่มสตรีมภาพหรือทำ inference)
