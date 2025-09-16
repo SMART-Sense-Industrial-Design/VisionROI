@@ -54,6 +54,7 @@ latest_frame_times: dict[str, float] = {}
 
 STATE_FILE = "service_state.json"
 PAGE_SCORE_THRESHOLD = 0.4
+FRAME_TIME_DRIFT_THRESHOLD = 0.2  # seconds
 
 app = Quart(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 100 * 1024 * 1024
@@ -475,6 +476,68 @@ async def read_and_queue_frame(
 # =========================
 # Loops
 # =========================
+def _draw_inference_overlays(
+    frame,
+    rois_snapshot: list[dict],
+    forced_group: str | None,
+    current_output: str,
+):
+    if np is None:
+        return frame.copy()
+    display_frame = frame.copy()
+
+    for i, r in enumerate(rois_snapshot):
+        if r.get("type") != "page":
+            continue
+        pts = r.get("points", [])
+        if len(pts) != 4:
+            continue
+        src = np.array([[p["x"], p["y"]] for p in pts], dtype=np.float32)
+        src_int = src.astype(int)
+        cv2.polylines(display_frame, [src_int], True, (0, 255, 0), 2)
+        label_pt = src_int[0]
+        cv2.putText(
+            display_frame,
+            str(r.get("id", i + 1)),
+            (int(label_pt[0]), max(0, int(label_pt[1]) - 5)),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.5,
+            (0, 255, 0),
+            1,
+            cv2.LINE_AA,
+        )
+
+    for i, r in enumerate(rois_snapshot):
+        if r.get("type") != "roi":
+            continue
+        if forced_group != "all":
+            if not current_output or r.get("group") != current_output:
+                continue
+        pts = r.get("points", [])
+        if len(pts) != 4:
+            continue
+        src = np.array([[p["x"], p["y"]] for p in pts], dtype=np.float32)
+        src_int = src.astype(int)
+        cv2.polylines(display_frame, [src_int], True, (255, 0, 0), 2)
+        label_pt = src_int[0]
+        cv2.putText(
+            display_frame,
+            str(r.get("id", i + 1)),
+            (int(label_pt[0]), max(0, int(label_pt[1]) - 5)),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.5,
+            (255, 0, 0),
+            1,
+            cv2.LINE_AA,
+        )
+
+    return display_frame
+
+
+def _resize_display_frame(frame):
+    return cv2.resize(frame, (0, 0), fx=0.5, fy=0.5)
+
+
 async def run_inference_loop(cam_id: str):
     _start_inference_workers()
     module_cache: dict[str, tuple[ModuleType | None, bool, bool, bool]] = {}
@@ -745,71 +808,66 @@ async def run_inference_loop(cam_id: str):
             current_output = last_inference_outputs.get(cam_id, forced_group or "")
 
             if is_numpy_frame:
-                display_frame = frame.copy()
-
-                for i, r in enumerate(rois_snapshot):
-                    if r.get("type") != "page":
-                        continue
-                    pts = r.get("points", [])
-                    if len(pts) != 4:
-                        continue
-                    src = np.array([[p["x"], p["y"]] for p in pts], dtype=np.float32)
-                    src_int = src.astype(int)
-                    cv2.polylines(display_frame, [src_int], True, (0, 255, 0), 2)
-                    label_pt = src_int[0]
-                    cv2.putText(
-                        display_frame,
-                        str(r.get("id", i + 1)),
-                        (int(label_pt[0]), max(0, int(label_pt[1]) - 5)),
-                        cv2.FONT_HERSHEY_SIMPLEX,
-                        0.5,
-                        (0, 255, 0),
-                        1,
-                        cv2.LINE_AA,
+                try:
+                    draw_task = asyncio.create_task(
+                        asyncio.to_thread(
+                            _draw_inference_overlays,
+                            frame,
+                            rois_snapshot,
+                            forced_group,
+                            current_output,
+                        )
                     )
+                    display_frame = await draw_task
+                except asyncio.CancelledError:
+                    draw_task.cancel()
+                    raise
+                except Exception:
+                    await asyncio.sleep(0)
+                    continue
 
-                for i, r in enumerate(rois_snapshot):
-                    if r.get("type") != "roi":
-                        continue
-                    if forced_group != "all":
-                        if not current_output or r.get("group") != current_output:
-                            continue
-                    pts = r.get("points", [])
-                    if len(pts) != 4:
-                        continue
-                    src = np.array([[p["x"], p["y"]] for p in pts], dtype=np.float32)
-                    src_int = src.astype(int)
-                    cv2.polylines(display_frame, [src_int], True, (255, 0, 0), 2)
-                    label_pt = src_int[0]
-                    cv2.putText(
-                        display_frame,
-                        str(r.get("id", i + 1)),
-                        (int(label_pt[0]), max(0, int(label_pt[1]) - 5)),
-                        cv2.FONT_HERSHEY_SIMPLEX,
-                        0.5,
-                        (255, 0, 0),
-                        1,
-                        cv2.LINE_AA,
-                    )
+                if display_frame is None:
+                    await asyncio.sleep(0)
+                    continue
 
                 try:
-                    resized = cv2.resize(display_frame, (0, 0), fx=0.5, fy=0.5)
+                    resize_task = asyncio.create_task(
+                        asyncio.to_thread(_resize_display_frame, display_frame)
+                    )
+                    resized = await resize_task
+                except asyncio.CancelledError:
+                    resize_task.cancel()
+                    raise
                 except Exception:
                     await asyncio.sleep(0)
                     continue
 
                 try:
-                    encoded, buffer = await asyncio.to_thread(
-                        cv2.imencode,
-                        ".jpg",
-                        resized,
-                        [int(cv2.IMWRITE_JPEG_QUALITY), 80],
+                    encode_task = asyncio.create_task(
+                        asyncio.to_thread(
+                            cv2.imencode,
+                            ".jpg",
+                            resized,
+                            [int(cv2.IMWRITE_JPEG_QUALITY), 80],
+                        )
                     )
+                    encoded, buffer = await encode_task
+                except asyncio.CancelledError:
+                    encode_task.cancel()
+                    raise
                 except Exception:
                     await asyncio.sleep(0)
                     continue
 
                 if not encoded or buffer is None:
+                    await asyncio.sleep(0)
+                    continue
+
+                latest_time = latest_frame_times.get(cam_id)
+                if (
+                    latest_time is not None
+                    and abs(latest_time - frame_time) > FRAME_TIME_DRIFT_THRESHOLD
+                ):
                     await asyncio.sleep(0)
                     continue
 
@@ -822,9 +880,21 @@ async def run_inference_loop(cam_id: str):
                 else:
                     await asyncio.sleep(0)
                     continue
+
+                latest_time = latest_frame_times.get(cam_id)
+                if (
+                    latest_time is not None
+                    and abs(latest_time - frame_time) > FRAME_TIME_DRIFT_THRESHOLD
+                ):
+                    await asyncio.sleep(0)
+                    continue
+
             if queue.full():
-                with contextlib.suppress(asyncio.QueueEmpty):
-                    queue.get_nowait()
+                while True:
+                    try:
+                        queue.get_nowait()
+                    except asyncio.QueueEmpty:
+                        break
             await queue.put(frame_bytes)
 
             interval = inference_intervals.get(cam_id, 1.0)
