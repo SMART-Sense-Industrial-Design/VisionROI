@@ -568,14 +568,18 @@ async def run_inference_loop(cam_id: str):
         for i, r in enumerate(rois):
             if r.get('type') != 'roi':
                 continue
-            if forced_group != 'all':
-                if not output or r.get('group') != output:
-                    continue
             if np is None:
                 continue
             pts = r.get('points', [])
             if len(pts) != 4:
                 continue
+
+            should_process_roi = forced_group == 'all' or (
+                output and r.get('group') == output
+            )
+            if not should_process_roi:
+                continue
+
             src = np.array([[p['x'], p['y']] for p in pts], dtype=np.float32)
 
             if should_infer and r.get('module'):
@@ -678,6 +682,13 @@ async def run_inference_loop(cam_id: str):
             elif should_infer and not r.get('module'):
                 print(f"module missing for ROI {r.get('id', i)}")
 
+        for i, r in enumerate(rois):
+            if np is None or r.get('type') != 'roi':
+                continue
+            pts = r.get('points', [])
+            if len(pts) != 4:
+                continue
+            src = np.array([[p['x'], p['y']] for p in pts], dtype=np.float32)
             src_int = src.astype(int)
             cv2.polylines(frame, [src_int], True, (255, 0, 0), 2)
             label_pt = src_int[0]
