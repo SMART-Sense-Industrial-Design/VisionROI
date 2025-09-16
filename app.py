@@ -685,6 +685,11 @@ async def run_inference_loop(cam_id: str):
         for i, r in enumerate(rois):
             if np is None or r.get('type') != 'roi':
                 continue
+            should_show = forced_group == 'all' or (
+                output and r.get('group') == output
+            )
+            if not should_show:
+                continue
             pts = r.get('points', [])
             if len(pts) != 4:
                 continue
