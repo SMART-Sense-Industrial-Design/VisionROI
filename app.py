@@ -16,6 +16,7 @@ import importlib.util
 import os
 import sys
 import argparse
+from collections import defaultdict
 from types import ModuleType
 from pathlib import Path
 import contextlib
@@ -455,8 +456,65 @@ async def read_and_queue_frame(
 async def run_inference_loop(cam_id: str):
     _start_inference_workers()
     module_cache: dict[str, tuple[ModuleType | None, bool, bool, bool]] = {}
+    pending_results: defaultdict[
+        tuple[str, float],
+        defaultdict[str | int, dict[str, Any]],
+    ] = defaultdict(lambda: defaultdict(dict))
+    pending_expected: dict[tuple[str, float], int] = {}
+    pending_deadlines: dict[tuple[str, float], float] = {}
+    pending_ready: set[tuple[str, float]] = set()
+    PENDING_RESULT_TIMEOUT = 10.0
+
+    def cleanup_pending_results(force: bool = False) -> None:
+        if force:
+            keys = list(
+                set(pending_results.keys())
+                | set(pending_deadlines.keys())
+                | set(pending_ready)
+            )
+        else:
+            now = time.time()
+            keys = [
+                key
+                for key, expiry in list(pending_deadlines.items())
+                if expiry <= now
+            ]
+        for key in keys:
+            pending_results.pop(key, None)
+            pending_expected.pop(key, None)
+            pending_deadlines.pop(key, None)
+            pending_ready.discard(key)
+
+    def flush_pending_result(key: tuple[str, float]) -> None:
+        results_map = pending_results.pop(key, None)
+        pending_expected.pop(key, None)
+        pending_deadlines.pop(key, None)
+        pending_ready.discard(key)
+        if not results_map:
+            return
+        results_map = dict(results_map)
+        if not results_map:
+            return
+        ordered_keys = sorted(results_map.keys(), key=lambda rid: str(rid))
+        results_list = [results_map[rid] for rid in ordered_keys]
+        if not results_list:
+            return
+        payload_dict = {
+            'frame_time': key[1],
+            'result_time': time.time(),
+            'results': results_list,
+        }
+        try:
+            q = get_roi_result_queue(key[0])
+            payload = json.dumps(payload_dict)
+            if q.full():
+                q.get_nowait()
+            q.put_nowait(payload)
+        except Exception:
+            pass
 
     async def process_frame(frame):
+        cleanup_pending_results()
         rois = inference_rois.get(cam_id, [])
         forced_group = inference_groups.get(cam_id)
         if not rois:
@@ -565,6 +623,7 @@ async def run_inference_loop(cam_id: str):
                 )
 
         loop = asyncio.get_running_loop() if should_infer else None
+        scheduled_any = False
         for i, r in enumerate(rois):
             if r.get('type') != 'roi':
                 continue
@@ -624,6 +683,7 @@ async def run_inference_loop(cam_id: str):
                         if takes_interval:
                             args.append(inference_intervals.get(cam_id, 1.0))
                         fut = loop.create_future()
+                        pending_key = (cam_id, frame_time)
                         try:
                             _INFERENCE_QUEUE.put_nowait(
                                 (process_fn, tuple(args), fut, loop),
@@ -635,52 +695,87 @@ async def run_inference_loop(cam_id: str):
                             fut.cancel()
                             continue
 
+                        pending_expected[pending_key] = (
+                            pending_expected.get(pending_key, 0) + 1
+                        )
+                        pending_deadlines[pending_key] = (
+                            time.time() + PENDING_RESULT_TIMEOUT
+                        )
+                        scheduled_any = True
+
                         def _on_done(
                             f: asyncio.Future,
                             roi_img=roi,
                             roi_id=r.get('id', i),
-                            cam=cam_id,
                             frame_time=frame_time,
+                            key=pending_key,
                         ) -> None:
+                            if key not in pending_expected:
+                                return
                             try:
                                 result = f.result()
-                                if result is None:
-                                    return
-                                if isinstance(result, str):
-                                    result_text = result
-                                elif isinstance(result, dict) and 'text' in result:
-                                    result_text = str(result['text'])
-                                else:
-                                    return
                             except asyncio.CancelledError:
                                 return
                             except Exception:
-                                return
+                                result = None
+
+                            result_text: str
+                            if isinstance(result, str):
+                                result_text = result
+                            elif isinstance(result, dict):
+                                if 'text' in result:
+                                    result_text = str(result['text'])
+                                elif 'result' in result:
+                                    result_text = str(result['result'])
+                                else:
+                                    result_text = ''
+                            elif result is None:
+                                result_text = ''
+                            else:
+                                result_text = str(result)
+
+                            entry = {
+                                'id': roi_id,
+                                'image': '',
+                                'text': result_text,
+                                'frame_time': frame_time,
+                                'result_time': time.time(),
+                            }
                             try:
-                                result_time = time.time()
-                                _, roi_buf = cv2.imencode(
-                                    '.jpg', roi_img, [int(cv2.IMWRITE_JPEG_QUALITY), 80],
-                                )
-                                roi_b64 = base64.b64encode(roi_buf).decode('ascii')
-                                q = get_roi_result_queue(cam)
-                                payload = json.dumps(
-                                    {
-                                        'id': roi_id,
-                                        'image': roi_b64,
-                                        'text': result_text,
-                                        'frame_time': frame_time,
-                                        'result_time': result_time,
-                                    },
-                                )
-                                if q.full():
-                                    q.get_nowait()
-                                q.put_nowait(payload)
+                                if roi_img is not None:
+                                    encoded, roi_buf = cv2.imencode(
+                                        '.jpg',
+                                        roi_img,
+                                        [int(cv2.IMWRITE_JPEG_QUALITY), 80],
+                                    )
+                                    if encoded and roi_buf is not None:
+                                        entry['image'] = base64.b64encode(roi_buf).decode('ascii')
                             except Exception:
                                 pass
+
+                            pending_results[key][roi_id] = entry
+                            pending_deadlines[key] = (
+                                time.time() + PENDING_RESULT_TIMEOUT
+                            )
+                            total_rois = pending_expected.get(key, 0)
+                            if (
+                                key in pending_ready
+                                and total_rois
+                                and len(pending_results[key]) >= total_rois
+                            ):
+                                flush_pending_result(key)
 
                         fut.add_done_callback(_on_done)
             elif should_infer and not r.get('module'):
                 print(f"module missing for ROI {r.get('id', i)}")
+
+        if scheduled_any:
+            pending_key = (cam_id, frame_time)
+            pending_ready.add(pending_key)
+            total_rois = pending_expected.get(pending_key, 0)
+            current_results = pending_results.get(pending_key)
+            if total_rois and current_results and len(current_results) >= total_rois:
+                flush_pending_result(pending_key)
 
         for i, r in enumerate(rois):
             if np is None or r.get('type') != 'roi':
@@ -717,6 +812,11 @@ async def run_inference_loop(cam_id: str):
     except asyncio.CancelledError:
         pass
     finally:
+        cleanup_pending_results(force=True)
+        pending_results.clear()
+        pending_expected.clear()
+        pending_deadlines.clear()
+        pending_ready.clear()
         for mod_name, (module, _, _, _) in module_cache.items():
             if module is not None:
                 with contextlib.suppress(Exception):
