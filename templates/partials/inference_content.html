@@ -13,7 +13,7 @@
                 <button id="cam1-stopButton" class="btn btn-danger" disabled>Stop</button>
                 <p id="cam1-status"></p>
                 <div class="video-wrapper">
-                    <img id="cam1-video" class="stream-video" />
+                    <canvas id="cam1-video" class="stream-video"></canvas>
                 </div>
             </div>
         </div>
@@ -49,7 +49,7 @@
         const cam = `inf_${cellId}`;
         const getEl = suffix => document.getElementById(`${cellId}-${suffix}`);
         const video = getEl('video');
-        video.onload = () => URL.revokeObjectURL(video.src);
+        const videoCtx = video.getContext('2d');
         const startButton = getEl('startButton');
         const stopButton = getEl('stopButton');
         const statusEl = getEl('status');
@@ -359,10 +359,11 @@
             }
             stopLogUpdates();
             // clear last frame and related data to free memory
-            if (video.src && video.src.startsWith('blob:')) {
-                URL.revokeObjectURL(video.src);
+            if (videoCtx) {
+                videoCtx.clearRect(0, 0, video.width || 0, video.height || 0);
             }
-            video.src = '';
+            video.width = 0;
+            video.height = 0;
             rois = [];
             allRois = [];
             roiGrid.innerHTML = '';
@@ -375,13 +376,22 @@
 
         function openSocket() {
             socket = new WebSocket(`ws://${location.host}/ws/${cam}`);
-            socket.binaryType = 'arraybuffer';
-            socket.onmessage = function(event) {
-                if (video.src && video.src.startsWith('blob:')) {
-                    URL.revokeObjectURL(video.src);
+            socket.binaryType = 'blob';
+            socket.onmessage = async function(event) {
+                try {
+                    const bitmap = await createImageBitmap(event.data);
+                    if (video.width !== bitmap.width || video.height !== bitmap.height) {
+                        video.width = bitmap.width;
+                        video.height = bitmap.height;
+                    }
+                    if (videoCtx) {
+                        videoCtx.clearRect(0, 0, video.width, video.height);
+                        videoCtx.drawImage(bitmap, 0, 0);
+                    }
+                    bitmap.close();
+                } catch (err) {
+                    console.error('Failed to render frame', err);
                 }
-                const blob = new Blob([event.data], { type: 'image/jpeg' });
-                video.src = URL.createObjectURL(blob);
             };
         }
 
