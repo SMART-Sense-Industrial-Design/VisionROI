@@ -50,6 +50,7 @@ inference_groups: dict[str, str | None] = {}
 inference_intervals: dict[str, float] = {}
 last_inference_times: dict[str, float] = {}
 last_inference_outputs: dict[str, str] = {}
+latest_frame_times: dict[str, float] = {}
 
 STATE_FILE = "service_state.json"
 PAGE_SCORE_THRESHOLD = 0.4
@@ -124,6 +125,27 @@ def _stop_inference_workers() -> None:
 _start_inference_workers()
 
 
+def _discard_stale_inference_job() -> bool:
+    """Drop one pending inference job and cancel its future if possible."""
+    try:
+        item = _INFERENCE_QUEUE.get_nowait()
+    except Empty:
+        return False
+
+    if item is None:
+        _INFERENCE_QUEUE.task_done()
+        with contextlib.suppress(Full):
+            _INFERENCE_QUEUE.put_nowait(None)
+        return False
+
+    _, _, fut, loop = item
+    if fut is not None and not fut.done():
+        with contextlib.suppress(Exception):
+            loop.call_soon_threadsafe(fut.cancel)
+    _INFERENCE_QUEUE.task_done()
+    return True
+
+
 # =========================
 # Memory helpers (free & trim)
 # =========================
@@ -149,6 +171,7 @@ def _free_cam_state(cam_id: str):
     inference_rois.pop(cam_id, None)
     inference_intervals.pop(cam_id, None)
     last_inference_times.pop(cam_id, None)
+    latest_frame_times.pop(cam_id, None)
 
     # Queues: drain & drop
     q = frame_queues.pop(cam_id, None)
@@ -455,252 +478,388 @@ async def read_and_queue_frame(
 async def run_inference_loop(cam_id: str):
     _start_inference_workers()
     module_cache: dict[str, tuple[ModuleType | None, bool, bool, bool]] = {}
+    pending_task: asyncio.Task | None = None
 
-    async def process_frame(frame):
-        rois = inference_rois.get(cam_id, [])
+    async def process_inference_frame(
+        frame,
+        frame_time: float,
+        rois_snapshot: list[dict],
+    ) -> None:
+        if frame_time < latest_frame_times.get(cam_id, 0.0):
+            return
+
         forced_group = inference_groups.get(cam_id)
-        if not rois:
-            return cv2.resize(frame, (0, 0), fx=0.5, fy=0.5)
-        now = time.time()
-        interval = inference_intervals.get(cam_id, 1.0)
-        should_infer = now - last_inference_times.get(cam_id, 0.0) >= interval
-        if should_infer:
-            last_inference_times[cam_id] = now
-
         save_flag = bool(save_roi_flags.get(cam_id))
-        frame_time = time.time()
-        best_score = -1.0
         scores: list[dict[str, float | str]] = []
+        best_score = -1.0
         has_page = False
-        output = last_inference_outputs.get(cam_id, forced_group or '')
+        output = last_inference_outputs.get(cam_id, forced_group or "")
 
-        if should_infer:
-            for i, r in enumerate(rois):
-                if np is None or r.get('type') != 'page':
+        if np is not None:
+            for r in rois_snapshot:
+                if r.get("type") != "page":
                     continue
-                has_page = True
-                pts = r.get('points', [])
+                pts = r.get("points", [])
                 if len(pts) != 4:
                     continue
-                src = np.array([[p['x'], p['y']] for p in pts], dtype=np.float32)
-                color = (0, 255, 0)
+                has_page = True
+                src = np.array([[p["x"], p["y"]] for p in pts], dtype=np.float32)
                 width_a = np.linalg.norm(src[0] - src[1])
                 width_b = np.linalg.norm(src[2] - src[3])
                 max_w = int(max(width_a, width_b))
                 height_a = np.linalg.norm(src[0] - src[3])
                 height_b = np.linalg.norm(src[1] - src[2])
                 max_h = int(max(height_a, height_b))
-                dst = np.array([[0, 0], [max_w - 1, 0], [max_w - 1, max_h - 1], [0, max_h - 1]], dtype=np.float32)
+                if max_w <= 0 or max_h <= 0:
+                    continue
+                dst = np.array(
+                    [[0, 0], [max_w - 1, 0], [max_w - 1, max_h - 1], [0, max_h - 1]],
+                    dtype=np.float32,
+                )
                 matrix = cv2.getPerspectiveTransform(src, dst)
-                roi = await asyncio.to_thread(cv2.warpPerspective, frame, matrix, (max_w, max_h))
-                template = r.get('_template')
+                roi = await asyncio.to_thread(
+                    cv2.warpPerspective, frame, matrix, (max_w, max_h)
+                )
+                template = r.get("_template")
                 if template is not None:
                     try:
-                        roi_gray = await asyncio.to_thread(cv2.cvtColor, roi, cv2.COLOR_BGR2GRAY)
+                        roi_gray = await asyncio.to_thread(
+                            cv2.cvtColor, roi, cv2.COLOR_BGR2GRAY
+                        )
                     except Exception:
                         roi_gray = None
                     if roi_gray is not None:
                         if roi_gray.shape != template.shape:
-                            roi_gray = await asyncio.to_thread(cv2.resize, roi_gray, (template.shape[1], template.shape[0]))
+                            roi_gray = await asyncio.to_thread(
+                                cv2.resize,
+                                roi_gray,
+                                (template.shape[1], template.shape[0]),
+                            )
                         try:
-                            res = await asyncio.to_thread(cv2.matchTemplate, roi_gray, template, cv2.TM_CCOEFF_NORMED)
+                            res = await asyncio.to_thread(
+                                cv2.matchTemplate,
+                                roi_gray,
+                                template,
+                                cv2.TM_CCOEFF_NORMED,
+                            )
                             score = float(res[0][0])
-                            scores.append({'page': r.get('page', ''), 'score': score})
+                            scores.append({
+                                "page": r.get("page", ""),
+                                "score": score,
+                            })
                             if score > best_score:
                                 best_score = score
-                                output = r.get('page', '')
+                                output = r.get("page", "")
                         except Exception:
                             pass
-                cv2.polylines(frame, [src.astype(int)], True, color, 2)
-                label_pt = src[0].astype(int)
-                cv2.putText(
-                    frame,
-                    str(r.get('id', i + 1)),
-                    (int(label_pt[0]), max(0, int(label_pt[1]) - 5)),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.5,
-                    color,
-                    1,
-                    cv2.LINE_AA,
-                )
 
-            if not has_page:
-                output = forced_group or ''
-            elif best_score <= PAGE_SCORE_THRESHOLD:
-                output = ''
+        if not has_page:
+            output = forced_group or ""
+        elif best_score <= PAGE_SCORE_THRESHOLD:
+            output = ""
 
-            scores.sort(key=lambda x: x['score'], reverse=True)
+        scores.sort(key=lambda x: x["score"], reverse=True)
 
-            if output or scores:
-                try:
-                    q = get_roi_result_queue(cam_id)
-                    payload = json.dumps({'group': output, 'scores': scores})
-                    if q.full():
+        if frame_time < latest_frame_times.get(cam_id, 0.0):
+            return
+
+        last_inference_times[cam_id] = time.time()
+
+        if output or scores:
+            try:
+                q = get_roi_result_queue(cam_id)
+                payload = json.dumps({"group": output, "scores": scores})
+                if q.full():
+                    with contextlib.suppress(asyncio.QueueEmpty):
                         q.get_nowait()
-                    await q.put(payload)
+                await q.put(payload)
+            except Exception:
+                pass
+
+        last_inference_outputs[cam_id] = output
+
+        if np is None:
+            return
+
+        loop = asyncio.get_running_loop()
+        interval = inference_intervals.get(cam_id, 1.0)
+        for idx, r in enumerate(rois_snapshot):
+            if r.get("type") != "roi":
+                continue
+            if forced_group != "all":
+                if not output or r.get("group") != output:
+                    continue
+            pts = r.get("points", [])
+            if len(pts) != 4:
+                continue
+            src = np.array([[p["x"], p["y"]] for p in pts], dtype=np.float32)
+
+            mod_name = r.get("module")
+            if not mod_name:
+                print(f"module missing for ROI {r.get('id', idx)}")
+                continue
+
+            module_entry = module_cache.get(mod_name)
+            if module_entry is None:
+                module = load_custom_module(mod_name)
+                takes_source = False
+                takes_cam_id = False
+                takes_interval = False
+                if module:
+                    proc = getattr(module, "process", None)
+                    if callable(proc):
+                        params = inspect.signature(proc).parameters
+                        takes_source = "source" in params
+                        takes_cam_id = "cam_id" in params
+                        takes_interval = "interval" in params
+                module_cache[mod_name] = (
+                    module,
+                    takes_source,
+                    takes_cam_id,
+                    takes_interval,
+                )
+            else:
+                module, takes_source, takes_cam_id, takes_interval = module_entry
+
+            if module is None:
+                print(
+                    f"module '{mod_name}' not found for ROI {r.get('id', idx)}"
+                )
+                continue
+
+            process_fn = getattr(module, "process", None)
+            if not callable(process_fn):
+                print(
+                    f"process function not found in module '{mod_name}' for ROI {r.get('id', idx)}"
+                )
+                continue
+
+            width_a = np.linalg.norm(src[0] - src[1])
+            width_b = np.linalg.norm(src[2] - src[3])
+            max_w = int(max(width_a, width_b))
+            height_a = np.linalg.norm(src[0] - src[3])
+            height_b = np.linalg.norm(src[1] - src[2])
+            max_h = int(max(height_a, height_b))
+            if max_w <= 0 or max_h <= 0:
+                continue
+            dst = np.array(
+                [[0, 0], [max_w - 1, 0], [max_w - 1, max_h - 1], [0, max_h - 1]],
+                dtype=np.float32,
+            )
+            matrix = cv2.getPerspectiveTransform(src, dst)
+            roi = await asyncio.to_thread(
+                cv2.warpPerspective, frame, matrix, (max_w, max_h)
+            )
+            args = [roi, r.get("id", str(idx)), save_flag]
+            if takes_source:
+                args.append(active_sources.get(cam_id, ""))
+            if takes_cam_id:
+                args.append(cam_id)
+            if takes_interval:
+                args.append(interval)
+
+            if _INFERENCE_QUEUE.full():
+                if not _discard_stale_inference_job():
+                    continue
+
+            fut = loop.create_future()
+            try:
+                _INFERENCE_QUEUE.put_nowait((process_fn, tuple(args), fut, loop))
+            except Full:
+                fut.cancel()
+                continue
+            except Exception:
+                fut.cancel()
+                continue
+
+            def _on_done(
+                f: asyncio.Future,
+                roi_img=roi,
+                roi_id=r.get("id", idx),
+                cam=cam_id,
+                expected_time=frame_time,
+            ) -> None:
+                if expected_time < latest_frame_times.get(cam, 0.0):
+                    return
+                try:
+                    result = f.result()
+                    if result is None:
+                        return
+                    if isinstance(result, str):
+                        result_text = result
+                    elif isinstance(result, dict) and "text" in result:
+                        result_text = str(result["text"])
+                    else:
+                        return
+                except asyncio.CancelledError:
+                    return
+                except Exception:
+                    return
+                try:
+                    result_time = time.time()
+                    _, roi_buf = cv2.imencode(
+                        ".jpg", roi_img, [int(cv2.IMWRITE_JPEG_QUALITY), 80]
+                    )
+                    roi_b64 = base64.b64encode(roi_buf).decode("ascii")
+                    q = get_roi_result_queue(cam)
+                    payload = json.dumps(
+                        {
+                            "id": roi_id,
+                            "image": roi_b64,
+                            "text": result_text,
+                            "frame_time": expected_time,
+                            "result_time": result_time,
+                        }
+                    )
+                    if q.full():
+                        with contextlib.suppress(asyncio.QueueEmpty):
+                            q.get_nowait()
+                    q.put_nowait(payload)
                 except Exception:
                     pass
 
-            last_inference_outputs[cam_id] = output
-        else:
-            for i, r in enumerate(rois):
-                if np is None or r.get('type') != 'page':
-                    continue
-                pts = r.get('points', [])
-                if len(pts) != 4:
-                    continue
-                src = np.array([[p['x'], p['y']] for p in pts], dtype=np.float32)
-                color = (0, 255, 0)
-                cv2.polylines(frame, [src.astype(int)], True, color, 2)
-                label_pt = src[0].astype(int)
-                cv2.putText(
-                    frame,
-                    str(r.get('id', i + 1)),
-                    (int(label_pt[0]), max(0, int(label_pt[1]) - 5)),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.5,
-                    color,
-                    1,
-                    cv2.LINE_AA,
-                )
-
-        loop = asyncio.get_running_loop() if should_infer else None
-        for i, r in enumerate(rois):
-            if r.get('type') != 'roi':
-                continue
-            if forced_group != 'all':
-                if not output or r.get('group') != output:
-                    continue
-            if np is None:
-                continue
-            pts = r.get('points', [])
-            if len(pts) != 4:
-                continue
-            src = np.array([[p['x'], p['y']] for p in pts], dtype=np.float32)
-
-            if should_infer and r.get('module'):
-                mod_name = r.get('module')
-                module_entry = module_cache.get(mod_name)
-                if module_entry is None:
-                    module = load_custom_module(mod_name)
-                    takes_source = False
-                    takes_cam_id = False
-                    takes_interval = False
-                    if module:
-                        proc = getattr(module, 'process', None)
-                        if callable(proc):
-                            params = inspect.signature(proc).parameters
-                            takes_source = 'source' in params
-                            takes_cam_id = 'cam_id' in params
-                            takes_interval = 'interval' in params
-                    module_cache[mod_name] = (module, takes_source, takes_cam_id, takes_interval)
-                else:
-                    module, takes_source, takes_cam_id, takes_interval = module_entry
-                if module is None:
-                    print(f"module '{mod_name}' not found for ROI {r.get('id', i)}")
-                else:
-                    process_fn = getattr(module, 'process', None)
-                    if not callable(process_fn):
-                        print(f"process function not found in module '{mod_name}' for ROI {r.get('id', i)}")
-                    else:
-                        width_a = np.linalg.norm(src[0] - src[1])
-                        width_b = np.linalg.norm(src[2] - src[3])
-                        max_w = int(max(width_a, width_b))
-                        height_a = np.linalg.norm(src[0] - src[3])
-                        height_b = np.linalg.norm(src[1] - src[2])
-                        max_h = int(max(height_a, height_b))
-                        dst = np.array([[0, 0], [max_w - 1, 0], [max_w - 1, max_h - 1], [0, max_h - 1]], dtype=np.float32)
-                        matrix = cv2.getPerspectiveTransform(src, dst)
-                        roi = await asyncio.to_thread(cv2.warpPerspective, frame, matrix, (max_w, max_h))
-                        args = [roi, r.get('id', str(i)), save_flag]
-                        if takes_source:
-                            args.append(active_sources.get(cam_id, ''))
-                        if takes_cam_id:
-                            args.append(cam_id)
-                        if takes_interval:
-                            args.append(inference_intervals.get(cam_id, 1.0))
-                        fut = loop.create_future()
-                        try:
-                            _INFERENCE_QUEUE.put_nowait(
-                                (process_fn, tuple(args), fut, loop),
-                            )
-                        except Full:
-                            fut.cancel()
-                            continue
-                        except Exception:
-                            fut.cancel()
-                            continue
-
-                        def _on_done(
-                            f: asyncio.Future,
-                            roi_img=roi,
-                            roi_id=r.get('id', i),
-                            cam=cam_id,
-                            frame_time=frame_time,
-                        ) -> None:
-                            try:
-                                result = f.result()
-                                if result is None:
-                                    return
-                                if isinstance(result, str):
-                                    result_text = result
-                                elif isinstance(result, dict) and 'text' in result:
-                                    result_text = str(result['text'])
-                                else:
-                                    return
-                            except asyncio.CancelledError:
-                                return
-                            except Exception:
-                                return
-                            try:
-                                result_time = time.time()
-                                _, roi_buf = cv2.imencode(
-                                    '.jpg', roi_img, [int(cv2.IMWRITE_JPEG_QUALITY), 80],
-                                )
-                                roi_b64 = base64.b64encode(roi_buf).decode('ascii')
-                                q = get_roi_result_queue(cam)
-                                payload = json.dumps(
-                                    {
-                                        'id': roi_id,
-                                        'image': roi_b64,
-                                        'text': result_text,
-                                        'frame_time': frame_time,
-                                        'result_time': result_time,
-                                    },
-                                )
-                                if q.full():
-                                    q.get_nowait()
-                                q.put_nowait(payload)
-                            except Exception:
-                                pass
-
-                        fut.add_done_callback(_on_done)
-            elif should_infer and not r.get('module'):
-                print(f"module missing for ROI {r.get('id', i)}")
-
-            src_int = src.astype(int)
-            cv2.polylines(frame, [src_int], True, (255, 0, 0), 2)
-            label_pt = src_int[0]
-            cv2.putText(
-                frame,
-                str(r.get('id', i + 1)),
-                (int(label_pt[0]), max(0, int(label_pt[1]) - 5)),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.5,
-                (255, 0, 0),
-                1,
-                cv2.LINE_AA,
-            )
-
-        return cv2.resize(frame, (0, 0), fx=0.5, fy=0.5)
+            fut.add_done_callback(_on_done)
 
     queue = get_frame_queue(cam_id)
     try:
         while True:
-            await read_and_queue_frame(cam_id, queue, process_frame)
+            worker = camera_workers.get(cam_id)
+            if worker is None:
+                await asyncio.sleep(0.01)
+                continue
+
+            frame = await worker.read()
+            if frame is None:
+                await asyncio.sleep(0.01)
+                continue
+            if np is not None and hasattr(frame, "size") and frame.size == 0:
+                await asyncio.sleep(0.01)
+                continue
+
+            frame_time = time.time()
+            is_numpy_frame = np is not None and hasattr(frame, "shape")
+            rois_snapshot = (
+                list(inference_rois.get(cam_id, [])) if is_numpy_frame else []
+            )
+            forced_group = inference_groups.get(cam_id)
+            current_output = last_inference_outputs.get(cam_id, forced_group or "")
+
+            if is_numpy_frame:
+                display_frame = frame.copy()
+
+                for i, r in enumerate(rois_snapshot):
+                    if r.get("type") != "page":
+                        continue
+                    pts = r.get("points", [])
+                    if len(pts) != 4:
+                        continue
+                    src = np.array([[p["x"], p["y"]] for p in pts], dtype=np.float32)
+                    src_int = src.astype(int)
+                    cv2.polylines(display_frame, [src_int], True, (0, 255, 0), 2)
+                    label_pt = src_int[0]
+                    cv2.putText(
+                        display_frame,
+                        str(r.get("id", i + 1)),
+                        (int(label_pt[0]), max(0, int(label_pt[1]) - 5)),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.5,
+                        (0, 255, 0),
+                        1,
+                        cv2.LINE_AA,
+                    )
+
+                for i, r in enumerate(rois_snapshot):
+                    if r.get("type") != "roi":
+                        continue
+                    if forced_group != "all":
+                        if not current_output or r.get("group") != current_output:
+                            continue
+                    pts = r.get("points", [])
+                    if len(pts) != 4:
+                        continue
+                    src = np.array([[p["x"], p["y"]] for p in pts], dtype=np.float32)
+                    src_int = src.astype(int)
+                    cv2.polylines(display_frame, [src_int], True, (255, 0, 0), 2)
+                    label_pt = src_int[0]
+                    cv2.putText(
+                        display_frame,
+                        str(r.get("id", i + 1)),
+                        (int(label_pt[0]), max(0, int(label_pt[1]) - 5)),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.5,
+                        (255, 0, 0),
+                        1,
+                        cv2.LINE_AA,
+                    )
+
+                try:
+                    resized = cv2.resize(display_frame, (0, 0), fx=0.5, fy=0.5)
+                except Exception:
+                    await asyncio.sleep(0)
+                    continue
+
+                try:
+                    encoded, buffer = await asyncio.to_thread(
+                        cv2.imencode,
+                        ".jpg",
+                        resized,
+                        [int(cv2.IMWRITE_JPEG_QUALITY), 80],
+                    )
+                except Exception:
+                    await asyncio.sleep(0)
+                    continue
+
+                if not encoded or buffer is None:
+                    await asyncio.sleep(0)
+                    continue
+
+                frame_bytes = (
+                    buffer.tobytes() if hasattr(buffer, "tobytes") else buffer
+                )
+            else:
+                if isinstance(frame, (bytes, bytearray, memoryview)):
+                    frame_bytes = bytes(frame)
+                else:
+                    await asyncio.sleep(0)
+                    continue
+            if queue.full():
+                with contextlib.suppress(asyncio.QueueEmpty):
+                    queue.get_nowait()
+            await queue.put(frame_bytes)
+
+            interval = inference_intervals.get(cam_id, 1.0)
+            last_time = last_inference_times.get(cam_id, 0.0)
+            now = time.time()
+            should_infer = (
+                is_numpy_frame
+                and rois_snapshot
+                and (pending_task is None or pending_task.done())
+                and (now - last_time >= interval)
+            )
+
+            if should_infer:
+                latest_frame_times[cam_id] = frame_time
+                pending_task = asyncio.create_task(
+                    process_inference_frame(frame, frame_time, rois_snapshot)
+                )
+
+                def _silence_task_errors(task: asyncio.Task) -> None:
+                    with contextlib.suppress(Exception):
+                        task.result()
+
+                pending_task.add_done_callback(_silence_task_errors)
+            else:
+                if pending_task is not None and not pending_task.done():
+                    latest_frame_times[cam_id] = frame_time
+
+            await asyncio.sleep(0)
     except asyncio.CancelledError:
         pass
     finally:
+        if pending_task is not None:
+            pending_task.cancel()
+            with contextlib.suppress(Exception):
+                await pending_task
         for mod_name, (module, _, _, _) in module_cache.items():
             if module is not None:
                 with contextlib.suppress(Exception):
