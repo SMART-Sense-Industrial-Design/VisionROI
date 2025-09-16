@@ -517,6 +517,9 @@ async def run_inference_loop(cam_id: str):
         cleanup_pending_results()
         rois = inference_rois.get(cam_id, [])
         forced_group = inference_groups.get(cam_id)
+        selected_group = (
+            forced_group if forced_group and forced_group != 'all' else None
+        )
         if not rois:
             return cv2.resize(frame, (0, 0), fx=0.5, fy=0.5)
         now = time.time()
@@ -530,7 +533,7 @@ async def run_inference_loop(cam_id: str):
         best_score = -1.0
         scores: list[dict[str, float | str]] = []
         has_page = False
-        output = last_inference_outputs.get(cam_id, forced_group or '')
+        output = last_inference_outputs.get(cam_id, selected_group or '')
 
         if should_infer:
             for i, r in enumerate(rois):
@@ -587,19 +590,25 @@ async def run_inference_loop(cam_id: str):
             elif best_score <= PAGE_SCORE_THRESHOLD:
                 output = ''
 
+            if forced_group and forced_group != 'all':
+                selected_group = forced_group
+            else:
+                selected_group = output
+
             scores.sort(key=lambda x: x['score'], reverse=True)
 
-            if output or scores:
+            active_group = selected_group or ''
+            if active_group or scores:
                 try:
                     q = get_roi_result_queue(cam_id)
-                    payload = json.dumps({'group': output, 'scores': scores})
+                    payload = json.dumps({'group': active_group, 'scores': scores})
                     if q.full():
                         q.get_nowait()
                     await q.put(payload)
                 except Exception:
                     pass
 
-            last_inference_outputs[cam_id] = output
+            last_inference_outputs[cam_id] = active_group
         else:
             for i, r in enumerate(rois):
                 if np is None or r.get('type') != 'page':
@@ -622,6 +631,21 @@ async def run_inference_loop(cam_id: str):
                     cv2.LINE_AA,
                 )
 
+        if selected_group is None:
+            if forced_group and forced_group != 'all':
+                selected_group = forced_group
+            else:
+                selected_group = output
+
+        def roi_matches_group(roi_group: str | None) -> bool:
+            if forced_group == 'all':
+                return True
+            if forced_group and forced_group != 'all':
+                return roi_group == forced_group
+            if selected_group:
+                return roi_group == selected_group
+            return False
+
         loop = asyncio.get_running_loop() if should_infer else None
         scheduled_any = False
         for i, r in enumerate(rois):
@@ -633,9 +657,7 @@ async def run_inference_loop(cam_id: str):
             if len(pts) != 4:
                 continue
 
-            should_process_roi = forced_group == 'all' or (
-                output and r.get('group') == output
-            )
+            should_process_roi = roi_matches_group(r.get('group'))
             if not should_process_roi:
                 continue
 
@@ -780,9 +802,7 @@ async def run_inference_loop(cam_id: str):
         for i, r in enumerate(rois):
             if np is None or r.get('type') != 'roi':
                 continue
-            should_show = forced_group == 'all' or (
-                output and r.get('group') == output
-            )
+            should_show = roi_matches_group(r.get('group'))
             if not should_show:
                 continue
             pts = r.get('points', [])
