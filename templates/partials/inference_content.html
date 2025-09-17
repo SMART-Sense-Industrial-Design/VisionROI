@@ -155,9 +155,31 @@
             }
         }
 
+        const getModuleElementId = id => `${cellId}-module-${id}`;
+
+        function findRoiDataById(id) {
+            const key = String(id);
+            const match = rois.find(r => String(r?.id) === key);
+            if (match) return match;
+            return allRois.find(r => String(r?.id) === key) || null;
+        }
+
+        function normalizeModule(value) {
+            return typeof value === 'string' ? value.trim() : '';
+        }
+
+        function updateRoiModuleLabel(id, override = '') {
+            const moduleEl = document.getElementById(getModuleElementId(id));
+            if (!moduleEl) return;
+            const overrideText = normalizeModule(override);
+            const fallback = normalizeModule(findRoiDataById(id)?.module ?? '');
+            const moduleName = overrideText || fallback;
+            moduleEl.textContent = moduleName ? `โมดูล: ${moduleName}` : 'โมดูล: -';
+        }
+
         function ensureRoiItem(id) {
             if (document.getElementById(`${cellId}-roi-${id}`)) return;
-            const r = rois.find(r => r.id === id) || { id };
+            const r = findRoiDataById(id) || { id };
             const item = document.createElement('div');
             item.className = 'roi-item';
             const title = document.createElement('h4');
@@ -166,6 +188,9 @@
             const img = document.createElement('img');
             img.id = `${cellId}-roi-${id}`;
             img.className = 'roi-image';
+            const moduleLine = document.createElement('p');
+            moduleLine.id = getModuleElementId(id);
+            moduleLine.className = 'roi-module';
             const p = document.createElement('p');
             p.id = `${cellId}-text-${id}`;
             p.className = 'roi-text';
@@ -174,9 +199,11 @@
             t.className = 'roi-time';
             item.appendChild(title);
             item.appendChild(img);
+            item.appendChild(moduleLine);
             item.appendChild(p);
             item.appendChild(t);
             roiGrid.appendChild(item);
+            updateRoiModuleLabel(id);
         }
 
         function applyRoiResult(result, fallbackFrameTime) {
@@ -184,6 +211,7 @@
             const roiId = result.id;
             if (roiId === undefined || roiId === null) return;
             ensureRoiItem(roiId);
+            updateRoiModuleLabel(roiId, result.module);
             const imgEl = document.getElementById(`${cellId}-roi-${roiId}`);
             if (imgEl && Object.prototype.hasOwnProperty.call(result, 'image')) {
                 imgEl.src = result.image ? `data:image/jpeg;base64,${result.image}` : '';
@@ -244,6 +272,8 @@
                                     if(resultTs)parts.push(`result=${formatTs(resultTs)}`);
                                     parts.push(`roi_id=${roiId}`);
                                     if(res.name)parts.push(`name=${res.name}`);
+                                    const moduleName=typeof res.module==='string'?res.module.trim():'';
+                                    if(moduleName)parts.push(`module=${moduleName}`);
                                     if(groupLabel)parts.push(`group=${groupLabel}`);
                                     if(typeof res.duration==='number'){
                                         const dur=formatDuration(res.duration);
@@ -377,6 +407,7 @@
             rois.forEach(r => {
                 if (r && r.id !== undefined && r.id !== null) {
                     ensureRoiItem(r.id);
+                    updateRoiModuleLabel(r.id);
                 }
             });
 
@@ -525,6 +556,7 @@
                 rois.forEach(r => {
                     if (r && r.id !== undefined && r.id !== null) {
                         ensureRoiItem(r.id);
+                        updateRoiModuleLabel(r.id);
                     }
                 });
                 if (roiSocket) {
