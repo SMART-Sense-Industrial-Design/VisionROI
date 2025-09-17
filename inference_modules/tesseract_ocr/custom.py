@@ -12,6 +12,9 @@ except Exception:  # pragma: no cover - fallback เมื่อไม่มี 
 
 MODULE_NAME = "tesseract_ocr"
 
+_ocr_instance: "TesseractOCR" | None = None
+_ocr_instance_lock = threading.Lock()
+
 
 class TesseractOCR(BaseOCR):
     """โมดูล OCR ที่ใช้ Tesseract ผ่าน pytesseract"""
@@ -68,3 +71,44 @@ class TesseractOCR(BaseOCR):
             self._save_image(frame, roi_id, source)
 
         return text
+
+
+def _get_ocr_instance() -> "TesseractOCR":
+    """สร้างและคืนอินสแตนซ์ OCR แบบ singleton เพื่อใช้ร่วมกันทั้งโมดูล"""
+
+    global _ocr_instance
+    with _ocr_instance_lock:
+        if _ocr_instance is None:
+            _ocr_instance = TesseractOCR()
+        return _ocr_instance
+
+
+def process(
+    frame,
+    roi_id=None,
+    save: bool = False,
+    source: str = "",
+    cam_id: int | None = None,
+    interval: float = 1.0,
+):
+    """จุดเข้าใช้งานหลักให้สอดคล้องกับโมดูล inference อื่น ๆ"""
+
+    ocr = _get_ocr_instance()
+    return ocr.process(
+        frame,
+        roi_id=roi_id,
+        save=save,
+        source=source,
+        cam_id=cam_id,
+        interval=interval,
+    )
+
+
+def cleanup() -> None:
+    """คืนทรัพยากรของอินสแตนซ์ OCR และรีเซ็ต singleton"""
+
+    global _ocr_instance
+    with _ocr_instance_lock:
+        if _ocr_instance is not None:
+            _ocr_instance.cleanup()
+            _ocr_instance = None
