@@ -25,7 +25,7 @@ import gc
 import time
 from typing import Callable, Awaitable, Any
 from concurrent.futures import ThreadPoolExecutor
-from queue import Queue, Empty, Full
+from queue import Queue, Empty
 from src.utils.logger import get_logger
 try:
     from websockets.exceptions import ConnectionClosed
@@ -787,14 +787,17 @@ async def run_inference_loop(cam_id: str):
                         fut = loop.create_future()
                         pending_key = (cam_id, frame_time)
                         try:
-                            _INFERENCE_QUEUE.put_nowait(
+                            await asyncio.to_thread(
+                                _INFERENCE_QUEUE.put,
                                 (process_fn, tuple(args), fut, loop),
                             )
-                        except Full:
-                            fut.cancel()
-                            continue
                         except Exception:
                             fut.cancel()
+                            queue_logger = get_logger('inference_queue')
+                            if queue_logger is not None:
+                                queue_logger.exception(
+                                    "failed to enqueue inference task for ROI %s", r.get('id', i)
+                                )
                             continue
 
                         pending_expected[pending_key] = (
