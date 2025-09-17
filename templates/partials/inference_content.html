@@ -283,12 +283,19 @@
                 opt.textContent = p;
                 groupSelect.appendChild(opt);
             });
-            const stored = selected || localStorage.getItem(`${cellId}-group`) || '';
+            let stored = selected || localStorage.getItem(`${cellId}-group`) || '';
+            if (!stored && list.length > 0) {
+                stored = 'all';
+            }
             groupSelect.value = stored;
             const roiForLog = stored && stored !== 'all'
                 ? list.filter(r => (r.group ?? r.page ?? r.name) === stored)
                 : list;
             updateLogRoiOptions(roiForLog);
+            if (stored) {
+                localStorage.setItem(`${cellId}-group`, stored);
+            }
+            return stored;
         }
 
         async function startInference(roisOverride = null, selectedGroup = '') {
@@ -325,10 +332,16 @@
             } else {
                 localStorage.removeItem(`${cellId}-group`);
             }
-            loadGroupOptions(roiList, selectedGroup);
-            rois = roisOverride || (selectedGroup && selectedGroup !== 'all'
-                ? roiList.filter(r => (r.group ?? r.page ?? r.name) === selectedGroup)
-                : selectedGroup === 'all'
+            const activeGroup = loadGroupOptions(roiList, selectedGroup);
+            const groupToUse = selectedGroup || activeGroup;
+            if (groupToUse) {
+                localStorage.setItem(`${cellId}-group`, groupToUse);
+            } else {
+                localStorage.removeItem(`${cellId}-group`);
+            }
+            rois = roisOverride || (groupToUse && groupToUse !== 'all'
+                ? roiList.filter(r => (r.group ?? r.page ?? r.name) === groupToUse)
+                : groupToUse === 'all'
                     ? roiList
 
                     : []);
@@ -471,19 +484,19 @@
                 const roiData = await roiRes.json();
                 allRois = roiData.rois || [];
                 const roiList = allRois.filter(r => (r.type ?? 'roi') === 'roi');
-                loadGroupOptions(roiList);
-                const stored = groupSelect.value;
-                rois = stored === 'all'
+                const stored = loadGroupOptions(roiList);
+                const groupForStart = stored || '';
+                rois = groupForStart === 'all'
                     ? roiList
-                    : stored
-                        ? roiList.filter(r => (r.group ?? r.page ?? r.name) === stored)
+                    : groupForStart
+                        ? roiList.filter(r => (r.group ?? r.page ?? r.name) === groupForStart)
 
                         : [];
                 const interval = parseFloat(intervalInput.value) || 1;
                 await fetchWithStatus(`/start_inference/${cam}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ rois, group: stored, interval })
+                    body: JSON.stringify({ rois, group: groupForStart, interval })
                 });
                 if (rois.length > 0) {
                     roiGrid.innerHTML = '';
