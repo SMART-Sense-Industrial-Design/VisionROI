@@ -26,6 +26,7 @@ _data_sources_root = Path(__file__).resolve().parents[2] / "data_sources"
 
 _reader: easyocr.Reader | None = None
 _reader_lock = threading.Lock()
+_reader_infer_lock = threading.Lock()
 
 
 def _get_reader() -> easyocr.Reader:
@@ -79,7 +80,8 @@ def process(
             last_ocr_times[roi_id] = current_time
         try:
             reader = _get_reader()
-            ocr_result = reader.readtext(frame, detail=0)
+            with _reader_infer_lock:
+                ocr_result = reader.readtext(frame, detail=0)
             text = " ".join(ocr_result)
             logger.info(
                 f"roi_id={roi_id} {MODULE_NAME} OCR result: {text}"
@@ -113,6 +115,7 @@ class EasyOCR(BaseOCR):
         super().__init__()
         self._reader: easyocr.Reader | None = None  # type: ignore[name-defined]
         self._reader_lock = threading.Lock()
+        self._reader_infer_lock = threading.Lock()
 
     def _get_reader(self) -> easyocr.Reader:
         if easyocr is None:
@@ -127,7 +130,8 @@ class EasyOCR(BaseOCR):
         if easyocr is not None:
             try:
                 reader = self._get_reader()
-                ocr_result = reader.readtext(frame, detail=0)
+                with self._reader_infer_lock:
+                    ocr_result = reader.readtext(frame, detail=0)
                 text = " ".join(ocr_result)
                 self.logger.info(
                     f"roi_id={roi_id} {self.MODULE_NAME} OCR result: {text}"
@@ -149,6 +153,7 @@ def cleanup() -> None:
     global _reader
     with _reader_lock:
         _reader = None
+    # ไม่มีการทำความสะอาดล็อกเรียกใช้งานเพราะใช้ร่วมกันได้
     with _last_ocr_lock:
         last_ocr_times.clear()
         last_ocr_results.clear()
