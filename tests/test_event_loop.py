@@ -1,7 +1,9 @@
 import asyncio
 import contextlib
+import json
 import time
 from types import SimpleNamespace
+from queue import Queue
 
 import numpy as np
 
@@ -224,3 +226,140 @@ def test_inference_timeout_allows_slow_results():
     logs = asyncio.run(main())
     assert logs, "ควรมี log AGGREGATED_ROI แม้ inference ช้า"
     assert any('"slow"' in entry for entry in logs)
+
+
+def test_aggregated_roi_logs_all_results_when_queue_full():
+    async def main():
+        original_queue_size = app._INFERENCE_QUEUE.maxsize
+        original_max_workers = app.MAX_WORKERS
+        app._stop_inference_workers()
+        app._INFERENCE_QUEUE = Queue(maxsize=1)
+        app.MAX_WORKERS = 1
+        app._EXECUTOR = None
+        app._start_inference_workers()
+
+        worker = app.CameraWorker(0, asyncio.get_running_loop())
+        assert worker.start()
+        app.camera_workers["0"] = worker
+        app.camera_sources["0"] = 0
+        app.active_sources["0"] = "queue-full"
+        app.inference_intervals["0"] = 0.01
+        app.inference_groups["0"] = "all"
+
+        rois = []
+        for idx in range(9):
+            base = idx * 10
+            rois.append(
+                {
+                    "id": f"roi-{idx}",
+                    "type": "roi",
+                    "points": [
+                        {"x": base, "y": base},
+                        {"x": base + 5, "y": base},
+                        {"x": base + 5, "y": base + 5},
+                        {"x": base, "y": base + 5},
+                    ],
+                    "module": "dummy_module",
+                }
+            )
+        app.inference_rois["0"] = rois
+
+        logs: list[str] = []
+
+        class DummyLogger:
+            def info(self, msg, *args, **kwargs):
+                if args:
+                    logs.append(args[0])
+                else:
+                    logs.append(msg)
+
+        def process_roi(_image, roi_id, _save_flag, *_args):
+            time.sleep(0.02)
+            return {"text": f"processed-{roi_id}"}
+
+        dummy_module = SimpleNamespace(process=process_roi)
+
+        original_logger = app.get_logger
+        original_loader = app.load_custom_module
+        original_get_perspective = getattr(app.cv2, "getPerspectiveTransform", None)
+        original_warp = getattr(app.cv2, "warpPerspective", None)
+        original_polylines = getattr(app.cv2, "polylines", None)
+        original_put_text = getattr(app.cv2, "putText", None)
+        original_imencode = getattr(app.cv2, "imencode", None)
+        original_font = getattr(app.cv2, "FONT_HERSHEY_SIMPLEX", None)
+        original_line_aa = getattr(app.cv2, "LINE_AA", None)
+
+        app.get_logger = lambda *a, **k: DummyLogger()
+        app.load_custom_module = lambda name: dummy_module
+        app.cv2.getPerspectiveTransform = lambda src, dst: np.eye(3, dtype=np.float32)
+
+        def warp_perspective(_frame, _matrix, size):
+            width = max(int(size[0]), 1)
+            height = max(int(size[1]), 1)
+            return np.zeros((height, width, 3), dtype=np.uint8)
+
+        app.cv2.warpPerspective = warp_perspective
+        app.cv2.polylines = lambda *a, **k: None
+        app.cv2.putText = lambda *a, **k: None
+        app.cv2.imencode = lambda *_a, **_k: (True, np.ones((10,), dtype=np.uint8))
+        app.cv2.FONT_HERSHEY_SIMPLEX = 0
+        app.cv2.LINE_AA = 0
+
+        loop_task = asyncio.create_task(app.run_inference_loop("0"))
+        try:
+            deadline = time.monotonic() + 2.0
+            while time.monotonic() < deadline and not logs:
+                await asyncio.sleep(0.05)
+            return logs
+        finally:
+            loop_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await loop_task
+            await worker.stop()
+            app.camera_workers.pop("0", None)
+            app.camera_sources.pop("0", None)
+            app.active_sources.pop("0", None)
+            app.inference_rois.pop("0", None)
+            app.inference_intervals.pop("0", None)
+            app.inference_groups.pop("0", None)
+            app.get_logger = original_logger
+            app.load_custom_module = original_loader
+            if original_get_perspective is not None:
+                app.cv2.getPerspectiveTransform = original_get_perspective
+            else:
+                delattr(app.cv2, "getPerspectiveTransform")
+            if original_warp is not None:
+                app.cv2.warpPerspective = original_warp
+            else:
+                delattr(app.cv2, "warpPerspective")
+            if original_polylines is not None:
+                app.cv2.polylines = original_polylines
+            else:
+                delattr(app.cv2, "polylines")
+            if original_put_text is not None:
+                app.cv2.putText = original_put_text
+            else:
+                delattr(app.cv2, "putText")
+            if original_imencode is not None:
+                app.cv2.imencode = original_imencode
+            else:
+                delattr(app.cv2, "imencode")
+            if original_font is not None:
+                app.cv2.FONT_HERSHEY_SIMPLEX = original_font
+            else:
+                delattr(app.cv2, "FONT_HERSHEY_SIMPLEX")
+            if original_line_aa is not None:
+                app.cv2.LINE_AA = original_line_aa
+            else:
+                delattr(app.cv2, "LINE_AA")
+            app._stop_inference_workers()
+            app._INFERENCE_QUEUE = Queue(maxsize=original_queue_size)
+            app.MAX_WORKERS = original_max_workers
+            app._EXECUTOR = None
+            app._start_inference_workers()
+
+    log_entries = asyncio.run(main())
+    assert log_entries, "ควรได้ log AGGREGATED_ROI ทุกครั้ง"
+    for entry in log_entries:
+        payload = json.loads(entry)
+        assert len(payload.get("results", [])) == 9, "ควรมีผลลัพธ์ ROI ครบ 9 รายการ"
