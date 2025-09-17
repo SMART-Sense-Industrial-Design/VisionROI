@@ -409,7 +409,9 @@
         }
 
         function openSocket() {
-            socket = new WebSocket(`ws://${location.host}/ws/${cam}`);
+            const wsScheme = location.protocol === 'https:' ? 'wss' : 'ws';
+            const wsBase = `${wsScheme}://${location.host}`;
+            socket = new WebSocket(`${wsBase}/ws/${cam}`);
             socket.binaryType = 'blob';
             socket.onmessage = async function(event) {
                 try {
@@ -430,7 +432,9 @@
         }
 
         function openRoiSocket() {
-            roiSocket = new WebSocket(`ws://${location.host}/ws_roi_result/${cam}`);
+            const wsScheme = location.protocol === 'https:' ? 'wss' : 'ws';
+            const wsBase = `${wsScheme}://${location.host}`;
+            roiSocket = new WebSocket(`${wsBase}/ws_roi_result/${cam}`);
             roiSocket.onmessage = function(event) {
                 try {
                     const data = JSON.parse(event.data);
