@@ -191,17 +191,17 @@
             const moduleLine = document.createElement('p');
             moduleLine.id = getModuleElementId(id);
             moduleLine.className = 'roi-module';
-            const p = document.createElement('p');
-            p.id = `${cellId}-text-${id}`;
-            p.className = 'roi-text';
             const t = document.createElement('p');
             t.id = `${cellId}-time-${id}`;
             t.className = 'roi-time';
+            const p = document.createElement('p');
+            p.id = `${cellId}-text-${id}`;
+            p.className = 'roi-text';
             item.appendChild(title);
             item.appendChild(img);
             item.appendChild(moduleLine);
-            item.appendChild(p);
             item.appendChild(t);
+            item.appendChild(p);
             roiGrid.appendChild(item);
             updateRoiModuleLabel(id);
         }
@@ -219,7 +219,7 @@
             const textEl = document.getElementById(`${cellId}-text-${roiId}`);
             if (textEl) {
                 const text = result.text ?? '';
-                textEl.textContent = `OCR: ${text}`;
+                textEl.textContent = text ? `ข้อความ: ${text}` : 'ข้อความ: -';
             }
             const timeEl = document.getElementById(`${cellId}-time-${roiId}`);
             if (timeEl) {
