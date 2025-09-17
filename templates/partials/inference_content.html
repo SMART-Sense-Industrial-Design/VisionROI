@@ -80,6 +80,17 @@
             return `${d.toLocaleTimeString('th-TH', { hour12: false })}.${ms}`;
         };
 
+        const formatDuration = seconds => {
+            if (!Number.isFinite(seconds) || seconds < 0) return '';
+            if (seconds >= 1) {
+                return `${seconds.toFixed(2)} s`;
+            }
+            if (seconds >= 0.001) {
+                return `${Math.round(seconds * 1000)} ms`;
+            }
+            return `${(seconds * 1000).toFixed(2)} ms`;
+        };
+
         sourceSelect.onchange = () => {
             localStorage.setItem(`${cellId}-source`, sourceSelect.value);
         };
@@ -184,10 +195,18 @@
             }
             const timeEl = document.getElementById(`${cellId}-time-${roiId}`);
             if (timeEl) {
-                const ts = typeof result.frame_time === 'number'
-                    ? result.frame_time
-                    : fallbackFrameTime;
-                timeEl.textContent = ts ? `เวลา: ${formatTs(ts)}` : '';
+                const duration = typeof result.duration === 'number'
+                    ? result.duration
+                    : Number.NaN;
+                const durationText = formatDuration(duration);
+                if (durationText) {
+                    timeEl.textContent = `เวลา: ${durationText}`;
+                } else {
+                    const ts = typeof result.frame_time === 'number'
+                        ? result.frame_time
+                        : fallbackFrameTime;
+                    timeEl.textContent = ts ? `เวลา: ${formatTs(ts)}` : '';
+                }
             }
         }
 
@@ -226,6 +245,10 @@
                                     parts.push(`roi_id=${roiId}`);
                                     if(res.name)parts.push(`name=${res.name}`);
                                     if(groupLabel)parts.push(`group=${groupLabel}`);
+                                    if(typeof res.duration==='number'){
+                                        const dur=formatDuration(res.duration);
+                                        if(dur)parts.push(`duration=${dur}`);
+                                    }
                                     const textValue=typeof res.text==='string'?res.text:'';
                                     parts.push(`text=${textValue}`);
                                     td.textContent=parts.join(' | ');
