@@ -15,6 +15,7 @@ dependencies = [
     "Pillow",
     "easyocr",
     "rapidocr",
+    "pytesseract",
 ]
 
 [project.optional-dependencies]

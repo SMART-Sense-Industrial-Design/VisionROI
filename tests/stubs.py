@@ -51,6 +51,8 @@ def stub_cv2():
     cv2_stub.rectangle = lambda *a, **k: None
     cv2_stub.putText = lambda *a, **k: None
     cv2_stub.resize = lambda img, dsize, fx=0, fy=0, **k: img
+    cv2_stub.cvtColor = lambda img, code, **k: img
+    cv2_stub.COLOR_BGR2RGB = 0
     cv2_stub.destroyAllWindows = lambda: None
     cv2_stub.IMWRITE_JPEG_QUALITY = 1
     sys.modules["cv2"] = cv2_stub
