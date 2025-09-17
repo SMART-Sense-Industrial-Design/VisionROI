@@ -481,6 +481,7 @@ async def run_inference_loop(cam_id: str):
     pending_ready: set[tuple[str, float]] = set()
     pending_context: dict[tuple[str, float], dict[str, Any]] = {}
     pending_extensions: dict[tuple[str, float], int] = {}
+    pending_roi_start: dict[tuple[str, float], dict[str | int, float]] = {}
 
     def get_pending_timeout() -> float:
         timeout = inference_result_timeouts.get(cam_id)
@@ -501,6 +502,7 @@ async def run_inference_loop(cam_id: str):
                 | set(pending_deadlines.keys())
                 | set(pending_ready)
                 | set(pending_extensions.keys())
+                | set(pending_roi_start.keys())
             )
         else:
             now = time.time()
@@ -522,6 +524,7 @@ async def run_inference_loop(cam_id: str):
             pending_ready.discard(key)
             pending_context.pop(key, None)
             pending_extensions.pop(key, None)
+            pending_roi_start.pop(key, None)
 
     def flush_pending_result(key: tuple[str, float]) -> None:
         results_map = pending_results.pop(key, None)
@@ -529,6 +532,7 @@ async def run_inference_loop(cam_id: str):
         pending_deadlines.pop(key, None)
         pending_ready.discard(key)
         pending_extensions.pop(key, None)
+        pending_roi_start.pop(key, None)
         if not results_map:
             return
         results_map = dict(results_map)
@@ -557,18 +561,20 @@ async def run_inference_loop(cam_id: str):
             else:
                 agg_logger = get_logger('aggregated_roi')
             if agg_logger is not None:
-                sanitized_results: list[dict[str, str]] = []
+                sanitized_results: list[dict[str, Any]] = []
                 for res in results_list:
                     roi_identifier = res.get('id')
                     if roi_identifier is None:
                         continue
-                    sanitized_results.append(
-                        {
-                            'id': str(roi_identifier),
-                            'name': str(res.get('name') or ''),
-                            'text': str(res.get('text') or ''),
-                        }
-                    )
+                    sanitized_entry = {
+                        'id': str(roi_identifier),
+                        'name': str(res.get('name') or ''),
+                        'text': str(res.get('text') or ''),
+                    }
+                    duration_val = res.get('duration')
+                    if isinstance(duration_val, (int, float)):
+                        sanitized_entry['duration'] = float(duration_val)
+                    sanitized_results.append(sanitized_entry)
                 if sanitized_results:
                     log_entry = {
                         'frame_time': payload_dict['frame_time'],
@@ -777,6 +783,7 @@ async def run_inference_loop(cam_id: str):
                         dst = np.array([[0, 0], [max_w - 1, 0], [max_w - 1, max_h - 1], [0, max_h - 1]], dtype=np.float32)
                         matrix = cv2.getPerspectiveTransform(src, dst)
                         roi = await asyncio.to_thread(cv2.warpPerspective, frame, matrix, (max_w, max_h))
+                        roi_identifier = r.get('id', i)
                         args = [roi, r.get('id', str(i)), save_flag]
                         if takes_source:
                             args.append(active_sources.get(cam_id, ''))
@@ -786,6 +793,7 @@ async def run_inference_loop(cam_id: str):
                             args.append(inference_intervals.get(cam_id, 1.0))
                         fut = loop.create_future()
                         pending_key = (cam_id, frame_time)
+                        start_time = time.time()
                         try:
                             await asyncio.to_thread(
                                 _INFERENCE_QUEUE.put,
@@ -806,12 +814,16 @@ async def run_inference_loop(cam_id: str):
                         pending_deadlines[pending_key] = (
                             time.time() + get_pending_timeout()
                         )
+                        start_map = pending_roi_start.setdefault(
+                            pending_key, {}
+                        )
+                        start_map[roi_identifier] = start_time
                         scheduled_any = True
 
                         def _on_done(
                             f: asyncio.Future,
                             roi_img=roi,
-                            roi_id=r.get('id', i),
+                            roi_id=roi_identifier,
                             frame_time=frame_time,
                             key=pending_key,
                             roi_name=r.get('name') or '',
@@ -841,15 +853,29 @@ async def run_inference_loop(cam_id: str):
                             else:
                                 result_text = str(result)
 
+                            start_map = pending_roi_start.get(key)
+                            start_ts = None
+                            if start_map is not None:
+                                start_ts = start_map.pop(roi_id, None)
+                                if not start_map:
+                                    pending_roi_start.pop(key, None)
+
+                            result_timestamp = time.time()
+                            duration = None
+                            if isinstance(start_ts, (int, float)):
+                                duration = max(0.0, result_timestamp - start_ts)
+
                             entry = {
                                 'id': roi_id,
                                 'image': '',
                                 'text': result_text,
                                 'frame_time': frame_time,
-                                'result_time': time.time(),
+                                'result_time': result_timestamp,
                                 'name': roi_name,
                                 'group': roi_group,
                             }
+                            if duration is not None:
+                                entry['duration'] = duration
                             try:
                                 if roi_img is not None:
                                     encoded, roi_buf = cv2.imencode(
@@ -937,6 +963,7 @@ async def run_inference_loop(cam_id: str):
         pending_ready.clear()
         pending_context.clear()
         pending_extensions.clear()
+        pending_roi_start.clear()
         for mod_name, (module, _, _, _) in module_cache.items():
             if module is not None:
                 with contextlib.suppress(Exception):
