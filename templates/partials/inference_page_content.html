@@ -185,12 +185,6 @@ function createController(cellId){
         rois=roiList.filter(r=>r.type==='roi');
         populateLogRoiSelect();
         roiGrid.innerHTML='';
-        rois.forEach(r=>{
-            if(r && r.id!==undefined && r.id!==null){
-                ensureRoiItem(r.id);
-                updateRoiModuleLabel(r.id);
-            }
-        });
 
         scoreTableBody.innerHTML='';
 
@@ -288,6 +282,8 @@ function createController(cellId){
         };
     }
 
+    const getRoiContainerId=id=>`${cellId}-roi-item-${id}`;
+    const getRoiTitleId=id=>`${cellId}-title-${id}`;
     const getRoiElementId=id=>`${cellId}-roi-${id}`;
     const getRoiTextId=id=>`${cellId}-text-${id}`;
     const getRoiTimeId=id=>`${cellId}-time-${id}`;
@@ -311,15 +307,29 @@ function createController(cellId){
         moduleEl.textContent=moduleName?`โมดูล: ${moduleName}`:'โมดูล: -';
     }
 
-    function ensureRoiItem(id){
+    function updateRoiTitle(id,nameOverride=''){
+        const titleEl=document.getElementById(getRoiTitleId(id));
+        if(!titleEl)return;
+        const fallback=findRoiDataById(id)?.name;
+        const title=nameOverride||fallback||`ROI ${id}`;
+        titleEl.textContent=title;
+    }
+
+    function ensureRoiItem(id,nameOverride=''){
         const key=String(id);
-        if(document.getElementById(getRoiElementId(key)))return;
+        const existing=document.getElementById(getRoiContainerId(key));
+        if(existing){
+            updateRoiTitle(key,nameOverride);
+            return existing;
+        }
         const r=findRoiDataById(key)||{id:key};
         const item=document.createElement('div');
         item.className='roi-item';
+        item.id=getRoiContainerId(key);
         const title=document.createElement('h4');
         title.className='roi-title';
-        title.textContent=r.name||`ROI ${key}`;
+        title.id=getRoiTitleId(key);
+        title.textContent=nameOverride||r.name||`ROI ${key}`;
         const img=document.createElement('img');
         img.id=getRoiElementId(key);
         img.className='roi-image';
@@ -341,6 +351,14 @@ function createController(cellId){
         item.appendChild(p);
         roiGrid.appendChild(item);
         updateRoiModuleLabel(key);
+        return item;
+    }
+
+    function removeRoiItem(id){
+        const item=document.getElementById(getRoiContainerId(id));
+        if(item && item.parentNode){
+            item.parentNode.removeChild(item);
+        }
     }
 
     function applyRoiResult(result,fallbackFrameTime){
@@ -348,14 +366,27 @@ function createController(cellId){
         const roiId=result.id;
         if(roiId===undefined||roiId===null)return;
         const key=String(roiId);
-        ensureRoiItem(key);
+        const imageData=typeof result.image==='string'?result.image.trim():'';
+        const candidates=[result.text,result.result,result.value,result.ocr];
+        const text=candidates.find(v=>typeof v==='string'&&v.trim().length>0)?.trim()||'';
+        const duration=typeof result.duration==='number'?result.duration:Number.NaN;
+        const durationText=formatDuration(duration);
+        const ts=typeof result.frame_time==='number'?result.frame_time:fallbackFrameTime;
+        const hasTimestamp=Number.isFinite(ts);
+        const shouldDisplay=Boolean((imageData&&imageData.length>0)||text||durationText);
+        if(!shouldDisplay){
+            removeRoiItem(key);
+            return;
+        }
+        const displayName=typeof result.name==='string'?result.name.trim():'';
+        ensureRoiItem(key,displayName);
         updateRoiModuleLabel(key,result.module);
+        updateRoiTitle(key,displayName);
         const imgEl=document.getElementById(getRoiElementId(key));
         if(imgEl && Object.prototype.hasOwnProperty.call(result,'image')){
-            const imgData=result.image;
-            if(typeof imgData==='string' && imgData.length>0){
-                const trimmed=imgData.trim();
-                imgEl.src=trimmed.startsWith('data:')?trimmed:`data:image/jpeg;base64,${trimmed}`;
+            if(imageData){
+                const src=imageData.startsWith('data:')?imageData:`data:image/jpeg;base64,${imageData}`;
+                imgEl.src=src;
                 imgEl.classList.remove('d-none');
             }else{
                 imgEl.src='';
@@ -364,19 +395,16 @@ function createController(cellId){
         }
         const textEl=document.getElementById(getRoiTextId(key));
         if(textEl){
-            const candidates=[result.text,result.result,result.value,result.ocr];
-            const text=candidates.find(v=>typeof v==='string'&&v.trim().length>0)||'';
             textEl.textContent=text?`ข้อความ: ${text}`:'ข้อความ: -';
         }
         const timeEl=document.getElementById(getRoiTimeId(key));
         if(timeEl){
-            const duration=typeof result.duration==='number'?result.duration:Number.NaN;
-            const durationText=formatDuration(duration);
             if(durationText){
                 timeEl.textContent=`เวลา: ${durationText}`;
+            }else if(hasTimestamp){
+                timeEl.textContent=`เวลา: ${formatTs(ts)}`;
             }else{
-                const ts=typeof result.frame_time==='number'?result.frame_time:fallbackFrameTime;
-                timeEl.textContent=ts?`เวลา: ${formatTs(ts)}`:'';
+                timeEl.textContent='';
             }
         }
     }
@@ -502,12 +530,6 @@ function createController(cellId){
                     rois=(roiData.rois||[]).filter(r=>r.type==='roi');
                     populateLogRoiSelect();
                     roiGrid.innerHTML='';
-                    rois.forEach(r=>{
-                        if(r && r.id!==undefined && r.id!==null){
-                            ensureRoiItem(r.id);
-                            updateRoiModuleLabel(r.id);
-                        }
-                    });
                     startLogUpdates(cfg.name);
                 }
                 setRunningUI();
