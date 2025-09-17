@@ -185,11 +185,6 @@ function createController(cellId){
         rois=roiList.filter(r=>r.type==='roi');
         populateLogRoiSelect();
         roiGrid.innerHTML='';
-        rois.forEach(r=>{
-            if(r && r.id!==undefined && r.id!==null){
-                ensureRoiItem(r.id);
-            }
-        });
 
         scoreTableBody.innerHTML='';
 
