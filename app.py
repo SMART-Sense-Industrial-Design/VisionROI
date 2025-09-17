@@ -542,15 +542,20 @@ async def run_inference_loop(cam_id: str):
             'frame_time': key[1],
             'result_time': time.time(),
             'results': results_list,
+            'cam_id': key[0],
         }
         context = pending_context.pop(key, None) or {}
         source_name = context.get('source') or active_sources.get(key[0], '')
         group_name = context.get('group') or ''
+        if group_name:
+            payload_dict['group'] = group_name
+        if source_name:
+            payload_dict['source'] = source_name
         try:
             if source_name:
                 agg_logger = get_logger('aggregated_roi', source_name)
             else:
-                agg_logger = None
+                agg_logger = get_logger('aggregated_roi')
             if agg_logger is not None:
                 sanitized_results: list[dict[str, str]] = []
                 for res in results_list:
