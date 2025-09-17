@@ -317,7 +317,7 @@
             }
             const res = await fetchWithStatus(`/load_roi_file?path=${encodeURIComponent(roiPath)}`);
             const data = await res.json();
-            statusEl.innerText = 'Loaded: ' + data.filename;
+            statusEl.innerText = '';
             allRois = data.rois || [];
             const roiList = allRois.filter(r => (r.type ?? 'roi') === 'roi');
             if (selectedGroup) {
