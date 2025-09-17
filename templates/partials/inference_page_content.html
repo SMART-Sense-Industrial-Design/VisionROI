@@ -323,7 +323,41 @@ function createController(cellId){
                 const data=await res.json();
                 logBody.innerHTML='';
                 const filter=logRoiSelect.value;
-                (data.lines||[]).slice().reverse().forEach(line=>{
+                const lines=(data.lines||[]).slice().reverse();
+                lines.forEach(line=>{
+                    const marker='AGGREGATED_ROI ';
+                    const idx=line.indexOf(marker);
+                    if(idx!==-1){
+                        const prefix=line.slice(0,idx).trim();
+                        const payload=line.slice(idx+marker.length).trim();
+                        try{
+                            const parsed=JSON.parse(payload);
+                            const results=Array.isArray(parsed.results)?parsed.results:[];
+                            const frameTs=typeof parsed.frame_time==='number'?parsed.frame_time:null;
+                            const resultTs=typeof parsed.result_time==='number'?parsed.result_time:null;
+                            const groupLabel=parsed.group||'';
+                            results.forEach(res=>{
+                                const roiId=res?.id??res?.roi_id??res?.ROI_ID;
+                                if(roiId===undefined||roiId===null)return;
+                                if(filter && String(roiId)!==filter)return;
+                                const tr=document.createElement('tr');
+                                const td=document.createElement('td');
+                                const parts=[];
+                                if(prefix)parts.push(prefix);
+                                if(frameTs)parts.push(`frame=${formatTs(frameTs)}`);
+                                if(resultTs)parts.push(`result=${formatTs(resultTs)}`);
+                                parts.push(`roi_id=${roiId}`);
+                                if(res.name)parts.push(`name=${res.name}`);
+                                if(groupLabel)parts.push(`group=${groupLabel}`);
+                                const textValue=typeof res.text==='string'?res.text:'';
+                                parts.push(`text=${textValue}`);
+                                td.textContent=parts.join(' | ');
+                                tr.appendChild(td);
+                                logBody.appendChild(tr);
+                            });
+                            return;
+                        }catch(e){}
+                    }
                     if(filter && !line.includes(`roi_id=${filter}`))return;
                     const tr=document.createElement('tr');
                     const td=document.createElement('td');

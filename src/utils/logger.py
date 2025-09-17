@@ -9,6 +9,27 @@ _formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
 _loggers: dict[tuple[str, str], logging.Logger] = {}
 _lock = threading.Lock()
 
+_SUPPRESS_INFO_MODULES = {
+    "easy_ocr",
+    "rapid_ocr",
+    "typhoon_ocr",
+    "base_ocr",
+}
+
+
+class _DropOcrResultFilter(logging.Filter):
+    """กรองข้อความ OCR result ที่ต้องรอรวมผลก่อนบันทึก"""
+
+    def filter(self, record: logging.LogRecord) -> bool:  # pragma: no cover - simple guard
+        if record.levelno <= logging.INFO:
+            try:
+                message = record.getMessage()
+            except Exception:  # pragma: no cover - หาก message มีปัญหาให้ผ่านต่อ
+                return True
+            if "OCR result" in message:
+                return False
+        return True
+
 _DATA_SOURCES_ROOT = Path(__file__).resolve().parents[2] / "data_sources"
 _INFERENCE_ROOT = Path(__file__).resolve().parents[2] / "inference_modules"
 
@@ -31,8 +52,12 @@ def get_logger(module_name: str, source: str | None = None) -> logging.Logger:
         else:
             log_dir = _INFERENCE_ROOT / module_name
         log_dir.mkdir(parents=True, exist_ok=True)
-        handler = TimedRotatingFileHandler(str(log_dir / "custom.log"), when="D", interval=1, backupCount=7)
+        handler = TimedRotatingFileHandler(
+            str(log_dir / "custom.log"), when="D", interval=1, backupCount=7
+        )
         handler.setFormatter(_formatter)
+        if module_name in _SUPPRESS_INFO_MODULES:
+            handler.addFilter(_DropOcrResultFilter())
         logger.addHandler(handler)
         logger.propagate = False
         _loggers[key] = logger
