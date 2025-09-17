@@ -26,6 +26,7 @@ import time
 from typing import Callable, Awaitable, Any
 from concurrent.futures import ThreadPoolExecutor
 from queue import Queue, Empty, Full
+from src.utils.logger import get_logger
 try:
     from websockets.exceptions import ConnectionClosed
 except Exception:
@@ -463,6 +464,7 @@ async def run_inference_loop(cam_id: str):
     pending_expected: dict[tuple[str, float], int] = {}
     pending_deadlines: dict[tuple[str, float], float] = {}
     pending_ready: set[tuple[str, float]] = set()
+    pending_context: dict[tuple[str, float], dict[str, Any]] = {}
     PENDING_RESULT_TIMEOUT = 10.0
 
     def cleanup_pending_results(force: bool = False) -> None:
@@ -484,6 +486,7 @@ async def run_inference_loop(cam_id: str):
             pending_expected.pop(key, None)
             pending_deadlines.pop(key, None)
             pending_ready.discard(key)
+            pending_context.pop(key, None)
 
     def flush_pending_result(key: tuple[str, float]) -> None:
         results_map = pending_results.pop(key, None)
@@ -504,6 +507,42 @@ async def run_inference_loop(cam_id: str):
             'result_time': time.time(),
             'results': results_list,
         }
+        context = pending_context.pop(key, None) or {}
+        source_name = context.get('source') or active_sources.get(key[0], '')
+        group_name = context.get('group') or ''
+        try:
+            if source_name:
+                agg_logger = get_logger('aggregated_roi', source_name)
+            else:
+                agg_logger = None
+            if agg_logger is not None:
+                sanitized_results: list[dict[str, str]] = []
+                for res in results_list:
+                    roi_identifier = res.get('id')
+                    if roi_identifier is None:
+                        continue
+                    sanitized_results.append(
+                        {
+                            'id': str(roi_identifier),
+                            'name': str(res.get('name') or ''),
+                            'text': str(res.get('text') or ''),
+                        }
+                    )
+                if sanitized_results:
+                    log_entry = {
+                        'frame_time': payload_dict['frame_time'],
+                        'result_time': payload_dict['result_time'],
+                        'cam_id': key[0],
+                        'group': group_name,
+                        'source': source_name,
+                        'results': sanitized_results,
+                    }
+                    agg_logger.info(
+                        "AGGREGATED_ROI %s",
+                        json.dumps(log_entry, ensure_ascii=False),
+                    )
+        except Exception:
+            pass
         try:
             q = get_roi_result_queue(key[0])
             payload = json.dumps(payload_dict)
@@ -731,6 +770,8 @@ async def run_inference_loop(cam_id: str):
                             roi_id=r.get('id', i),
                             frame_time=frame_time,
                             key=pending_key,
+                            roi_name=r.get('name') or '',
+                            roi_group=r.get('group') or r.get('page') or '',
                         ) -> None:
                             if key not in pending_expected:
                                 return
@@ -762,6 +803,8 @@ async def run_inference_loop(cam_id: str):
                                 'text': result_text,
                                 'frame_time': frame_time,
                                 'result_time': time.time(),
+                                'name': roi_name,
+                                'group': roi_group,
                             }
                             try:
                                 if roi_img is not None:
@@ -794,6 +837,17 @@ async def run_inference_loop(cam_id: str):
         if scheduled_any:
             pending_key = (cam_id, frame_time)
             pending_ready.add(pending_key)
+            if pending_key not in pending_context:
+                if forced_group and forced_group != 'all':
+                    context_group = forced_group
+                elif forced_group == 'all':
+                    context_group = 'all'
+                else:
+                    context_group = selected_group or ''
+                pending_context[pending_key] = {
+                    'group': context_group,
+                    'source': active_sources.get(cam_id, ''),
+                }
             total_rois = pending_expected.get(pending_key, 0)
             current_results = pending_results.get(pending_key)
             if total_rois and current_results and len(current_results) >= total_rois:
@@ -837,6 +891,7 @@ async def run_inference_loop(cam_id: str):
         pending_expected.clear()
         pending_deadlines.clear()
         pending_ready.clear()
+        pending_context.clear()
         for mod_name, (module, _, _, _) in module_cache.items():
             if module is not None:
                 with contextlib.suppress(Exception):
