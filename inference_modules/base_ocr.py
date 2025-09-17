@@ -1,10 +1,9 @@
 from __future__ import annotations
 
 import time
+from logging import Logger
 from PIL import Image
 import cv2
-from logging.handlers import TimedRotatingFileHandler
-import logging
 import os
 from datetime import datetime
 import threading
@@ -23,11 +22,10 @@ class BaseOCR:
     MODULE_NAME = "base_ocr"
 
     def __init__(self) -> None:
-        self.logger = logging.getLogger(__name__)
-        self.logger.setLevel(logging.INFO)
-        self._formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
-        self._handler: TimedRotatingFileHandler | None = None
-        self._current_source: str | None = None
+        from src.utils.logger import get_logger as _get_shared_logger
+
+        self._get_shared_logger = _get_shared_logger
+        self.logger = self._get_shared_logger(self.MODULE_NAME)
         # base_ocr อยู่ในโฟลเดอร์ inference_modules ดังนั้น parents[1] คือ root
         self._data_sources_root = Path(__file__).resolve().parents[1] / "data_sources"
 
@@ -37,28 +35,9 @@ class BaseOCR:
         self._imwrite_lock = threading.Lock()
 
     # ------------------------- logging -------------------------
-    def get_logger(self, source: str | None) -> logging.Logger:
+    def get_logger(self, source: str | None) -> Logger:
         """คืน logger ที่บันทึก log ตาม source"""
-        source = source or ""
-        if self._current_source == source and self._handler:
-            return self.logger
-
-        log_dir = (
-            self._data_sources_root / source
-            if source
-            else Path(__file__).resolve().parent
-        )
-        log_dir.mkdir(parents=True, exist_ok=True)
-        log_path = log_dir / "custom.log"
-        if self._handler:
-            self.logger.removeHandler(self._handler)
-            self._handler.close()
-        self._handler = TimedRotatingFileHandler(
-            str(log_path), when="D", interval=1, backupCount=7
-        )
-        self._handler.setFormatter(self._formatter)
-        self.logger.addHandler(self._handler)
-        self._current_source = source
+        self.logger = self._get_shared_logger(self.MODULE_NAME, source)
         return self.logger
 
     # ------------------------- image saving -------------------------
@@ -138,12 +117,5 @@ class BaseOCR:
         with self._last_ocr_lock:
             self.last_ocr_times.clear()
             self.last_ocr_results.clear()
-        if self._handler:
-            self.logger.removeHandler(self._handler)
-            try:
-                self._handler.close()
-            finally:
-                self._handler = None
-        self._current_source = None
         self._cleanup_extra()
         gc.collect()

@@ -570,6 +570,7 @@ async def run_inference_loop(cam_id: str):
                         'id': str(roi_identifier),
                         'name': str(res.get('name') or ''),
                         'text': str(res.get('text') or ''),
+                        'module': str(res.get('module') or ''),
                     }
                     duration_val = res.get('duration')
                     if isinstance(duration_val, (int, float)):
@@ -828,6 +829,7 @@ async def run_inference_loop(cam_id: str):
                             key=pending_key,
                             roi_name=r.get('name') or '',
                             roi_group=r.get('group') or r.get('page') or '',
+                            module_name=mod_name or '',
                         ) -> None:
                             if key not in pending_expected:
                                 return
@@ -873,6 +875,7 @@ async def run_inference_loop(cam_id: str):
                                 'result_time': result_timestamp,
                                 'name': roi_name,
                                 'group': roi_group,
+                                'module': module_name,
                             }
                             if duration is not None:
                                 entry['duration'] = duration

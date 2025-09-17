@@ -34,6 +34,10 @@ def test_tesseract_ocr_process_returns_text(monkeypatch, tmp_path):
     custom = importlib.import_module(module_name)
     ocr = custom.TesseractOCR(lang="eng", config="--psm 6")
     monkeypatch.setattr(ocr, "_data_sources_root", tmp_path)
+    from src.utils import logger as logger_utils
+
+    monkeypatch.setattr(logger_utils, "_DATA_SOURCES_ROOT", tmp_path)
+    logger_utils._loggers.clear()
 
     frame = np.zeros((4, 4, 3), dtype=np.uint8)
 
