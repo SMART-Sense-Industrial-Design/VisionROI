@@ -259,13 +259,15 @@ function createController(cellId){
                             });
                         }
                     },0);
-                } else if (Array.isArray(data.results)) {
+                }
+                if(Array.isArray(data.results)){
                     const fallbackFrameTime=
                         typeof data.frame_time==='number'?data.frame_time:undefined;
                     setTimeout(()=>{
                         data.results.forEach(item=>applyRoiResult(item,fallbackFrameTime));
                     },0);
-                } else if (Object.prototype.hasOwnProperty.call(data,'id')) {
+                }
+                if(Object.prototype.hasOwnProperty.call(data,'id')){
                     setTimeout(()=>{
                         applyRoiResult(data);
                     },0);
