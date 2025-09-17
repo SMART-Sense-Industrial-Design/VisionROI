@@ -365,7 +365,9 @@ def test_aggregated_roi_logs_all_results_when_queue_full():
     assert log_entries, "ควรได้ log AGGREGATED_ROI ทุกครั้ง"
     for entry in log_entries:
         payload = json.loads(entry)
-        assert len(payload.get("results", [])) == 9, "ควรมีผลลัพธ์ ROI ครบ 9 รายการ"
+        results = payload.get("results", [])
+        assert len(results) == 9, "ควรมีผลลัพธ์ ROI ครบ 9 รายการ"
+        assert all(item.get("module") == "dummy_module" for item in results)
 
 
 def test_aggregated_roi_logs_separate_files_per_source():
