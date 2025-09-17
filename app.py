@@ -52,9 +52,11 @@ inference_groups: dict[str, str | None] = {}
 inference_intervals: dict[str, float] = {}
 last_inference_times: dict[str, float] = {}
 last_inference_outputs: dict[str, str] = {}
+inference_result_timeouts: dict[str, float] = {}
 
 STATE_FILE = "service_state.json"
 PAGE_SCORE_THRESHOLD = 0.4
+DEFAULT_PENDING_RESULT_TIMEOUT = float(os.getenv("INFERENCE_RESULT_TIMEOUT", "10.0") or 10.0)
 
 app = Quart(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 100 * 1024 * 1024
@@ -151,6 +153,7 @@ def _free_cam_state(cam_id: str):
     inference_rois.pop(cam_id, None)
     inference_intervals.pop(cam_id, None)
     last_inference_times.pop(cam_id, None)
+    inference_result_timeouts.pop(cam_id, None)
 
     # Queues: drain & drop
     q = frame_queues.pop(cam_id, None)
@@ -213,6 +216,8 @@ def save_service_state() -> None:
             ),
             "inference_group": inference_groups.get(cam_id),
             "interval": inference_intervals.get(cam_id, 1.0),
+            "result_timeout": inference_result_timeouts.get(cam_id,
+                                                            DEFAULT_PENDING_RESULT_TIMEOUT),
         }
         for cam_id in cam_ids
     }
@@ -252,6 +257,16 @@ async def restore_service_state() -> None:
         active_sources[cam_id] = cfg.get("active_source", "")
         group = cfg.get("inference_group")
         inference_intervals[cam_id] = cfg.get("interval", 1.0)
+        timeout_val = cfg.get("result_timeout")
+        if timeout_val is not None:
+            try:
+                inference_result_timeouts[cam_id] = max(
+                    0.1, float(timeout_val)
+                )
+            except (TypeError, ValueError):
+                inference_result_timeouts.pop(cam_id, None)
+        else:
+            inference_result_timeouts.pop(cam_id, None)
         if cfg.get("inference_running"):
             await perform_start_inference(cam_id, group=group, save_state=False)
         elif group is not None:
@@ -465,7 +480,19 @@ async def run_inference_loop(cam_id: str):
     pending_deadlines: dict[tuple[str, float], float] = {}
     pending_ready: set[tuple[str, float]] = set()
     pending_context: dict[tuple[str, float], dict[str, Any]] = {}
-    PENDING_RESULT_TIMEOUT = 10.0
+    pending_extensions: dict[tuple[str, float], int] = {}
+
+    def get_pending_timeout() -> float:
+        timeout = inference_result_timeouts.get(cam_id)
+        if timeout is None:
+            timeout = DEFAULT_PENDING_RESULT_TIMEOUT
+        try:
+            timeout_val = float(timeout)
+        except (TypeError, ValueError):
+            timeout_val = DEFAULT_PENDING_RESULT_TIMEOUT
+        if timeout_val <= 0:
+            return 0.1
+        return timeout_val
 
     def cleanup_pending_results(force: bool = False) -> None:
         if force:
@@ -473,26 +500,35 @@ async def run_inference_loop(cam_id: str):
                 set(pending_results.keys())
                 | set(pending_deadlines.keys())
                 | set(pending_ready)
+                | set(pending_extensions.keys())
             )
         else:
             now = time.time()
-            keys = [
-                key
-                for key, expiry in list(pending_deadlines.items())
-                if expiry <= now
-            ]
+            keys: list[tuple[str, float]] = []
+            for key, expiry in list(pending_deadlines.items()):
+                if expiry > now:
+                    continue
+                total = pending_expected.get(key, 0)
+                completed = len(pending_results.get(key, {}))
+                if total > completed:
+                    pending_deadlines[key] = now + get_pending_timeout()
+                    pending_extensions[key] = pending_extensions.get(key, 0) + 1
+                    continue
+                keys.append(key)
         for key in keys:
             pending_results.pop(key, None)
             pending_expected.pop(key, None)
             pending_deadlines.pop(key, None)
             pending_ready.discard(key)
             pending_context.pop(key, None)
+            pending_extensions.pop(key, None)
 
     def flush_pending_result(key: tuple[str, float]) -> None:
         results_map = pending_results.pop(key, None)
         pending_expected.pop(key, None)
         pending_deadlines.pop(key, None)
         pending_ready.discard(key)
+        pending_extensions.pop(key, None)
         if not results_map:
             return
         results_map = dict(results_map)
@@ -506,15 +542,20 @@ async def run_inference_loop(cam_id: str):
             'frame_time': key[1],
             'result_time': time.time(),
             'results': results_list,
+            'cam_id': key[0],
         }
         context = pending_context.pop(key, None) or {}
         source_name = context.get('source') or active_sources.get(key[0], '')
         group_name = context.get('group') or ''
+        if group_name:
+            payload_dict['group'] = group_name
+        if source_name:
+            payload_dict['source'] = source_name
         try:
             if source_name:
                 agg_logger = get_logger('aggregated_roi', source_name)
             else:
-                agg_logger = None
+                agg_logger = get_logger('aggregated_roi')
             if agg_logger is not None:
                 sanitized_results: list[dict[str, str]] = []
                 for res in results_list:
@@ -760,7 +801,7 @@ async def run_inference_loop(cam_id: str):
                             pending_expected.get(pending_key, 0) + 1
                         )
                         pending_deadlines[pending_key] = (
-                            time.time() + PENDING_RESULT_TIMEOUT
+                            time.time() + get_pending_timeout()
                         )
                         scheduled_any = True
 
@@ -820,7 +861,7 @@ async def run_inference_loop(cam_id: str):
 
                             pending_results[key][roi_id] = entry
                             pending_deadlines[key] = (
-                                time.time() + PENDING_RESULT_TIMEOUT
+                                time.time() + get_pending_timeout()
                             )
                             total_rois = pending_expected.get(key, 0)
                             if (
@@ -892,6 +933,7 @@ async def run_inference_loop(cam_id: str):
         pending_deadlines.clear()
         pending_ready.clear()
         pending_context.clear()
+        pending_extensions.clear()
         for mod_name, (module, _, _, _) in module_cache.items():
             if module is not None:
                 with contextlib.suppress(Exception):
@@ -1476,6 +1518,8 @@ async def start_inference(cam_id: str):
     rois = cfg.pop("rois", None)
     group = cfg.pop("group", None)
     interval = cfg.pop("interval", None)
+    timeout_sentinel = object()
+    result_timeout = cfg.pop("result_timeout", timeout_sentinel)
     if interval is not None:
         try:
             inference_intervals[cam_id] = float(interval)
@@ -1483,6 +1527,14 @@ async def start_inference(cam_id: str):
             inference_intervals[cam_id] = 1.0
     else:
         inference_intervals.pop(cam_id, None)
+    if result_timeout is not timeout_sentinel:
+        if result_timeout is None:
+            inference_result_timeouts.pop(cam_id, None)
+        else:
+            try:
+                inference_result_timeouts[cam_id] = max(0.1, float(result_timeout))
+            except (TypeError, ValueError):
+                inference_result_timeouts.pop(cam_id, None)
     if cfg:
         cfg_ok = await apply_camera_settings(cam_id, cfg)
         if not cfg_ok:
