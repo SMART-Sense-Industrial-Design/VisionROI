@@ -1,9 +1,12 @@
 import asyncio
 import contextlib
 import json
+import shutil
 import time
+import uuid
 from types import SimpleNamespace
 from queue import Queue
+from pathlib import Path
 
 import numpy as np
 
@@ -363,3 +366,69 @@ def test_aggregated_roi_logs_all_results_when_queue_full():
     for entry in log_entries:
         payload = json.loads(entry)
         assert len(payload.get("results", [])) == 9, "ควรมีผลลัพธ์ ROI ครบ 9 รายการ"
+
+
+def test_aggregated_roi_logs_separate_files_per_source():
+    from src.utils import logger as logger_utils
+
+    source_one = f"test-source-{uuid.uuid4().hex}"
+    source_two = f"test-source-{uuid.uuid4().hex}"
+    cam_one = "cam-1"
+    cam_two = "cam-2"
+
+    logger_one = None
+    logger_two = None
+    log_file_one = Path("data_sources") / source_one / "custom.log"
+    log_file_two = Path("data_sources") / source_two / "custom.log"
+
+    try:
+        logger_one = logger_utils.get_logger("aggregated_roi", source_one)
+        logger_two = logger_utils.get_logger("aggregated_roi", source_two)
+
+        entry_one = {
+            "frame_time": 1.0,
+            "result_time": 2.0,
+            "cam_id": cam_one,
+            "source": source_one,
+            "results": [{"id": "roi-1", "name": "", "text": "foo"}],
+        }
+        entry_two = {
+            "frame_time": 3.0,
+            "result_time": 4.0,
+            "cam_id": cam_two,
+            "source": source_two,
+            "results": [{"id": "roi-2", "name": "", "text": "bar"}],
+        }
+
+        logger_one.info("AGGREGATED_ROI %s", json.dumps(entry_one, ensure_ascii=False))
+        logger_two.info("AGGREGATED_ROI %s", json.dumps(entry_two, ensure_ascii=False))
+
+        for active_logger in (logger_one, logger_two):
+            for handler in active_logger.handlers:
+                handler.flush()
+
+        content_one = log_file_one.read_text(encoding="utf-8")
+        content_two = log_file_two.read_text(encoding="utf-8")
+
+        assert f'"cam_id": "{cam_one}"' in content_one
+        assert source_one in content_one
+        assert f'"cam_id": "{cam_two}"' not in content_one
+        assert source_two not in content_one
+
+        assert f'"cam_id": "{cam_two}"' in content_two
+        assert source_two in content_two
+        assert f'"cam_id": "{cam_one}"' not in content_two
+        assert source_one not in content_two
+    finally:
+        for active_logger, src_name, log_file in [
+            (logger_one, source_one, log_file_one),
+            (logger_two, source_two, log_file_two),
+        ]:
+            if active_logger is not None:
+                for handler in list(active_logger.handlers):
+                    handler.close()
+                    active_logger.removeHandler(handler)
+            logger_utils._loggers.pop(("aggregated_roi", src_name or ""), None)
+            log_dir = log_file.parent
+            if log_dir.exists():
+                shutil.rmtree(log_dir, ignore_errors=True)

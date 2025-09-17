@@ -45,7 +45,12 @@ def get_logger(module_name: str, source: str | None = None) -> logging.Logger:
         logger = _loggers.get(key)
         if logger is not None:
             return logger
-        logger = logging.getLogger(module_name)
+        logger_name = module_name if not src else f"{module_name}:{src}"
+        logger = logging.getLogger(logger_name)
+        if logger.handlers:
+            for existing in list(logger.handlers):
+                logger.removeHandler(existing)
+                existing.close()
         logger.setLevel(logging.INFO)
         if src:
             log_dir = _DATA_SOURCES_ROOT / src
