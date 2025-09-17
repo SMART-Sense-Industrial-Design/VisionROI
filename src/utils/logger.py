@@ -14,6 +14,7 @@ _SUPPRESS_INFO_MODULES = {
     "rapid_ocr",
     "typhoon_ocr",
     "base_ocr",
+    "tesseract_ocr",
 }
 
 

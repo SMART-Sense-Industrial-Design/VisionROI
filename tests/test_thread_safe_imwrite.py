@@ -25,7 +25,10 @@ sys.modules["PIL"] = pil_package
 sys.modules["PIL.Image"] = pil_image_module
 
 
-@pytest.mark.parametrize("module, cls_name", [("easy_ocr", "EasyOCR"), ("rapid_ocr", "RapidOCR")])
+@pytest.mark.parametrize(
+    "module, cls_name",
+    [("easy_ocr", "EasyOCR"), ("rapid_ocr", "RapidOCR"), ("tesseract_ocr", "TesseractOCR")],
+)
 def test_process_multiple_roi_thread_safe(tmp_path, monkeypatch, module, cls_name):
     """เรียก process พร้อมกันหลาย ROI เพื่อทดสอบว่าการบันทึกรูปปลอดภัย"""
 
