@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import time
+from collections import deque
+from collections.abc import Iterable
+from typing import Any
 from PIL import Image
 import cv2
 import logging
@@ -62,42 +65,8 @@ class RapidOCR(BaseOCR):
         if RapidOCRLib is not None:
             try:
                 reader = self._get_reader()
-                result = reader(frame)
-                if (
-                    isinstance(result, (list, tuple))
-                    and len(result) == 2
-                    and isinstance(result[0], (list, tuple))
-                    and not isinstance(result[1], (list, tuple, dict))
-                ):
-                    ocr_result = result[0]
-                else:
-                    ocr_result = result
-
-                text_items: list[str] = []
-                if isinstance(ocr_result, (list, tuple)):
-                    for res in ocr_result:
-                        if isinstance(res, (list, tuple)) and len(res) > 1:
-                            text_items.append(str(res[1]))
-                        elif isinstance(res, dict) and "text" in res:
-                            text_items.append(str(res["text"]))
-                elif isinstance(ocr_result, dict) and "text" in ocr_result:
-                    text_items.append(str(ocr_result["text"]))
-                elif hasattr(ocr_result, "text"):
-                    text_items.append(str(getattr(ocr_result, "text")))
-                elif hasattr(ocr_result, "texts"):
-                    texts_attr = getattr(ocr_result, "texts")
-                    if isinstance(texts_attr, (list, tuple)):
-                        text_items.extend(str(t) for t in texts_attr)
-                    elif texts_attr is not None:
-                        text_items.append(str(texts_attr))
-                elif hasattr(ocr_result, "txts"):
-                    txts_attr = getattr(ocr_result, "txts")
-                    if isinstance(txts_attr, (list, tuple)):
-                        text_items.extend(str(t) for t in txts_attr)
-                    elif txts_attr is not None:
-                        text_items.append(str(txts_attr))
-
-                text = " ".join(text_items)
+                result = _normalise_reader_output(reader(frame))
+                text = _extract_text(result)
             except Exception as e:  # pragma: no cover - log any OCR error
                 self.logger.exception(
                     f"roi_id={roi_id} {self.MODULE_NAME} OCR error: {e}"
@@ -129,46 +98,96 @@ last_ocr_results: dict = {}
 _last_ocr_lock = threading.Lock()
 
 
+def _normalise_reader_output(result: Any) -> Any:
+    """แปลงผลลัพธ์จาก RapidOCR ให้อยู่ในรูปที่นำไป extract ข้อความได้ง่าย"""
+    if (
+        isinstance(result, (list, tuple))
+        and len(result) == 2
+        and isinstance(result[0], (list, tuple))
+        and not isinstance(result[1], (list, tuple, dict))
+    ):
+        return result[0]
+    return result
+
+
+def _extract_text(ocr_result: Any) -> str:
+    """แปลงผลลัพธ์ OCR ให้เป็น string เดียวอย่างมีประสิทธิภาพ"""
+    if ocr_result is None:
+        return ""
+
+    pieces: list[str] = []
+    queue: deque[Any] = deque([ocr_result])
+
+    while queue:
+        current = queue.popleft()
+        if current is None:
+            continue
+
+        if isinstance(current, str):
+            if current:
+                pieces.append(current)
+            continue
+
+        if isinstance(current, dict):
+            text_value = current.get("text")
+            if text_value is not None:
+                _append_text_value(text_value, pieces, queue)
+            continue
+
+        text_attr = getattr(current, "text", None)
+        if text_attr is not None:
+            handled = _append_text_value(text_attr, pieces, queue)
+            if handled:
+                continue
+
+        for attr_name in ("texts", "txts"):
+            if hasattr(current, attr_name):
+                attr_value = getattr(current, attr_name)
+                if attr_value is not None:
+                    _append_text_value(attr_value, pieces, queue)
+                break
+        else:
+            if isinstance(current, (list, tuple)):
+                if len(current) > 1 and not isinstance(current[1], (list, tuple, dict)):
+                    text_candidate = current[1]
+                    if text_candidate is not None:
+                        pieces.append(str(text_candidate))
+                else:
+                    queue.extend(current)
+            else:
+                pieces.append(str(current))
+
+    return " ".join(pieces)
+
+
+def _append_text_value(value: Any, pieces: list[str], queue: deque[Any]) -> bool:
+    """เพิ่มค่าข้อความลงใน pieces หรือแตกเป็นชิ้นย่อยถ้าจำเป็น"""
+    if value is None:
+        return True
+
+    if isinstance(value, str):
+        if value:
+            pieces.append(value)
+        return True
+
+    if isinstance(value, dict):
+        queue.append(value)
+        return True
+
+    if isinstance(value, Iterable) and not isinstance(value, (bytes, bytearray)):
+        queue.extend(item for item in value if item is not None)
+        return True
+
+    pieces.append(str(value))
+    return True
+
+
 def _run_ocr_async(frame, roi_id, save, source) -> str:
     """ประมวลผล OCR และบันทึกรูป"""
     try:
         reader = _get_reader()
-        # RapidOCR อาจคืนผลลัพธ์เป็น tuple (result, time) หรือเพียง result อย่างเดียว
-        result = reader(frame)
-        if (
-            isinstance(result, (list, tuple))
-            and len(result) == 2
-            and isinstance(result[0], (list, tuple))
-            and not isinstance(result[1], (list, tuple, dict))
-        ):
-            ocr_result = result[0]
-        else:
-            ocr_result = result
-
-        text_items: list[str] = []
-        if isinstance(ocr_result, (list, tuple)):
-            for res in ocr_result:
-                if isinstance(res, (list, tuple)) and len(res) > 1:
-                    text_items.append(str(res[1]))
-                elif isinstance(res, dict) and "text" in res:
-                    text_items.append(str(res["text"]))
-        elif isinstance(ocr_result, dict) and "text" in ocr_result:
-            text_items.append(str(ocr_result["text"]))
-        elif hasattr(ocr_result, "text"):
-            text_items.append(str(getattr(ocr_result, "text")))
-        elif hasattr(ocr_result, "texts"):
-            texts_attr = getattr(ocr_result, "texts")
-            if isinstance(texts_attr, (list, tuple)):
-                text_items.extend(str(t) for t in texts_attr)
-            elif texts_attr is not None:
-                text_items.append(str(texts_attr))
-        elif hasattr(ocr_result, "txts"):
-            txts_attr = getattr(ocr_result, "txts")
-            if isinstance(txts_attr, (list, tuple)):
-                text_items.extend(str(t) for t in txts_attr)
-            elif txts_attr is not None:
-                text_items.append(str(txts_attr))
-        text = " ".join(text_items)
+        result = _normalise_reader_output(reader(frame))
+        text = _extract_text(result)
 
         logger.info(
             f"roi_id={roi_id} {MODULE_NAME} OCR result: {text}"
