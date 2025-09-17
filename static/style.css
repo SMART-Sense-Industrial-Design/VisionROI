@@ -95,6 +95,13 @@ main {
   border: 2px solid red;
 }
 
+.roi-module {
+  margin: 4px 0 0;
+  font-size: 11px;
+  text-align: center;
+  color: #6c757d;
+}
+
 .roi-text {
   margin: 2px 0 0;
   font-size: 12px;
