@@ -11,6 +11,7 @@ except Exception:  # pragma: no cover - fallback เมื่อไม่มี 
     pytesseract = None  # type: ignore[assignment]
 
 MODULE_NAME = "tesseract_ocr"
+DEFAULT_TESSERACT_LANG = "eng"
 
 _ocr_instance: "TesseractOCR" | None = None
 _ocr_instance_lock = threading.Lock()
@@ -21,9 +22,10 @@ class TesseractOCR(BaseOCR):
 
     MODULE_NAME = MODULE_NAME
 
-    def __init__(self, lang: str = "eng+tha", config: str | None = None) -> None:
+    def __init__(self, lang: str | None = None, config: str | None = None) -> None:
         super().__init__()
-        self.lang = lang
+        # บังคับให้ Tesseract ใช้ภาษาอังกฤษเสมอ แม้จะมีการส่งค่าภาษาอื่นเข้ามา
+        self.lang = DEFAULT_TESSERACT_LANG
         self.config = config
         self._ocr_lock = threading.Lock()
 
