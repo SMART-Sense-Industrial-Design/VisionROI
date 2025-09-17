@@ -62,6 +62,16 @@
         let logTimer;
         let currentLogSource;
         intervalInput.value = localStorage.getItem(`${cellId}-interval`) || '1';
+        const groupStorageKey = `${cellId}-group`;
+
+        const getStoredGroup = () => localStorage.getItem(groupStorageKey) || '';
+        const storeGroupSelection = value => {
+            if (value) {
+                localStorage.setItem(groupStorageKey, value);
+            } else {
+                localStorage.removeItem(groupStorageKey);
+            }
+        };
 
         const formatTs = ts => {
             if (!ts) return '';
@@ -283,10 +293,13 @@
                 opt.textContent = p;
                 groupSelect.appendChild(opt);
             });
-            const requested = typeof selected === 'string' ? selected : '';
+            const stored = getStoredGroup();
+            const hasSelected = typeof selected === 'string' && selected.length > 0;
+            const requested = hasSelected ? selected : stored;
             const validGroups = new Set(groups);
             const currentSelection = (requested === 'all' || validGroups.has(requested)) ? requested : '';
             groupSelect.value = currentSelection;
+            storeGroupSelection(currentSelection);
             const roiForLog = currentSelection
                 ? currentSelection === 'all'
                     ? list
@@ -495,7 +508,11 @@
 
         async function switchGroup() {
             const selected = groupSelect.value;
-            if (!selected) return;
+            storeGroupSelection(selected);
+            if (!selected) {
+                updateLogRoiOptions([]);
+                return;
+            }
             const roiList = allRois.filter(r => (r.type ?? 'roi') === 'roi');
             const filtered = selected === 'all'
                 ? roiList
