@@ -512,9 +512,26 @@
                 const roiData = await roiRes.json();
                 allRois = roiData.rois || [];
                 const roiList = allRois.filter(r => (r.type ?? 'roi') === 'roi');
-                loadGroupOptions(roiList);
-                rois = [];
+                const activeGroup = loadGroupOptions(roiList);
+                const groupToUse = activeGroup || '';
+                if (groupToUse === 'all') {
+                    rois = roiList;
+                } else if (groupToUse) {
+                    rois = roiList.filter(r => (r.group ?? r.page ?? r.name) === groupToUse);
+                } else {
+                    rois = [];
+                }
                 roiGrid.innerHTML = '';
+                rois.forEach(r => {
+                    if (r && r.id !== undefined && r.id !== null) {
+                        ensureRoiItem(r.id);
+                    }
+                });
+                if (roiSocket) {
+                    roiSocket.close();
+                    roiSocket = null;
+                }
+                openRoiSocket();
                 stopLogUpdates();
                 startLogUpdates(cfg.name);
                 setRunningUI();
