@@ -328,17 +328,17 @@ function createController(cellId){
         const moduleLine=document.createElement('p');
         moduleLine.id=getRoiModuleId(key);
         moduleLine.className='roi-module';
-        const p=document.createElement('p');
-        p.id=getRoiTextId(key);
-        p.className='roi-text';
         const t=document.createElement('p');
         t.id=getRoiTimeId(key);
         t.className='roi-time';
+        const p=document.createElement('p');
+        p.id=getRoiTextId(key);
+        p.className='roi-text';
         item.appendChild(title);
         item.appendChild(img);
         item.appendChild(moduleLine);
-        item.appendChild(p);
         item.appendChild(t);
+        item.appendChild(p);
         roiGrid.appendChild(item);
         updateRoiModuleLabel(key);
     }
@@ -366,7 +366,7 @@ function createController(cellId){
         if(textEl){
             const candidates=[result.text,result.result,result.value,result.ocr];
             const text=candidates.find(v=>typeof v==='string'&&v.trim().length>0)||'';
-            textEl.textContent=text?`OCR: ${text}`:'OCR: -';
+            textEl.textContent=text?`ข้อความ: ${text}`:'ข้อความ: -';
         }
         const timeEl=document.getElementById(getRoiTimeId(key));
         if(timeEl){
