@@ -1,24 +1,24 @@
 {% extends "base.html" %}
-{% block title %}Create Source{% endblock %}
+{% block title %}สร้างแหล่งวิดีโอ{% endblock %}
 {% block content %}
 
 <div class="container py-4">
   
   <form id="create-form" method="POST" action="/create_source" class="card mb-4">
     <div class="card-header">
-      <h2>Create Source</h2>
+      <h2>สร้างแหล่งวิดีโอ</h2>
     </div>
     <div class="card-body">
     <div class="mb-3">
-      <label for="name" class="form-label">Name:</label>
+      <label for="name" class="form-label">ชื่อ:</label>
       <input type="text" id="name" name="name" class="form-control" required>
     </div>
     <div class="mb-3">
-      <label for="source" class="form-label">Source:</label>
+      <label for="source" class="form-label">แหล่งสัญญาณ:</label>
       <input type="text" id="source" name="source" class="form-control" required>
     </div>
     <div class="mb-3">
-      <label for="stream_type" class="form-label">Stream Type:</label>
+      <label for="stream_type" class="form-label">ประเภทสตรีม:</label>
       <select id="stream_type" name="stream_type" class="form-select">
         <option value="opencv" selected>OpenCV</option>
         <option value="ffmpeg">FFmpeg</option>
@@ -28,36 +28,36 @@
       <div class="col-md-6 d-flex align-items-center">
         <div class="form-check me-2">
           <input class="form-check-input" type="checkbox" id="width-toggle">
-          <label class="form-check-label" for="width-toggle">Width:</label>
+          <label class="form-check-label" for="width-toggle">ความกว้าง:</label>
         </div>
         <input type="number" id="width" name="width" class="form-control" style="max-width:150px;" disabled>
       </div>
       <div class="col-md-6 d-flex align-items-center mt-2 mt-md-0">
         <div class="form-check me-2">
           <input class="form-check-input" type="checkbox" id="height-toggle">
-          <label class="form-check-label" for="height-toggle">Height:</label>
+          <label class="form-check-label" for="height-toggle">ความสูง:</label>
         </div>
         <input type="number" id="height" name="height" class="form-control" style="max-width:150px;" disabled>
       </div>
     </div>
-    <button type="submit" class="btn btn-primary">Create</button>
+    <button type="submit" class="btn btn-primary">สร้าง</button>
     </div>
   </form>
 
   <div class="card">
     <div class="card-header">
-      <h3>Source List</h3>
+      <h3>รายการแหล่งสัญญาณ</h3>
     </div>
     <div class="card-body">
       <table class="table table-hover mt-3">
     <thead class="table-light">
       <tr>
-        <th>Name</th>
-        <th>Source</th>
-        <th>Stream</th>
-        <th>Width</th>
-        <th>Height</th>
-        <th>Actions</th>
+        <th>ชื่อ</th>
+        <th>แหล่งสัญญาณ</th>
+        <th>สตรีม</th>
+        <th>ความกว้าง</th>
+        <th>ความสูง</th>
+        <th>การจัดการ</th>
       </tr>
     </thead>
     <tbody id="source-table-body">
@@ -115,13 +115,13 @@
                         });
                         const data = await res.json();
                         if (res.ok && data.status === 'updated') {
-                            showAlert('Stream type updated', 'success');
+                            showAlert('อัปเดตประเภทสตรีมแล้ว', 'success');
                             await loadSources();
                         } else {
-                            showAlert(data.message || 'Update failed', 'error');
+                            showAlert(data.message || 'อัปเดตไม่สำเร็จ', 'error');
                         }
                     } catch (err) {
-                        showAlert('Update failed', 'error');
+                        showAlert('อัปเดตไม่สำเร็จ', 'error');
                     }
                 });
                 streamTd.appendChild(streamSelect);
@@ -131,17 +131,17 @@
                 heightTd.textContent = src.height ?? '';
                 const actionTd = document.createElement('td');
                 const delBtn = document.createElement('button');
-                delBtn.textContent = 'Delete';
+                delBtn.textContent = 'ลบ';
                 delBtn.className = 'btn btn-danger btn-sm';
                 delBtn.addEventListener('click', async () => {
-                    if (confirm(`Delete ${src.name}?`)) {
+                    if (confirm(`ต้องการลบ ${src.name} หรือไม่?`)) {
                         try {
                             const delRes = await fetch(`/delete_source/${encodeURIComponent(src.name)}`, { method: 'DELETE' });
                             if (!delRes.ok) throw new Error('network');
-                            showAlert('Source deleted', 'success');
+                            showAlert('ลบแหล่งสัญญาณแล้ว', 'success');
                             await loadSources();
                         } catch (err) {
-                            showAlert('Delete failed', 'error');
+                            showAlert('ลบไม่สำเร็จ', 'error');
                         }
                     }
                 });
@@ -154,10 +154,10 @@
                 tr.appendChild(actionTd);
                 tbody.appendChild(tr);
             });
-            showAlert('Sources loaded', 'success');
+            showAlert('โหลดแหล่งสัญญาณแล้ว', 'success');
         } catch (err) {
             console.error('Failed to load sources', err);
-            showAlert('Failed to load sources', 'error');
+            showAlert('โหลดแหล่งสัญญาณไม่สำเร็จ', 'error');
         }
     }
 
@@ -168,16 +168,16 @@
             const res = await fetch('/create_source', { method: 'POST', body: formData });
             const data = await res.json();
             if (res.ok && data.status === 'created') {
-                showAlert('Source created', 'success');
+                showAlert('สร้างแหล่งสัญญาณแล้ว', 'success');
                 e.target.reset();
                 widthInput.disabled = true;
                 heightInput.disabled = true;
                 await loadSources();
             } else {
-                showAlert(data.message || 'Create failed', 'error');
+                showAlert(data.message || 'สร้างไม่สำเร็จ', 'error');
             }
         } catch (err) {
-            showAlert('Create failed', 'error');
+            showAlert('สร้างไม่สำเร็จ', 'error');
         }
     });
 

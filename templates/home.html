@@ -1,26 +1,26 @@
 {% extends "base.html" %}
-{% block title %}Home{% endblock %}
+{% block title %}หน้าแรก{% endblock %}
 {% block content %}
 <div class="container py-4">
   <div class="card">
     <div class="card-body">
       <h2 class="card-title">VisionROI</h2>
       <p class="card-text">
-        A dashboard for testing OCR and managing ROI positions on real-time video. Use the menu above to get started:
+        แดชบอร์ดสำหรับทดสอบ OCR และจัดการตำแหน่ง ROI บนวิดีโอแบบเรียลไทม์ ใช้เมนูด้านบนเพื่อเริ่มต้น:
       </p>
       <ul class="list-group list-group-flush">
-        <li class="list-group-item"><strong>➕ Create Source</strong> – Add or manage cameras/videos for drawing ROIs</li>
-        <li class="list-group-item"><strong>📐 ROI</strong> – Draw and save ROI positions to a JSON file</li>
-        <li class="list-group-item"><strong>🤖 Inference Group</strong> – Select an ROI group and run AI models like OCR or YOLO</li>
-        <li class="list-group-item"><strong>📄 Inference Page</strong> – Detect document pages and related ROIs</li>
+        <li class="list-group-item"><strong>➕ สร้างแหล่งวิดีโอ</strong> – เพิ่มหรือจัดการกล้อง/วิดีโอสำหรับวาด ROI</li>
+        <li class="list-group-item"><strong>📐 ROI</strong> – วาดและบันทึกตำแหน่ง ROI เป็นไฟล์ JSON</li>
+        <li class="list-group-item"><strong>🤖 กลุ่ม Inference</strong> – เลือกกลุ่ม ROI และรันโมเดล AI เช่น OCR หรือ YOLO</li>
+        <li class="list-group-item"><strong>📄 หน้า Inference</strong> – ตรวจจับหน้าเอกสารและ ROI ที่เกี่ยวข้อง</li>
       </ul>
-      <p class="mt-3">Supports Telegram notifications and includes sample modules for experimentation</p>
+      <p class="mt-3">รองรับการแจ้งเตือนผ่าน Telegram และมีโมดูลตัวอย่างสำหรับทดลองใช้งาน</p>
       </div>
     </div>
   </div>
 <script>
   window.addEventListener('DOMContentLoaded', () => {
-    showAlert('Welcome to VisionROI', 'success');
+    showAlert('ยินดีต้อนรับสู่ VisionROI', 'success');
   });
 </script>
 {% endblock %}
