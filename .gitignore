@@ -220,3 +220,6 @@ rois_*.json
 
 # Service state
 service_state.json
+
+# MQTT configuration
+mqtt_configs.json
