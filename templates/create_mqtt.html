@@ -1,0 +1,218 @@
+{% extends "base.html" %}
+{% block title %}MQTT Config{% endblock %}
+{% block content %}
+<div class="container py-4">
+  <div class="card mb-4">
+    <div class="card-header">
+      <h2 class="mb-0">สร้างการเชื่อมต่อ MQTT</h2>
+    </div>
+    <div class="card-body">
+      <form id="mqtt-form" class="row g-3">
+        <div class="col-md-4">
+          <label class="form-label" for="name">ชื่อการตั้งค่า</label>
+          <input type="text" id="name" name="name" class="form-control" required>
+        </div>
+        <div class="col-md-4">
+          <label class="form-label" for="host">MQTT Host</label>
+          <input type="text" id="host" name="host" class="form-control" required>
+        </div>
+        <div class="col-md-4">
+          <label class="form-label" for="port">Port</label>
+          <input type="number" id="port" name="port" class="form-control" min="1" max="65535" value="1883">
+        </div>
+        <div class="col-md-4">
+          <label class="form-label" for="username">Username</label>
+          <input type="text" id="username" name="username" class="form-control" autocomplete="off">
+        </div>
+        <div class="col-md-4">
+          <label class="form-label" for="password">Password</label>
+          <input type="password" id="password" name="password" class="form-control" autocomplete="new-password">
+        </div>
+        <div class="col-md-4">
+          <label class="form-label" for="client_id">Client ID</label>
+          <input type="text" id="client_id" name="client_id" class="form-control" autocomplete="off">
+        </div>
+        <div class="col-md-6">
+          <label class="form-label" for="base_topic">Base Topic (เช่น office/floor1)</label>
+          <input type="text" id="base_topic" name="base_topic" class="form-control" autocomplete="off">
+        </div>
+        <div class="col-md-6">
+          <label class="form-label" for="keepalive">Keepalive (วินาที)</label>
+          <input type="number" id="keepalive" name="keepalive" class="form-control" min="1" value="60">
+        </div>
+        <div class="col-md-4">
+          <label class="form-label" for="qos">QoS</label>
+          <select id="qos" name="qos" class="form-select">
+            <option value="0" selected>0 - At most once</option>
+            <option value="1">1 - At least once</option>
+            <option value="2">2 - Exactly once</option>
+          </select>
+        </div>
+        <div class="col-md-4">
+          <label class="form-label" for="publish_timeout">Timeout การส่ง (วินาที)</label>
+          <input type="number" step="0.1" min="0.1" id="publish_timeout" name="publish_timeout" class="form-control" value="5">
+        </div>
+        <div class="col-md-4 d-flex align-items-center">
+          <div class="form-check me-3">
+            <input class="form-check-input" type="checkbox" id="retain" name="retain">
+            <label class="form-check-label" for="retain">Retain</label>
+          </div>
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="tls" name="tls">
+            <label class="form-check-label" for="tls">ใช้ TLS</label>
+          </div>
+        </div>
+        <div class="col-12">
+          <button type="submit" class="btn btn-primary">บันทึกการตั้งค่า</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header d-flex justify-content-between align-items-center">
+      <h3 class="mb-0">รายการ MQTT Config</h3>
+      <button type="button" class="btn btn-outline-secondary btn-sm" id="refresh-btn">รีเฟรช</button>
+    </div>
+    <div class="card-body">
+      <div class="table-responsive">
+        <table class="table table-hover align-middle">
+          <thead class="table-light">
+            <tr>
+              <th>ชื่อ</th>
+              <th>Host</th>
+              <th>Port</th>
+              <th>Username</th>
+              <th>Base Topic</th>
+              <th>QoS</th>
+              <th>Retain</th>
+              <th>TLS</th>
+              <th>Keepalive</th>
+              <th>Timeout</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="mqtt-table-body"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(async function() {
+  const form = document.getElementById('mqtt-form');
+  const tableBody = document.getElementById('mqtt-table-body');
+  const refreshBtn = document.getElementById('refresh-btn');
+
+  function parseNumber(value, fallback) {
+    if (value === undefined || value === null || value === '') return fallback;
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : fallback;
+  }
+
+  async function loadConfigs() {
+    try {
+      const res = await fetch('/mqtt_configs');
+      if (!res.ok) throw new Error('bad response');
+      const data = await res.json();
+      tableBody.innerHTML = '';
+      if (!Array.isArray(data) || data.length === 0) {
+        const row = document.createElement('tr');
+        const cell = document.createElement('td');
+        cell.colSpan = 11;
+        cell.className = 'text-center text-muted';
+        cell.textContent = 'ยังไม่มีการตั้งค่า MQTT';
+        row.appendChild(cell);
+        tableBody.appendChild(row);
+        return;
+      }
+      data.forEach(cfg => {
+        const row = document.createElement('tr');
+        row.innerHTML = `
+          <td>${cfg.name}</td>
+          <td>${cfg.host}</td>
+          <td>${cfg.port ?? ''}</td>
+          <td>${cfg.username || '-'}</td>
+          <td>${cfg.base_topic || '-'}</td>
+          <td>${cfg.qos ?? 0}</td>
+          <td>${cfg.retain ? 'Yes' : 'No'}</td>
+          <td>${cfg.tls ? 'Yes' : 'No'}</td>
+          <td>${cfg.keepalive ?? '-'}</td>
+          <td>${cfg.publish_timeout ?? '-'}</td>
+          <td></td>`;
+        const actionCell = row.lastElementChild;
+        const delBtn = document.createElement('button');
+        delBtn.className = 'btn btn-danger btn-sm';
+        delBtn.textContent = 'ลบ';
+        delBtn.addEventListener('click', async () => {
+          if (!confirm(`ลบการตั้งค่า ${cfg.name}?`)) return;
+          try {
+            const resp = await fetch(`/mqtt_configs/${encodeURIComponent(cfg.name)}`, {
+              method: 'DELETE'
+            });
+            const result = await resp.json();
+            if (!resp.ok) throw new Error(result.message || 'delete failed');
+            showAlert('ลบการตั้งค่าแล้ว', 'success');
+            await loadConfigs();
+          } catch (err) {
+            console.error(err);
+            showAlert('ลบการตั้งค่าไม่สำเร็จ', 'error');
+          }
+        });
+        actionCell.appendChild(delBtn);
+        tableBody.appendChild(row);
+      });
+      showAlert('โหลดข้อมูล MQTT สำเร็จ', 'success');
+    } catch (err) {
+      console.error(err);
+      showAlert('โหลดข้อมูล MQTT ไม่สำเร็จ', 'error');
+    }
+  }
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const formData = new FormData(form);
+    const payload = {
+      name: formData.get('name')?.toString().trim(),
+      host: formData.get('host')?.toString().trim(),
+      port: parseNumber(formData.get('port'), 1883),
+      username: formData.get('username')?.toString().trim() || '',
+      password: formData.get('password')?.toString() || '',
+      client_id: formData.get('client_id')?.toString().trim() || '',
+      base_topic: formData.get('base_topic')?.toString().trim() || '',
+      qos: parseNumber(formData.get('qos'), 0),
+      retain: document.getElementById('retain').checked,
+      tls: document.getElementById('tls').checked,
+      keepalive: parseNumber(formData.get('keepalive'), 60),
+      publish_timeout: parseNumber(formData.get('publish_timeout'), 5),
+    };
+
+    try {
+      const res = await fetch('/mqtt_configs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        showAlert(data.message || 'บันทึกไม่สำเร็จ', 'error');
+        return;
+      }
+      showAlert('บันทึกการตั้งค่าเรียบร้อย', 'success');
+      form.reset();
+      document.getElementById('port').value = '1883';
+      document.getElementById('keepalive').value = '60';
+      document.getElementById('publish_timeout').value = '5';
+      await loadConfigs();
+    } catch (err) {
+      console.error(err);
+      showAlert('บันทึกไม่สำเร็จ', 'error');
+    }
+  });
+
+  refreshBtn.addEventListener('click', loadConfigs);
+  await loadConfigs();
+})();
+</script>
+{% endblock %}
