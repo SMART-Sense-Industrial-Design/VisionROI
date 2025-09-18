@@ -1135,7 +1135,11 @@ async def ws_roi_result(cam_id: str):
 # =========================
 async def apply_camera_settings(cam_id: str, data: dict) -> bool:
     async with get_cam_lock(cam_id):
-        active_sources[cam_id] = data.get("name", "")
+        name_val = data.get("name")
+        if isinstance(name_val, str) and name_val:
+            active_sources[cam_id] = name_val
+        elif cam_id not in active_sources:
+            active_sources[cam_id] = ""
         source_val = data.get("source", "")
         width_val = data.get("width")
         height_val = data.get("height")
