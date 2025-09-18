@@ -156,23 +156,9 @@ def _free_cam_state(cam_id: str):
     inference_result_timeouts.pop(cam_id, None)
 
     # Queues: drain & drop
-    q = frame_queues.pop(cam_id, None)
-    if q is not None:
-        with contextlib.suppress(Exception):
-            while not q.empty():
-                q.get_nowait()
-
-    rq = roi_frame_queues.pop(cam_id, None)
-    if rq is not None:
-        with contextlib.suppress(Exception):
-            while not rq.empty():
-                rq.get_nowait()
-
-    rres = roi_result_queues.pop(cam_id, None)
-    if rres is not None:
-        with contextlib.suppress(Exception):
-            while not rres.empty():
-                rres.get_nowait()
+    _drain_queue(frame_queues.pop(cam_id, None))
+    _drain_queue(roi_frame_queues.pop(cam_id, None))
+    _drain_queue(roi_result_queues.pop(cam_id, None))
 
     # Locks
     camera_locks.pop(cam_id, None)
@@ -423,6 +409,15 @@ def get_roi_frame_queue(cam_id: str) -> asyncio.Queue[bytes | None]:
 
 def get_roi_result_queue(cam_id: str) -> asyncio.Queue[str | None]:
     return roi_result_queues.setdefault(cam_id, asyncio.Queue(maxsize=100))
+
+
+def _drain_queue(queue: asyncio.Queue[Any] | None) -> None:
+    """Remove all pending items from *queue* if it exists."""
+    if queue is None:
+        return
+    with contextlib.suppress(asyncio.QueueEmpty):
+        while True:
+            queue.get_nowait()
 
 
 # =========================
@@ -1046,11 +1041,7 @@ async def stop_camera_task(
             if queue is not None:
                 with contextlib.suppress(Exception):
                     await asyncio.wait_for(queue.put(None), timeout=0.2)
-                for _ in range(3):
-                    try:
-                        queue.get_nowait()
-                    except asyncio.QueueEmpty:
-                        break
+                _drain_queue(queue)
 
         inf_task = inference_tasks.get(cam_id)
         roi_task = roi_tasks.get(cam_id)
@@ -1079,55 +1070,35 @@ async def stop_camera_task(
 # =========================
 # WebSockets
 # =========================
-@app.websocket('/ws/<string:cam_id>')
-async def ws(cam_id: str):
-    queue = get_frame_queue(cam_id)
+async def _stream_queue_over_websocket(queue: asyncio.Queue[bytes | str | None]) -> None:
+    """Relay items from *queue* to the active websocket connection."""
     try:
         while True:
-            frame_bytes = await queue.get()
-            if frame_bytes is None:
+            item = await queue.get()
+            if item is None:
                 await websocket.close(code=1000)
                 break
-            await websocket.send(frame_bytes)
+            await websocket.send(item)
     except ConnectionClosed:
         pass
     finally:
         with contextlib.suppress(Exception):
             await websocket.close()
+
+
+@app.websocket('/ws/<string:cam_id>')
+async def ws(cam_id: str):
+    await _stream_queue_over_websocket(get_frame_queue(cam_id))
 
 
 @app.websocket('/ws_roi/<string:cam_id>')
 async def ws_roi(cam_id: str):
-    queue = get_roi_frame_queue(cam_id)
-    try:
-        while True:
-            frame_bytes = await queue.get()
-            if frame_bytes is None:
-                await websocket.close(code=1000)
-                break
-            await websocket.send(frame_bytes)
-    except ConnectionClosed:
-        pass
-    finally:
-        with contextlib.suppress(Exception):
-            await websocket.close()
+    await _stream_queue_over_websocket(get_roi_frame_queue(cam_id))
 
 
 @app.websocket('/ws_roi_result/<string:cam_id>')
 async def ws_roi_result(cam_id: str):
-    queue = get_roi_result_queue(cam_id)
-    try:
-        while True:
-            data = await queue.get()
-            if data is None:
-                await websocket.close(code=1000)
-                break
-            await websocket.send(data)
-    except ConnectionClosed:
-        pass
-    finally:
-        with contextlib.suppress(Exception):
-            await websocket.close()
+    await _stream_queue_over_websocket(get_roi_result_queue(cam_id))
 
 
 # =========================
@@ -1627,12 +1598,7 @@ async def start_roi_stream(cam_id: str):
         cfg_ok = await apply_camera_settings(cam_id, data)
         if not cfg_ok:
             return jsonify({"status": "error", "cam_id": cam_id}), 400
-    queue = get_roi_frame_queue(cam_id)
-    while not queue.empty():
-        try:
-            queue.get_nowait()
-        except asyncio.QueueEmpty:
-            break
+    _drain_queue(get_roi_frame_queue(cam_id))
     _, resp, status = await start_camera_task(cam_id, roi_tasks, run_roi_loop)
     return jsonify(resp), status
 
