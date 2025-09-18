@@ -16,6 +16,7 @@ dependencies = [
     "easyocr",
     "rapidocr",
     "pytesseract",
+    "paho-mqtt",
 ]
 
 [project.optional-dependencies]

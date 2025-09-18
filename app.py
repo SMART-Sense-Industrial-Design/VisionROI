@@ -14,6 +14,7 @@ import base64
 import shutil
 import importlib.util
 import os
+import re
 import sys
 import argparse
 from collections import defaultdict
@@ -31,6 +32,11 @@ try:
     from websockets.exceptions import ConnectionClosed
 except Exception:
     ConnectionClosed = Exception
+
+try:
+    import paho.mqtt.client as mqtt
+except Exception:
+    mqtt = None
 
 import signal  # signals
 
@@ -53,6 +59,12 @@ inference_intervals: dict[str, float] = {}
 last_inference_times: dict[str, float] = {}
 last_inference_outputs: dict[str, str] = {}
 inference_result_timeouts: dict[str, float] = {}
+
+MQTT_CONFIG_FILE = "mqtt_configs.json"
+mqtt_configs: dict[str, dict[str, Any]] = {}
+mqtt_config_lock: asyncio.Lock | None = None
+_missing_mqtt_configs_notified: set[str] = set()
+_mqtt_dependency_missing_logged = False
 
 STATE_FILE = "service_state.json"
 PAGE_SCORE_THRESHOLD = 0.4
@@ -231,6 +243,270 @@ def ensure_roi_ids(rois):
             if isinstance(r, dict) and "id" not in r:
                 r["id"] = str(idx + 1)
     return rois
+
+
+def get_mqtt_config_lock() -> asyncio.Lock:
+    global mqtt_config_lock
+    lock = mqtt_config_lock
+    if lock is None:
+        lock = asyncio.Lock()
+        mqtt_config_lock = lock
+    return lock
+
+
+def _truthy(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "y", "on"}
+    return False
+
+
+def load_mqtt_configs_from_disk() -> dict[str, dict[str, Any]]:
+    if not os.path.exists(MQTT_CONFIG_FILE):
+        return {}
+    try:
+        with open(MQTT_CONFIG_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception:
+        return {}
+
+    configs: dict[str, dict[str, Any]] = {}
+    items: list[dict[str, Any]]
+    if isinstance(data, list):
+        items = [cfg for cfg in data if isinstance(cfg, dict)]
+    elif isinstance(data, dict):
+        items = []
+        for name, cfg in data.items():
+            if not isinstance(cfg, dict):
+                continue
+            entry = dict(cfg)
+            entry.setdefault("name", name)
+            items.append(entry)
+    else:
+        return {}
+
+    for item in items:
+        name = str(item.get("name") or "").strip()
+        host = str(item.get("host") or "").strip()
+        if not name or not host:
+            continue
+        cfg = dict(item)
+        cfg["name"] = name
+        cfg["host"] = host
+        port_val = cfg.get("port", 1883)
+        try:
+            cfg["port"] = int(port_val)
+        except (TypeError, ValueError):
+            cfg["port"] = 1883
+        qos_val = cfg.get("qos")
+        if qos_val is not None:
+            try:
+                qos_int = int(qos_val)
+            except (TypeError, ValueError):
+                qos_int = 0
+            cfg["qos"] = max(0, min(2, qos_int))
+        configs[name] = cfg
+    return configs
+
+
+def save_mqtt_configs_to_disk(configs: dict[str, dict[str, Any]]) -> None:
+    data: list[dict[str, Any]] = []
+    for name, cfg in sorted(configs.items()):
+        entry = dict(cfg)
+        entry["name"] = name
+        data.append(entry)
+    tmp_path = f"{MQTT_CONFIG_FILE}.tmp"
+    with open(tmp_path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+    os.replace(tmp_path, MQTT_CONFIG_FILE)
+
+
+def _sanitize_topic_segment(segment: Any) -> str:
+    seg = str(segment or "").strip()
+    seg = seg.replace(" ", "_")
+    seg = re.sub(r"[^0-9A-Za-z_\-]+", "_", seg)
+    return seg.strip("_")
+
+
+def build_mqtt_topic(
+    cfg: dict[str, Any],
+    source: str,
+    cam_id: str,
+    group: str,
+    roi_id: str,
+) -> str:
+    parts: list[str] = []
+    base = cfg.get("base_topic")
+    if base:
+        for part in str(base).split("/"):
+            sanitized = _sanitize_topic_segment(part)
+            if sanitized:
+                parts.append(sanitized)
+    source_part = _sanitize_topic_segment(source)
+    if not source_part:
+        source_part = _sanitize_topic_segment(cam_id) or "camera"
+    parts.append(source_part)
+    group_part = _sanitize_topic_segment(group)
+    if not group_part:
+        group_part = "ungrouped"
+    parts.append(group_part)
+    roi_part = _sanitize_topic_segment(roi_id)
+    if not roi_part:
+        roi_part = "roi"
+    parts.append(roi_part)
+    return "/".join(parts)
+
+
+def _public_mqtt_config(name: str, cfg: dict[str, Any]) -> dict[str, Any]:
+    port_val = cfg.get("port", 1883)
+    try:
+        port_int = int(port_val)
+    except (TypeError, ValueError):
+        port_int = 1883
+    qos_val = cfg.get("qos", 0)
+    try:
+        qos_int = int(qos_val)
+    except (TypeError, ValueError):
+        qos_int = 0
+    keepalive_val = cfg.get("keepalive", 60)
+    try:
+        keepalive_int = int(keepalive_val)
+    except (TypeError, ValueError):
+        keepalive_int = 60
+    publish_timeout_val = cfg.get("publish_timeout", 5.0)
+    try:
+        publish_timeout_float = float(publish_timeout_val)
+    except (TypeError, ValueError):
+        publish_timeout_float = 5.0
+    return {
+        "name": name,
+        "host": cfg.get("host", ""),
+        "port": port_int,
+        "username": cfg.get("username", ""),
+        "has_password": bool(cfg.get("password")),
+        "base_topic": cfg.get("base_topic", ""),
+        "client_id": cfg.get("client_id", ""),
+        "qos": max(0, min(2, qos_int)),
+        "retain": _truthy(cfg.get("retain")),
+        "tls": _truthy(cfg.get("tls")),
+        "keepalive": keepalive_int,
+        "publish_timeout": publish_timeout_float,
+    }
+
+
+async def publish_roi_to_mqtt(
+    config_name: str,
+    cam_id: str,
+    source_name: str,
+    group_name: str,
+    roi_id: str,
+    payload: dict[str, Any],
+) -> bool:
+    global _mqtt_dependency_missing_logged
+    logger = get_logger("mqtt")
+
+    if mqtt is None:
+        if not _mqtt_dependency_missing_logged:
+            if logger is not None:
+                logger.warning(
+                    "paho-mqtt not available; MQTT publishing is disabled"
+                )
+            _mqtt_dependency_missing_logged = True
+        return False
+
+    cfg = mqtt_configs.get(config_name)
+    if not cfg:
+        if config_name and config_name not in _missing_mqtt_configs_notified:
+            if logger is not None:
+                logger.warning(
+                    "MQTT config '%s' not found; skipping publish", config_name
+                )
+            _missing_mqtt_configs_notified.add(config_name)
+        return False
+
+    host = str(cfg.get("host") or "").strip()
+    if not host:
+        return False
+
+    topic = build_mqtt_topic(cfg, source_name, cam_id, group_name, str(roi_id))
+    if not topic:
+        topic = "roi"
+
+    message = json.dumps(payload, ensure_ascii=False)
+
+    port_val = cfg.get("port", 1883)
+    try:
+        port = int(port_val)
+    except (TypeError, ValueError):
+        port = 1883
+
+    keepalive_val = cfg.get("keepalive", 60)
+    try:
+        keepalive = int(keepalive_val)
+    except (TypeError, ValueError):
+        keepalive = 60
+
+    qos_val = cfg.get("qos", 0)
+    try:
+        qos = int(qos_val)
+    except (TypeError, ValueError):
+        qos = 0
+    qos = max(0, min(2, qos))
+
+    publish_timeout_val = cfg.get("publish_timeout", 5.0)
+    try:
+        publish_timeout = max(0.1, float(publish_timeout_val))
+    except (TypeError, ValueError):
+        publish_timeout = 5.0
+
+    username = str(cfg.get("username") or "").strip() or None
+    password = cfg.get("password")
+    if isinstance(password, str):
+        password = password or None
+    tls_enabled = _truthy(cfg.get("tls"))
+    client_id = str(cfg.get("client_id") or "").strip() or None
+    retain = _truthy(cfg.get("retain"))
+
+    def _publish_sync() -> bool:
+        client = mqtt.Client(client_id=client_id)  # type: ignore[arg-type]
+        if username or password:
+            client.username_pw_set(username, password)
+        if tls_enabled:
+            client.tls_set()
+        client.connect(host, port, keepalive)
+        client.loop_start()
+        try:
+            info = client.publish(topic, message, qos=qos, retain=retain)
+            info.wait_for_publish(timeout=publish_timeout)
+            rc = info.rc
+        finally:
+            with contextlib.suppress(Exception):
+                client.loop_stop()
+            with contextlib.suppress(Exception):
+                client.disconnect()
+        if rc != mqtt.MQTT_ERR_SUCCESS:
+            raise RuntimeError(f"publish failed with code {rc}")
+        return True
+
+    try:
+        await asyncio.to_thread(_publish_sync)
+        if logger is not None:
+            logger.debug(
+                "Published MQTT message via '%s' to topic '%s'", config_name, topic
+            )
+        return True
+    except Exception:
+        if logger is not None:
+            logger.exception(
+                "Failed to publish MQTT message for config '%s'", config_name
+            )
+        return False
+
+
+mqtt_configs = load_mqtt_configs_from_disk()
 
 
 async def restore_service_state() -> None:
@@ -602,6 +878,7 @@ async def run_inference_loop(cam_id: str):
         selected_group = (
             forced_group if forced_group and forced_group != 'all' else None
         )
+        source_name = active_sources.get(cam_id, '')
         if not rois:
             return cv2.resize(frame, (0, 0), fx=0.5, fy=0.5)
         now = time.time()
@@ -782,7 +1059,7 @@ async def run_inference_loop(cam_id: str):
                         roi_identifier = r.get('id', i)
                         args = [roi, r.get('id', str(i)), save_flag]
                         if takes_source:
-                            args.append(active_sources.get(cam_id, ''))
+                            args.append(source_name)
                         if takes_cam_id:
                             args.append(cam_id)
                         if takes_interval:
@@ -825,6 +1102,8 @@ async def run_inference_loop(cam_id: str):
                             roi_name=r.get('name') or '',
                             roi_group=r.get('group') or r.get('page') or '',
                             module_name=mod_name or '',
+                            mqtt_name=str(r.get('mqtt_config') or '').strip(),
+                            source_name=source_name,
                         ) -> None:
                             if key not in pending_expected:
                                 return
@@ -872,6 +1151,8 @@ async def run_inference_loop(cam_id: str):
                                 'group': roi_group,
                                 'module': module_name,
                             }
+                            entry['cam_id'] = cam_id
+                            entry['source'] = source_name
                             if duration is not None:
                                 entry['duration'] = duration
                             try:
@@ -885,6 +1166,46 @@ async def run_inference_loop(cam_id: str):
                                         entry['image'] = base64.b64encode(roi_buf).decode('ascii')
                             except Exception:
                                 pass
+
+                            if mqtt_name:
+                                entry['mqtt_config'] = mqtt_name
+                                if loop is not None:
+                                    group_value = (
+                                        str(roi_group)
+                                        if roi_group is not None
+                                        else ''
+                                    )
+                                    mqtt_payload = {
+                                        'cam_id': cam_id,
+                                        'source': source_name,
+                                        'group': group_value,
+                                        'roi_id': str(roi_id),
+                                        'roi_name': roi_name,
+                                        'module': module_name,
+                                        'text': result_text,
+                                        'frame_time': frame_time,
+                                        'result_time': result_timestamp,
+                                    }
+                                    if duration is not None:
+                                        mqtt_payload['duration'] = duration
+                                    try:
+                                        loop.create_task(
+                                            publish_roi_to_mqtt(
+                                                mqtt_name,
+                                                cam_id,
+                                                source_name,
+                                                group_value,
+                                                str(roi_id),
+                                                mqtt_payload,
+                                            )
+                                        )
+                                    except RuntimeError:
+                                        logger = get_logger('mqtt')
+                                        if logger is not None:
+                                            logger.exception(
+                                                "failed to schedule MQTT publish for config '%s'",
+                                                mqtt_name,
+                                            )
 
                             pending_results[key][roi_id] = entry
                             pending_deadlines[key] = (
@@ -914,7 +1235,7 @@ async def run_inference_loop(cam_id: str):
                     context_group = selected_group or ''
                 pending_context[pending_key] = {
                     'group': context_group,
-                    'source': active_sources.get(cam_id, ''),
+                    'source': source_name,
                 }
             total_rois = pending_expected.get(pending_key, 0)
             current_results = pending_results.get(pending_key)
@@ -1205,6 +1526,122 @@ async def list_groups():
     except FileNotFoundError:
         pass
     return jsonify(sorted(groups))
+
+
+@app.route("/create_mqtt")
+async def create_mqtt():
+    return await render_template("create_mqtt.html")
+
+
+@app.route("/mqtt_configs", methods=["GET", "POST"])
+async def handle_mqtt_configs():
+    if request.method == "GET":
+        async with get_mqtt_config_lock():
+            configs = [
+                _public_mqtt_config(name, cfg)
+                for name, cfg in sorted(mqtt_configs.items())
+            ]
+        return jsonify(configs)
+
+    data = await request.get_json() or {}
+    name = str(data.get("name") or "").strip()
+    host = str(data.get("host") or "").strip()
+    if not name or not host:
+        return jsonify({"status": "error", "message": "missing data"}), 400
+
+    port_val = data.get("port", 1883)
+    try:
+        port = int(port_val)
+    except (TypeError, ValueError):
+        return jsonify({"status": "error", "message": "invalid port"}), 400
+    if not (1 <= port <= 65535):
+        return jsonify({"status": "error", "message": "invalid port"}), 400
+
+    qos_val = data.get("qos", 0)
+    try:
+        qos = int(qos_val)
+    except (TypeError, ValueError):
+        qos = 0
+    if qos not in (0, 1, 2):
+        return jsonify({"status": "error", "message": "invalid qos"}), 400
+
+    keepalive_val = data.get("keepalive", 60)
+    try:
+        keepalive = int(keepalive_val)
+    except (TypeError, ValueError):
+        return jsonify({"status": "error", "message": "invalid keepalive"}), 400
+    if keepalive <= 0:
+        return jsonify({"status": "error", "message": "invalid keepalive"}), 400
+
+    publish_timeout_val = data.get("publish_timeout", 5.0)
+    try:
+        publish_timeout = max(0.1, float(publish_timeout_val))
+    except (TypeError, ValueError):
+        return jsonify({"status": "error", "message": "invalid publish_timeout"}), 400
+
+    username = str(data.get("username") or "").strip()
+    password_val = data.get("password")
+    password = str(password_val) if password_val is not None else ""
+    base_topic = str(data.get("base_topic") or "").strip()
+    client_id = str(data.get("client_id") or "").strip()
+    retain = _truthy(data.get("retain"))
+    tls_enabled = _truthy(data.get("tls"))
+
+    cfg: dict[str, Any] = {
+        "name": name,
+        "host": host,
+        "port": port,
+        "username": username,
+        "password": password,
+        "base_topic": base_topic,
+        "client_id": client_id,
+        "qos": qos,
+        "retain": retain,
+        "keepalive": keepalive,
+        "publish_timeout": publish_timeout,
+    }
+    if tls_enabled:
+        cfg["tls"] = True
+    else:
+        cfg["tls"] = False
+
+    async with get_mqtt_config_lock():
+        if name in mqtt_configs:
+            return jsonify({"status": "error", "message": "name exists"}), 400
+        mqtt_configs[name] = cfg
+        try:
+            await asyncio.to_thread(save_mqtt_configs_to_disk, mqtt_configs)
+        except Exception:
+            mqtt_configs.pop(name, None)
+            return jsonify({"status": "error", "message": "save failed"}), 500
+
+    _missing_mqtt_configs_notified.discard(name)
+    return (
+        jsonify({
+            "status": "created",
+            "config": _public_mqtt_config(name, cfg),
+        }),
+        201,
+    )
+
+
+@app.route("/mqtt_configs/<string:name>", methods=["DELETE"])
+async def delete_mqtt_config(name: str):
+    name = str(name or "").strip()
+    if not name:
+        return jsonify({"status": "error", "message": "invalid name"}), 400
+
+    async with get_mqtt_config_lock():
+        if name not in mqtt_configs:
+            return jsonify({"status": "error", "message": "not found"}), 404
+        mqtt_configs.pop(name, None)
+        try:
+            await asyncio.to_thread(save_mqtt_configs_to_disk, mqtt_configs)
+        except Exception:
+            return jsonify({"status": "error", "message": "save failed"}), 500
+
+    _missing_mqtt_configs_notified.discard(name)
+    return jsonify({"status": "deleted"})
 
 
 @app.route("/source_list", methods=["GET"])

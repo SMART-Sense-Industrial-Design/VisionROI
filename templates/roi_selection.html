@@ -42,6 +42,7 @@
         let currentSource = "";
         let groups = [];
         let modules = [];
+        let mqttConfigs = [];
         let initialized = false;
         let isStreaming = false;
         let hasStarted = false;
@@ -148,6 +149,19 @@
             } catch (err) {
                 console.error('Failed to load inference modules', err);
                 modules = [];
+            }
+            renderRoiList();
+        }
+
+        async function loadMqttConfigs() {
+            try {
+                const res = await fetch('/mqtt_configs');
+                if (!res.ok) throw new Error('Bad response');
+                const data = await res.json();
+                mqttConfigs = Array.isArray(data) ? data : [];
+            } catch (err) {
+                console.error('Failed to load MQTT configs', err);
+                mqttConfigs = [];
             }
             renderRoiList();
         }
@@ -275,6 +289,8 @@
                         id: roiId,
                         group: groupId,
                         module: "",
+                        name: '',
+                        mqtt_config: '',
                         points: currentPoints.slice(),
                         type: 'roi'
                     });
@@ -308,7 +324,7 @@
                         pageRois.push({ id: roiId, points, type: 'page', page: '', image: null });
 
                     } else {
-                        rois.push({ id: roiId, group: groupId, module: "", points, type: 'roi' });
+                        rois.push({ id: roiId, group: groupId, module: "", name: '', mqtt_config: '', points, type: 'roi' });
                     }
                     renderRoiList();
                     fetch('/save_roi', {
@@ -475,7 +491,7 @@
                 table.className = 'table table-hover table-sm';
                 const thead = document.createElement('thead');
                 const headerRow = document.createElement('tr');
-                ['ID', 'xywh', 'Group', 'Inference Module', 'Delete'].forEach(colName => {
+                ['ID', 'xywh', 'Group', 'Inference Module', 'MQTT', 'Delete'].forEach(colName => {
                     const th = document.createElement('th');
                     th.textContent = colName;
                     headerRow.appendChild(th);
@@ -527,6 +543,25 @@
                     select.addEventListener('change', e => updateRoiModule(idx, e.target.value));
                     tdModule.appendChild(select);
                     tr.appendChild(tdModule);
+
+                    const tdMqtt = document.createElement('td');
+                    const mqttSelect = document.createElement('select');
+                    mqttSelect.className = 'form-select form-select-sm';
+                    const noneOption = document.createElement('option');
+                    noneOption.value = '';
+                    noneOption.textContent = 'ไม่ส่ง';
+                    mqttSelect.appendChild(noneOption);
+                    mqttConfigs.forEach(cfg => {
+                        if (!cfg || !cfg.name) return;
+                        const opt = document.createElement('option');
+                        opt.value = cfg.name;
+                        opt.textContent = cfg.name;
+                        if ((r.mqtt_config ?? '') === cfg.name) opt.selected = true;
+                        mqttSelect.appendChild(opt);
+                    });
+                    mqttSelect.addEventListener('change', e => updateRoiMqtt(idx, e.target.value));
+                    tdMqtt.appendChild(mqttSelect);
+                    tr.appendChild(tdMqtt);
 
                     const tdDel = document.createElement('td');
                     const delBtn = document.createElement('button');
@@ -688,10 +723,13 @@
                             { x: r.x, y: r.y + r.height }
                         ];
                     }
+                    const mqttName = typeof r.mqtt_config === 'string' ? r.mqtt_config : '';
                     return {
                         id: r.id ?? String(idx + 1),
                         group: r.group ?? null,
                         module: r.module ?? "",
+                        name: r.name ?? '',
+                        mqtt_config: mqttName,
                         points: pts || [],
                         type: 'roi'
                     };
@@ -737,6 +775,15 @@
 
         function updateRoiModule(i, module) {
             rois[i].module = module;
+            fetch('/save_roi', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ rois: rois.concat(pageRois).concat(typeof otherRois !== 'undefined' ? otherRois : []), source: currentSource })
+            });
+        }
+
+        function updateRoiMqtt(i, mqttName) {
+            rois[i].mqtt_config = mqttName || '';
             fetch('/save_roi', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -850,6 +897,7 @@
         window.clearAllRois = clearAllRois;
         window.updateRoiGroup = updateRoiGroup;
         window.updateRoiModule = updateRoiModule;
+        window.updateRoiMqtt = updateRoiMqtt;
         window.updateRoiId = updateRoiId;
         window.deleteRoi = deleteRoi;
         window.updatePageRoiName = updatePageRoiName;
@@ -865,6 +913,7 @@
             await loadSources();
             await loadGroups();
             await loadModules();
+            await loadMqttConfigs();
             await checkStatus();
             if (typeof showAlert === 'function') showAlert('ROI selection ready', 'success');
         })();
