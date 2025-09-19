@@ -468,27 +468,38 @@
             container.innerHTML = '';
 
             const row = document.createElement('div');
-            row.className = 'row g-3';
+            row.className = 'row row-cols-1 row-cols-lg-2 g-3 align-items-stretch';
+            container.appendChild(row);
 
-            if (rois.length > 0) {
+            const createCard = (title) => {
                 const col = document.createElement('div');
-                col.className = 'col-12 col-md-6';
+                col.className = 'col';
+
                 const card = document.createElement('div');
                 card.className = 'card h-100';
 
                 const header = document.createElement('div');
                 header.className = 'card-header';
-                header.textContent = 'ROI List';
+                header.textContent = title;
                 card.appendChild(header);
 
                 const body = document.createElement('div');
-                // body.className = 'card-body';
+                body.className = 'card-body p-0';
+                card.appendChild(body);
 
+                col.appendChild(card);
+                row.appendChild(col);
+
+                return body;
+            };
+
+            const roiBody = createCard('ROI List');
+            if (rois.length > 0) {
                 const tableWrapper = document.createElement('div');
                 tableWrapper.className = 'table-responsive';
 
                 const table = document.createElement('table');
-                table.className = 'table table-hover table-sm';
+                table.className = 'table table-hover table-sm mb-0';
                 const thead = document.createElement('thead');
                 const headerRow = document.createElement('tr');
                 ['ID', 'xywh', 'Group', 'Inference Module', 'MQTT', 'Delete'].forEach(colName => {
@@ -575,31 +586,21 @@
 
                 table.appendChild(tbody);
                 tableWrapper.appendChild(table);
-                body.appendChild(tableWrapper);
-                card.appendChild(body);
-                col.appendChild(card);
-                row.appendChild(col);
+                roiBody.appendChild(tableWrapper);
+            } else {
+                const emptyState = document.createElement('div');
+                emptyState.className = 'p-3 text-muted';
+                emptyState.textContent = 'ยังไม่มี ROI ที่บันทึกไว้';
+                roiBody.appendChild(emptyState);
             }
 
+            const pageBody = createCard('Page ROI List');
             if (pageRois.length > 0) {
-                const col = document.createElement('div');
-                col.className = 'col-12 col-md-6';
-                const card = document.createElement('div');
-                card.className = 'card h-100';
-
-                const header = document.createElement('div');
-                header.className = 'card-header';
-                header.textContent = 'Page ROI List';
-                card.appendChild(header);
-
-                const body = document.createElement('div');
-                // body.className = 'card-body';
-
                 const tableWrapper = document.createElement('div');
                 tableWrapper.className = 'table-responsive';
 
                 const table = document.createElement('table');
-                table.className = 'table table-hover table-sm';
+                table.className = 'table table-hover table-sm mb-0';
                 const thead = document.createElement('thead');
                 const headerRow = document.createElement('tr');
                 ['ID', 'xywh', 'Page Name', 'Save Image', 'Action'].forEach(colName => {
@@ -666,14 +667,12 @@
 
                 table.appendChild(tbody);
                 tableWrapper.appendChild(table);
-                body.appendChild(tableWrapper);
-                card.appendChild(body);
-                col.appendChild(card);
-                row.appendChild(col);
-            }
-
-            if (row.childElementCount > 0) {
-                container.appendChild(row);
+                pageBody.appendChild(tableWrapper);
+            } else {
+                const emptyState = document.createElement('div');
+                emptyState.className = 'p-3 text-muted';
+                emptyState.textContent = 'ยังไม่มี Page ROI ที่บันทึกไว้';
+                pageBody.appendChild(emptyState);
             }
         }
 
