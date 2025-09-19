@@ -57,6 +57,14 @@ main.app-main {
   margin: 0 auto;
 }
 
+.app-shell--fluid {
+  max-width: min(100%, 1800px);
+  width: 100%;
+  margin: 0 auto;
+  padding-left: clamp(1rem, 2vw, 2.5rem);
+  padding-right: clamp(1rem, 2vw, 2.5rem);
+}
+
 @media (max-width: 992px) {
   main.app-main {
     padding: 6rem 1.25rem 3rem;
