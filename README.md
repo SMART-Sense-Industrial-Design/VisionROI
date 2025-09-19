@@ -255,6 +255,20 @@ tg = TelegramNotify(token="YOUR_BOT_TOKEN", chat_id="YOUR_CHAT_ID")
 tg.start_send_text("สวัสดี")
 ```
 
+### MQTT ต่อ ROI
+- สามารถสร้างคอนฟิก MQTT ได้จากหน้า `/create_mqtt` โดยระบุ `host`, `port`, ชื่อผู้ใช้/รหัสผ่าน (ถ้ามี), `base_topic`, `client_id`, `qos`, `retain`, `tls` และ `keepalive`
+- เมื่อมีคอนฟิกแล้ว หน้า `/roi` จะให้เลือกคอนฟิก MQTT แยกสำหรับแต่ละ ROI ได้ ทำให้ ROI ที่สำคัญสามารถส่งข้อมูลคนละ broker หรือ broker เดียวกันแต่คนละ topic ได้
+- หากเลือกคอนฟิกไว้ ROI นั้น ๆ จะเรียก `publish_roi_to_mqtt()` อัตโนมัติเมื่อมีผลลัพธ์จาก inference
+- โครงสร้าง topic ที่ระบบสร้างคือ:
+
+  ```
+  <base_topic>/<source>/<group>/<roi_id>
+  ```
+
+  แต่ละส่วนจะถูกแปลงให้เป็นตัวอักษร, ตัวเลข, `_` หรือ `-` เท่านั้น และตัดช่องว่างออก เช่น `My Camera` จะกลายเป็น `My_Camera`
+- ตัวอย่าง: หากตั้งค่า `base_topic` เป็น `vision`, source ชื่อ `cam_north`, กลุ่ม `group_a`, ROI ลำดับ `3` จะได้ topic `vision/cam_north/group_a/3`
+- Payload ที่ส่งเป็น JSON ประกอบด้วยข้อมูล ROI เช่น ชื่อ ROI, ค่า inference, ค่าความเชื่อมั่น, timestamp และอาจมี `duration` หากโมดูลส่งมา
+
 ## หน้าต่างต่าง ๆ
 ### Home (`/home`)
 หน้าแรกแสดงแดชบอร์ดสรุปฟีเจอร์หลักของระบบ ได้แก่ **Create Source**, **ROI** และ **Inference Group** เพื่อให้ผู้ใช้เข้าใจขั้นตอนการทำงานโดยรวมตั้งแต่จัดการแหล่งวิดีโอไปจนถึงรันโมเดล AI นอกจากนี้เมื่อเข้าใช้งานครั้งแรกจะมีข้อความต้อนรับแสดงขึ้นมา
