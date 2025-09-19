@@ -223,3 +223,6 @@ service_state.json
 
 # MQTT configuration
 mqtt_configs.json
+
+# Systemd service files
+vision-roi.service
