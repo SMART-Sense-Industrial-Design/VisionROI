@@ -1,37 +1,78 @@
 <!DOCTYPE html>
-<html>
+<html lang="th">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}AI Stream Dashboard{% endblock %}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+Thai:wght@400;500;600&display=swap" rel="stylesheet">
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
-  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=1">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=2">
 </head>
-<body>
-  <nav class="navbar navbar-expand-lg navbar-light fixed-top">
-    <div class="container-fluid">
-      <a class="navbar-brand d-flex align-items-center" href="#">
-        <img src="{{ url_for('static', filename='images/logo.jpg') }}" class="logo me-2" alt="logo">
-        <span>AI Stream Dashboard</span>
+<body class="app-body">
+  <nav class="navbar navbar-expand-lg navbar-dark glass-nav fixed-top">
+    <div class="container-xxl">
+      <a class="navbar-brand" href="/home">
+        <span class="brand-icon shadow-sm">
+          <img src="{{ url_for('static', filename='images/logo.jpg') }}" class="logo" alt="VisionROI logo">
+        </span>
+        <span class="brand-text">
+          <span class="brand-title">VisionROI</span>
+          <span class="brand-subtitle">AI Stream Dashboard</span>
+        </span>
       </a>
       <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav" aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
         <span class="navbar-toggler-icon"></span>
       </button>
       <div class="collapse navbar-collapse" id="navbarNav">
-        <ul class="navbar-nav me-auto mb-2 mb-lg-0">
-          <li class="nav-item"><a href="/home" class="nav-link" data-bs-toggle="tooltip" title="Home">🏠 Home</a></li>
-          <li class="nav-item"><a href="/create_source" class="nav-link" data-bs-toggle="tooltip" title="Create Source">➕ Create Source</a></li>
-          <li class="nav-item"><a href="/create_mqtt" class="nav-link" data-bs-toggle="tooltip" title="MQTT Config">📡 MQTT</a></li>
-          <li class="nav-item"><a href="/roi" class="nav-link" data-bs-toggle="tooltip" title="ROI">📐 ROI</a></li>
-          <li class="nav-item"><a href="/inference" class="nav-link" data-bs-toggle="tooltip" title="Inference Group">🤖 Inference Group</a></li>
-          <li class="nav-item"><a href="/inference_page" class="nav-link" data-bs-toggle="tooltip" title="Inference Page">📄 Inference Page</a></li>
+        <ul class="navbar-nav ms-auto mb-2 mb-lg-0 align-items-lg-center">
+          <li class="nav-item">
+            <a href="/home" class="nav-link" data-bs-toggle="tooltip" title="หน้าแรก">
+              <i class="bi bi-house-door me-2"></i>
+              <span>หน้าแรก</span>
+            </a>
+          </li>
+          <li class="nav-item">
+            <a href="/create_source" class="nav-link" data-bs-toggle="tooltip" title="Create Source">
+              <i class="bi bi-hdd-network me-2"></i>
+              <span>สร้างแหล่งวิดีโอ</span>
+            </a>
+          </li>
+          <li class="nav-item">
+            <a href="/create_mqtt" class="nav-link" data-bs-toggle="tooltip" title="MQTT Config">
+              <i class="bi bi-broadcast me-2"></i>
+              <span>MQTT</span>
+            </a>
+          </li>
+          <li class="nav-item">
+            <a href="/roi" class="nav-link" data-bs-toggle="tooltip" title="ROI">
+              <i class="bi bi-bounding-box me-2"></i>
+              <span>ROI</span>
+            </a>
+          </li>
+          <li class="nav-item">
+            <a href="/inference" class="nav-link" data-bs-toggle="tooltip" title="Inference Group">
+              <i class="bi bi-cpu me-2"></i>
+              <span>Inference Group</span>
+            </a>
+          </li>
+          <li class="nav-item">
+            <a href="/inference_page" class="nav-link" data-bs-toggle="tooltip" title="Inference Page">
+              <i class="bi bi-kanban me-2"></i>
+              <span>Inference Page</span>
+            </a>
+          </li>
         </ul>
       </div>
     </div>
   </nav>
   {% include 'partials/alert.html' %}
-  <main id="content" class="container-fluid">
-    {% block content %}{% endblock %}
+  <main id="content" class="app-main">
+    <div class="app-shell container-xxl">
+      {% block content %}{% endblock %}
+    </div>
   </main>
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
   <script src="{{ url_for('static', filename='js/bootstrap-init.js') }}"></script>
@@ -45,6 +86,5 @@
       setActiveLink(window.location.pathname);
     });
   </script>
-
 </body>
 </html>
