@@ -76,7 +76,7 @@ def process(
             os.makedirs(save_dir, exist_ok=True)
             filename = datetime.now().strftime("%Y%m%d%H%M%S%f") + ".jpg"
             path = save_dir / filename
-            save_image_async(str(path), frame.copy())
+            # save_image_async(str(path), frame.copy())
 
     # else:
     #     logger.info(f"OCR skipped for ROI {roi_id} (throttled)")
