@@ -61,6 +61,7 @@
         let currentLogSource;
         intervalInput.value = localStorage.getItem(`${cellId}-interval`) || '1';
         const groupStorageKey = `${cellId}-group`;
+        let lastActiveGroup = '';
 
         const getStoredGroup = () => localStorage.getItem(groupStorageKey) || '';
         const storeGroupSelection = value => {
@@ -389,7 +390,10 @@
             statusEl.innerText = '';
             allRois = data.rois || [];
             const roiList = allRois.filter(r => (r.type ?? 'roi') === 'roi');
-            const selectedGroupName = typeof selectedGroup === 'string' ? selectedGroup : '';
+            const fallbackGroup = lastActiveGroup || '';
+            const selectedGroupName = typeof selectedGroup === 'string' && selectedGroup.length > 0
+                ? selectedGroup
+                : fallbackGroup;
             if (!selectedGroupName) {
                 storeGroupSelection('');
             }
@@ -442,6 +446,7 @@
                 return;
             }
             statusEl.innerText = 'สำเร็จ';
+            lastActiveGroup = groupToUse || '';
             openSocket();
             if (rois.length > 0) {
                 openRoiSocket();
@@ -454,7 +459,12 @@
         }
 
         async function stopInference() {
-            if (!running) return;
+            if (!running) {
+                // ensure UI stays consistent when switching groups while idle
+                startButton.disabled = false;
+                stopButton.disabled = true;
+                return;
+            }
             running = false;
             await fetchWithStatus(`/stop_inference/${cam}`, { method: 'POST' });
             if (socket) {
@@ -479,6 +489,9 @@
             startButton.innerText = 'Resume';
             startButton.disabled = false;
             stopButton.disabled = true;
+            groupSelect.value = '';
+            storeGroupSelection('');
+            updateLogRoiOptions([]);
             showAlert('Inference stopped', 'info');
         }
 
@@ -587,6 +600,7 @@
                 updateLogRoiOptions([]);
                 return;
             }
+
             const roiList = allRois.filter(r => (r.type ?? 'roi') === 'roi');
             const filtered = selected === 'all'
                 ? roiList
@@ -594,8 +608,12 @@
 
             updateLogRoiOptions(filtered);
 
-            await stopInference();
-            await startInference(filtered, selected);
+            if (running) {
+                await stopInference();
+            }
+
+            const hasCachedRois = allRois.length > 0;
+            await startInference(hasCachedRois ? filtered : null, selected);
         }
 
         function setRunningUI() {
