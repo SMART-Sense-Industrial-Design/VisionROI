@@ -17,20 +17,36 @@ dependencies = [
     "rapidocr",
     "pytesseract",
     "paho-mqtt",
+    "requests",
 ]
 
 [project.optional-dependencies]
-extras = [
-    "onnxruntime",
-    "requests",
-    "tensorflow",
-    "torch",
-    "transformers",
+server = [
+    "uvicorn",
     "websockets",
+]
+
+onnx = [
     "onnx",
+    "onnxruntime",
+]
+
+torch = [
+    "torch",
     "torchvision",
-    "pycuda",
+    "transformers",
+]
+
+tflite = [
+    "tensorflow",
+]
+
+tensorrt = [
     "tensorrt",
+    "pycuda",
+    "torch",
+    "torchvision",
+    "onnx",
 ]
 
 
