@@ -33,16 +33,18 @@
    source .venv/bin/activate  # บน Windows ใช้ .venv\\Scripts\\activate
    ```
 
-2. ติดตั้งแพ็กเกจของโปรเจ็กต์ (หากต้องการใช้เซิร์ฟเวอร์ **uvicorn** ให้ติดตั้งเพิ่ม):
+2. ติดตั้งแพ็กเกจของโปรเจ็กต์ (หากต้องการใช้เซิร์ฟเวอร์ **uvicorn** ให้ติดตั้งเพิ่ม หรือจะติดตั้ง extras ทั้งหมดในครั้งเดียวก็ได้):
 
    ```bash
    pip install "."
-   pip install uvicorn  # ติดตั้ง uvicorn
+   pip install uvicorn          # ติดตั้ง uvicorn เพิ่มเติม
+   # หรือใช้คำสั่งเดียวติดตั้งพร้อม extras ที่ใช้บ่อย
+   pip install ".[extras]"
    ```
 
 3. ตรวจสอบให้แน่ใจว่าเครื่องมีคำสั่ง `ffmpeg` (จำเป็นเมื่อเลือก backend แบบ `ffmpeg`).
-   บน Ubuntu สามารถติดตั้งได้ด้วย `sudo apt install ffmpeg` ส่วน Windows สามารถดาวน์โหลดจาก [FFmpeg.org](https://ffmpeg.org) แล้วเพิ่มลงใน PATH
-   หากใช้เฉพาะ backend `opencv` สามารถข้ามขั้นตอนนี้ได้
+   บน Ubuntu สามารถติดตั้งได้ด้วย `sudo apt install ffmpeg` ส่วน Windows สามารถดาวน์โหลดจาก [FFmpeg.org](https://ffmpeg.org) แล้วเพิ่มลงใน PATH.
+   สามารถตรวจสอบได้ด้วยคำสั่ง `ffmpeg -version` หากใช้เฉพาะ backend `opencv` สามารถข้ามขั้นตอนนี้ได้
 
 4. รันแอปพลิเคชัน (ค่าเริ่มต้นใช้พอร์ต `5000` หากต้องการกำหนดพอร์ตเองให้เพิ่ม `--port`).
    หากต้องการใช้เซิร์ฟเวอร์ **uvicorn** (แนะนำสำหรับการใช้งานจริง) ให้เพิ่ม `--use-uvicorn`:
@@ -156,21 +158,15 @@ python -m venv .venv
   .venv\\Scripts\\activate
   ```
 
-เมื่อ environment ถูก activate แล้วจึงติดตั้งแพ็กเกจและ dependencies ด้วย `pip`
-(และหากต้องการใช้เซิร์ฟเวอร์ **uvicorn** ให้ติดตั้งเพิ่ม):
+เมื่อ environment ถูก activate แล้วให้ติดตั้งแพ็กเกจหลัก และเลือกเสริมส่วนที่ต้องใช้:
 
 ```bash
-pip install "."
-pip install uvicorn  # ติดตั้ง uvicorn
+pip install "."          # ติดตั้งแพ็กเกจหลัก
+pip install uvicorn      # (ทางเลือก) ใช้ uvicorn เป็นเว็บเซิร์ฟเวอร์
+pip install ".[extras]"  # (ทางเลือก) ติดตั้ง dependencies เสริม เช่น onnxruntime, torch, tensorrt
 ```
 
-หากต้องการ dependencies เพิ่มเติม เช่น `onnxruntime`, `requests`, `tensorflow`, `torch`, `websockets`, `onnx`, `torchvision`, `pycuda` หรือ `tensorrt` สามารถติดตั้งผ่าน extras ได้:
-
-```bash
-pip install ".[extras]"
-```
-
-หรือหากต้องการติดตั้งแบบ editable:
+หากต้องการติดตั้งแบบ editable เพื่อแก้ไขซอร์สโค้ดโดยตรง:
 
 ```bash
 pip install -e "."
@@ -460,6 +456,8 @@ text = ocr.process(frame, roi_id="1", save=True, source="demo")
 
 ## ข้อมูลเพิ่มเติม
 - `config.json` เก็บข้อมูล source และไฟล์ ROI
+- `service_state.json` จะถูกสร้างอัตโนมัติเมื่อมีการเริ่มงาน ROI หรือ inference เพื่อเก็บสถานะล่าสุดของกล้องแต่ละตัว
+- `custom.log` ภายใต้ `data_sources/<name>/` ใช้สำหรับบันทึกผลลัพธ์หรือข้อความจากโมดูล `custom.py`
 
 ## การร่วมพัฒนา
 - หากพบปัญหาหรือมีข้อเสนอแนะ สามารถเปิด issue ได้
