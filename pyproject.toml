@@ -25,6 +25,7 @@ extras = [
     "requests",
     "tensorflow",
     "torch",
+    "transformers",
     "websockets",
     "onnx",
     "torchvision",
