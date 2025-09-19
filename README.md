@@ -32,7 +32,7 @@
    source .venv/bin/activate  # บน Windows ใช้ .venv\\Scripts\\activate
    ```
 
-2. ติดตั้งแพ็กเกจของโปรเจ็กต์ (หากต้องการใช้เซิร์ฟเวอร์ **uvicorn** ให้ติดตั้งเพิ่ม หรือจะติดตั้ง extras ทั้งหมดในครั้งเดียวก็ได้):
+2. ติดตั้งแพ็กเกจของโปรเจ็กต์และ dependencies หลัก (หากต้องการใช้เซิร์ฟเวอร์ **uvicorn** ให้ติดตั้งเพิ่ม หรือจะติดตั้ง extras ทั้งหมดในครั้งเดียวก็ได้):
 
    ```bash
    pip install "."
@@ -40,6 +40,8 @@
    # หรือใช้คำสั่งเดียวติดตั้งพร้อม extras ที่ใช้บ่อย
    pip install ".[extras]"
    ```
+
+   > หากยังไม่ได้ติดตั้งไลบรารีระบบ เช่น `tesseract` หรือแพ็กเกจที่เกี่ยวข้อง โปรดดูหัวข้อ [ติดตั้ง System Dependencies ที่จำเป็น](#ติดตั้ง-system-dependencies-ที่จำเป็น)
 
 3. ตรวจสอบให้แน่ใจว่าเครื่องมีคำสั่ง `ffmpeg` (จำเป็นเมื่อเลือก backend แบบ `ffmpeg`).
    บน Ubuntu สามารถติดตั้งได้ด้วย `sudo apt install ffmpeg` ส่วน Windows สามารถดาวน์โหลดจาก [FFmpeg.org](https://ffmpeg.org) แล้วเพิ่มลงใน PATH.
@@ -122,12 +124,14 @@ VisionROI/
 - `easyocr`
 - `rapidocr`
 - `pytesseract`
+- `paho-mqtt`
 
 ### Dependencies เพิ่มเติม (Extras)
 - `onnxruntime` – สำหรับรันโมเดล ONNX
 - `requests` – ใช้ส่งการแจ้งเตือนผ่าน Telegram เท่านั้น (หากต้องการรองรับ Line จำเป็นต้องพัฒนาโมดูลเพิ่มเติม)
 - `tensorflow` – สำหรับโมเดลที่ใช้ TFLite
 - `torch` – สำหรับฟังก์ชันที่ใช้ PyTorch
+- `transformers` – โมดูลภาษาธรรมชาติสำหรับโมเดลที่ต้องพึ่งพา Hugging Face
 - `websockets` – สำหรับการเชื่อมต่อผ่าน WebSocket แบบไคลเอนต์
 - `onnx` – เครื่องมือสำหรับจัดการโมเดล ONNX
 - `torchvision` – ยูทิลิตีเสริมสำหรับ PyTorch
@@ -168,6 +172,29 @@ pip install ".[extras]"  # (ทางเลือก) ติดตั้ง depe
 ```bash
 pip install -e "."
 ```
+
+### ติดตั้ง System Dependencies ที่จำเป็น
+แพ็กเกจบางตัวต้องพึ่งพาไลบรารีระดับระบบปฏิบัติการ โดยเฉพาะเมื่อต้องใช้งานโมดูล OCR (`pytesseract`) และการประมวลผลภาพผ่าน OpenCV:
+
+- **Ubuntu / Debian**
+
+  ```bash
+  sudo apt update
+  sudo apt install ffmpeg tesseract-ocr libtesseract-dev libgl1 libglib2.0-0
+  ```
+
+- **macOS (ผ่าน Homebrew)**
+
+  ```bash
+  brew install ffmpeg tesseract
+  ```
+
+- **Windows**
+
+  1. ดาวน์โหลดและติดตั้ง [FFmpeg](https://ffmpeg.org/download.html) แล้วเพิ่มลงใน `PATH`.
+  2. ดาวน์โหลดและติดตั้ง [Tesseract OCR](https://github.com/UB-Mannheim/tesseract/wiki) แล้วเพิ่มโฟลเดอร์ที่มี `tesseract.exe` ลงใน `PATH`.
+
+หลังจากติดตั้งระบบเรียบร้อยสามารถตรวจสอบว่า `ffmpeg` และ `tesseract` ใช้งานได้ด้วยคำสั่ง `ffmpeg -version` และ `tesseract --version` เพื่อยืนยันว่า backend `ffmpeg` และโมดูล `pytesseract` พร้อมใช้งาน
 
 ### ตัวแปรสภาพแวดล้อมที่สำคัญ
 - `INFERENCE_RESULT_TIMEOUT` – กำหนดเวลารอผลลัพธ์จากโมดูล inference ต่อ ROI หน่วยเป็นวินาที (ค่าเริ่มต้น `10.0`). หากต้องการลดความถี่ในการตัดการเชื่อมต่อของ WebSocket ในงานที่ใช้เวลาประมวลผลยาว ควรกำหนดค่าให้อยู่เหนือระยะเวลาประมวลผลสูงสุดของแต่ละโมดูล
