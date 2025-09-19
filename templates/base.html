@@ -70,7 +70,7 @@
   </nav>
   {% include 'partials/alert.html' %}
   <main id="content" class="app-main">
-    <div class="app-shell container-xxl">
+    <div class="{% block shell_classes %}app-shell container-xxl{% endblock %}">
       {% block content %}{% endblock %}
     </div>
   </main>
