@@ -442,6 +442,7 @@ button.delete {
   border-radius: var(--radius-md);
   overflow: hidden;
   box-shadow: 0 25px 55px -35px rgba(15, 23, 42, 0.7);
+  padding: 10px;
 }
 
 #video {
