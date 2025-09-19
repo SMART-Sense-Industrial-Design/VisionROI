@@ -389,8 +389,12 @@
             statusEl.innerText = '';
             allRois = data.rois || [];
             const roiList = allRois.filter(r => (r.type ?? 'roi') === 'roi');
-            const activeGroup = loadGroupOptions(roiList, selectedGroup);
-            const groupToUse = selectedGroup || activeGroup;
+            const selectedGroupName = typeof selectedGroup === 'string' ? selectedGroup : '';
+            if (!selectedGroupName) {
+                storeGroupSelection('');
+            }
+            const activeGroup = loadGroupOptions(roiList, selectedGroupName);
+            const groupToUse = selectedGroupName || activeGroup;
             const requestGroup = groupToUse || null;
             if (Array.isArray(roisOverride)) {
                 rois = roisOverride;
