@@ -32,13 +32,15 @@
    source .venv/bin/activate  # บน Windows ใช้ .venv\\Scripts\\activate
    ```
 
-2. ติดตั้งแพ็กเกจของโปรเจ็กต์และ dependencies หลัก (หากต้องการใช้เซิร์ฟเวอร์ **uvicorn** ให้ติดตั้งเพิ่ม หรือจะติดตั้ง extras ทั้งหมดในครั้งเดียวก็ได้):
+2. ติดตั้งแพ็กเกจของโปรเจ็กต์และ dependencies หลัก (ถ้าต้องการรันผ่าน **uvicorn** หรือใช้งานโมเดลเพิ่มเติม ให้ติดตั้ง extras ตามความต้องการ):
 
    ```bash
    pip install "."
-   pip install uvicorn          # ติดตั้ง uvicorn เพิ่มเติม
-   # หรือใช้คำสั่งเดียวติดตั้งพร้อม extras ที่ใช้บ่อย
-   pip install ".[extras]"
+   pip install ".[server]"      # (ตัวเลือก) ติดตั้ง uvicorn + websockets
+   pip install ".[onnx]"        # (ตัวเลือก) ใช้งานโมเดล ONNX
+   pip install ".[torch]"       # (ตัวเลือก) ใช้งานโมเดลที่พึ่งพา PyTorch/Transformers
+   pip install ".[tflite]"      # (ตัวเลือก) ใช้งานโมเดล TensorFlow Lite
+   pip install ".[tensorrt]"    # (ตัวเลือก) ใช้งาน TensorRT backend
    ```
 
    > หากยังไม่ได้ติดตั้งไลบรารีระบบ เช่น `tesseract` หรือแพ็กเกจที่เกี่ยวข้อง โปรดดูหัวข้อ [ติดตั้ง System Dependencies ที่จำเป็น](#ติดตั้ง-system-dependencies-ที่จำเป็น)
@@ -125,18 +127,14 @@ VisionROI/
 - `rapidocr`
 - `pytesseract`
 - `paho-mqtt`
+- `requests`
 
 ### Dependencies เพิ่มเติม (Extras)
-- `onnxruntime` – สำหรับรันโมเดล ONNX
-- `requests` – ใช้ส่งการแจ้งเตือนผ่าน Telegram เท่านั้น (หากต้องการรองรับ Line จำเป็นต้องพัฒนาโมดูลเพิ่มเติม)
-- `tensorflow` – สำหรับโมเดลที่ใช้ TFLite
-- `torch` – สำหรับฟังก์ชันที่ใช้ PyTorch
-- `transformers` – โมดูลภาษาธรรมชาติสำหรับโมเดลที่ต้องพึ่งพา Hugging Face
-- `websockets` – สำหรับการเชื่อมต่อผ่าน WebSocket แบบไคลเอนต์
-- `onnx` – เครื่องมือสำหรับจัดการโมเดล ONNX
-- `torchvision` – ยูทิลิตีเสริมสำหรับ PyTorch
-- `pycuda` – จำเป็นสำหรับ TensorRT backend
-- `tensorrt` – เร่งความเร็วโมเดลด้วย TensorRT
+- `server` – รวม `uvicorn`, `websockets` สำหรับการรันเซิร์ฟเวอร์ผ่าน Uvicorn และรองรับการจัดการ WebSocket client
+- `onnx` – รวม `onnx`, `onnxruntime` สำหรับโหลดและรันโมเดล ONNX
+- `torch` – รวม `torch`, `torchvision`, `transformers` สำหรับโมเดลที่อาศัย PyTorch หรือ Hugging Face
+- `tflite` – รวม `tensorflow` สำหรับโมเดล TensorFlow Lite
+- `tensorrt` – รวม `tensorrt`, `pycuda`, `torch`, `torchvision`, `onnx` เพื่อใช้งาน TensorRT backend (รวมส่วนพึ่งพาที่จำเป็น)
 
 ## การติดตั้ง
 แนะนำให้สร้าง virtual environment ก่อน:
@@ -162,9 +160,9 @@ python -m venv .venv
 เมื่อ environment ถูก activate แล้วให้ติดตั้งแพ็กเกจหลัก และเลือกเสริมส่วนที่ต้องใช้:
 
 ```bash
-pip install "."          # ติดตั้งแพ็กเกจหลัก
-pip install uvicorn      # (ทางเลือก) ใช้ uvicorn เป็นเว็บเซิร์ฟเวอร์
-pip install ".[extras]"  # (ทางเลือก) ติดตั้ง dependencies เสริม เช่น onnxruntime, torch, tensorrt
+pip install "."              # ติดตั้งแพ็กเกจหลัก
+pip install ".[server]"      # (ทางเลือก) ใช้ uvicorn + websockets
+pip install ".[onnx,torch]"  # (ตัวอย่าง) ติดตั้ง extras หลายชุดพร้อมกัน
 ```
 
 หากต้องการติดตั้งแบบ editable เพื่อแก้ไขซอร์สโค้ดโดยตรง:
