@@ -466,7 +466,13 @@
                 startRes = await fetch(`/start_inference/${cam}`, {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ ...camCfg, rois, group: requestGroup, interval })
+                    body: JSON.stringify({
+                        ...camCfg,
+                        rois,
+                        group: requestGroup,
+                        interval,
+                        draw_page_boxes: false
+                    })
                 });
                 startData = await startRes.json().catch(() => ({}));
             } catch (err) {
