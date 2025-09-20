@@ -24,6 +24,7 @@ import contextlib
 import inspect
 import gc
 import time
+from datetime import datetime
 from typing import Callable, Awaitable, Any
 from concurrent.futures import ThreadPoolExecutor
 from queue import Queue, Empty
@@ -60,6 +61,9 @@ last_inference_times: dict[str, float] = {}
 last_inference_outputs: dict[str, str] = {}
 inference_result_timeouts: dict[str, float] = {}
 inference_draw_page_boxes: dict[str, bool] = {}
+
+recent_notifications: list[dict[str, Any]] = []
+MAX_RECENT_NOTIFICATIONS = 200
 
 MQTT_CONFIG_FILE = "mqtt_configs.json"
 mqtt_configs: dict[str, dict[str, Any]] = {}
@@ -245,6 +249,18 @@ def ensure_roi_ids(rois):
             if isinstance(r, dict) and "id" not in r:
                 r["id"] = str(idx + 1)
     return rois
+
+
+def push_recent_notification(entry: dict[str, Any]) -> None:
+    recent_notifications.append(entry)
+    if len(recent_notifications) > MAX_RECENT_NOTIFICATIONS:
+        del recent_notifications[: len(recent_notifications) - MAX_RECENT_NOTIFICATIONS]
+
+
+def get_recent_notifications(limit: int | None = None) -> list[dict[str, Any]]:
+    if limit is not None and limit > 0:
+        return list(recent_notifications[-limit:])
+    return list(recent_notifications)
 
 
 def get_mqtt_config_lock() -> asyncio.Lock:
@@ -543,8 +559,133 @@ async def restore_service_state() -> None:
     save_service_state()
 
 
+async def startup_tasks() -> None:
+    await restore_service_state()
+
+
+async def shutdown_tasks() -> None:
+    _stop_inference_workers()
+
+
 if hasattr(app, "before_serving"):
-    app.before_serving(restore_service_state)
+    app.before_serving(startup_tasks)
+
+if hasattr(app, "after_serving"):
+    app.after_serving(shutdown_tasks)
+
+
+def _resolve_interval(cam_id: str, persisted: dict[str, dict[str, object]]) -> float | None:
+    interval = inference_intervals.get(cam_id)
+    if interval is not None:
+        return float(interval)
+    persisted_entry = persisted.get(cam_id, {})
+    value = persisted_entry.get("interval")
+    if isinstance(value, (int, float)):
+        try:
+            return max(0.0, float(value))
+        except (TypeError, ValueError):
+            return None
+    return None
+
+
+def build_dashboard_payload() -> dict[str, Any]:
+    persisted = load_service_state()
+    known_ids = set(persisted) | set(camera_sources) | set(active_sources)
+    known_ids |= set(inference_rois)
+    known_ids |= set(inference_tasks)
+    known_ids |= set(roi_tasks)
+    cameras: list[dict[str, Any]] = []
+    running_count = 0
+    online_count = 0
+    intervals: list[float] = []
+    fps_values: list[float] = []
+    now_epoch = time.time()
+    notifications_snapshot = get_recent_notifications()
+    alerts_last_hour = 0
+    for notif in notifications_snapshot:
+        try:
+            ts = float(notif.get("timestamp_epoch", 0.0))
+        except (TypeError, ValueError):
+            ts = 0.0
+        if now_epoch - ts <= 3600:
+            alerts_last_hour += 1
+    for cam_id in sorted(known_ids, key=str):
+        task = inference_tasks.get(cam_id)
+        inference_running = bool(task and not task.done())
+        roi_task = roi_tasks.get(cam_id)
+        roi_running = bool(roi_task and not roi_task.done())
+        persisted_entry = persisted.get(cam_id, {})
+        interval = _resolve_interval(cam_id, persisted)
+        if interval:
+            intervals.append(interval)
+            if interval > 0:
+                fps_values.append(round(1.0 / interval, 3))
+        active_group = inference_groups.get(cam_id) or persisted_entry.get("inference_group")
+        last_result = last_inference_outputs.get(cam_id, "")
+        last_activity = last_inference_times.get(cam_id)
+        if isinstance(last_activity, (int, float)) and last_activity > 0:
+            last_activity_iso = datetime.fromtimestamp(last_activity).isoformat()
+        else:
+            last_activity_iso = None
+        status: str
+        if inference_running:
+            status = "กำลังประมวลผล"
+        elif roi_running:
+            status = "สตรีม ROI"
+        else:
+            status = "หยุดทำงาน"
+        if inference_running or roi_running:
+            online_count += 1
+        if inference_running:
+            running_count += 1
+        recent_alerts_for_cam = [
+            notif
+            for notif in notifications_snapshot
+            if notif.get("cam_id") == cam_id
+        ]
+        alerts_count = len(recent_alerts_for_cam)
+        camera_entry = {
+            "cam_id": cam_id,
+            "source": camera_sources.get(cam_id, persisted_entry.get("source", "")),
+            "name": active_sources.get(cam_id, persisted_entry.get("active_source", "")),
+            "backend": camera_backends.get(cam_id, persisted_entry.get("backend", "opencv")),
+            "group": active_group,
+            "interval": interval,
+            "fps": (round(1.0 / interval, 3) if interval and interval > 0 else None),
+            "status": status,
+            "last_output": last_result,
+            "last_activity": last_activity_iso,
+            "alerts_count": alerts_count,
+            "roi_count": len(inference_rois.get(cam_id, [])),
+            "inference_running": inference_running,
+            "roi_running": roi_running,
+            "snapshot_url": f"/ws_snapshot/{cam_id}?ts={int(now_epoch)}"
+            if inference_running
+            else None,
+        }
+        cameras.append(camera_entry)
+    average_interval = sum(intervals) / len(intervals) if intervals else 0.0
+    average_fps = sum(fps_values) / len(fps_values) if fps_values else 0.0
+    recent_alerts = notifications_snapshot[-20:]
+    summary = {
+        "total_cameras": len(known_ids),
+        "online_cameras": online_count,
+        "inference_running": running_count,
+        "alerts_last_hour": alerts_last_hour,
+        "average_interval": average_interval,
+        "average_fps": average_fps,
+    }
+    return {
+        "summary": summary,
+        "cameras": cameras,
+        "alerts": recent_alerts,
+        "generated_at": datetime.utcnow().isoformat() + "Z",
+    }
+
+
+async def build_dashboard_response() -> dict[str, Any]:
+    payload = build_dashboard_payload()
+    return payload
 
 
 # ========== stop helpers ==========
@@ -627,6 +768,11 @@ async def index():
 @app.route("/home")
 async def home():
     return await render_template("home.html")
+
+
+@app.route("/docs")
+async def docs():
+    return await render_template("docs.html")
 
 
 @app.route("/roi")
@@ -866,6 +1012,25 @@ async def run_inference_loop(cam_id: str):
                     agg_logger.info(
                         "AGGREGATED_ROI %s",
                         json.dumps(log_entry, ensure_ascii=False),
+                    )
+                    try:
+                        ts = datetime.fromtimestamp(
+                            float(payload_dict['result_time'])
+                        ).isoformat()
+                    except Exception:
+                        ts = datetime.utcnow().isoformat()
+                    push_recent_notification(
+                        {
+                            "cam_id": key[0],
+                            "group": group_name or "",
+                            "source": source_name or "",
+                            "count": len(sanitized_results),
+                            "results": sanitized_results[:5],
+                            "timestamp": ts,
+                            "timestamp_epoch": float(
+                                payload_dict.get('result_time', time.time())
+                            ),
+                        }
                     )
         except Exception:
             pass
@@ -1964,6 +2129,41 @@ async def perform_start_inference(cam_id: str, rois=None, group: str | None = No
     return True, resp, status
 
 
+async def perform_stop_inference(cam_id: str, save_state: bool = True):
+    _, resp, status = await stop_camera_task(cam_id, inference_tasks, frame_queues)
+    queue = roi_result_queues.get(cam_id)
+    if queue is not None:
+        await queue.put(None)
+        roi_result_queues.pop(cam_id, None)
+    rois = inference_rois.pop(cam_id, [])
+    seen: set[str] = set()
+    for r in rois:
+        mod_name = r.get("module")
+        if not mod_name or mod_name in seen:
+            continue
+        seen.add(mod_name)
+        mod_key = f"custom_{mod_name}"
+        module = sys.modules.get(mod_key)
+        if module is not None:
+            with contextlib.suppress(Exception):
+                cleanup_fn = getattr(module, "cleanup", None)
+                if callable(cleanup_fn):
+                    cleanup_fn()
+            sys.modules.pop(mod_key, None)
+    inference_groups.pop(cam_id, None)
+    save_roi_flags.pop(cam_id, None)
+    inference_intervals.pop(cam_id, None)
+    last_inference_times.pop(cam_id, None)
+    inference_result_timeouts.pop(cam_id, None)
+    inference_draw_page_boxes.pop(cam_id, None)
+    _free_cam_state(cam_id)
+    gc.collect()
+    _malloc_trim()
+    if save_state:
+        save_service_state()
+    return resp, status
+
+
 @app.route('/start_inference/<string:cam_id>', methods=["POST"])
 async def start_inference(cam_id: str):
     if roi_tasks.get(cam_id) and not roi_tasks[cam_id].done():
@@ -2005,41 +2205,19 @@ async def start_inference(cam_id: str):
 
 @app.route('/stop_inference/<string:cam_id>', methods=["POST"])
 async def stop_inference(cam_id: str):
-    _, resp, status = await stop_camera_task(cam_id, inference_tasks, frame_queues)
-    queue = roi_result_queues.get(cam_id)
-    if queue is not None:
-        await queue.put(None)
-        roi_result_queues.pop(cam_id, None)
-    # clear cached ROI data and flags
-    rois = inference_rois.pop(cam_id, [])
-    # cleanup any loaded custom modules
-    seen: set[str] = set()
-    for r in rois:
-        mod_name = r.get("module")
-        if not mod_name or mod_name in seen:
-            continue
-        seen.add(mod_name)
-        mod_key = f"custom_{mod_name}"
-        module = sys.modules.get(mod_key)
-        if module is not None:
-            with contextlib.suppress(Exception):
-                cleanup_fn = getattr(module, "cleanup", None)
-                if callable(cleanup_fn):
-                    cleanup_fn()
-            sys.modules.pop(mod_key, None)
-    inference_groups.pop(cam_id, None)
-    save_roi_flags.pop(cam_id, None)
-    inference_intervals.pop(cam_id, None)
-    last_inference_times.pop(cam_id, None)
-    inference_draw_page_boxes.pop(cam_id, None)
-
-    # NEW: fully free per-camera state & trim memory
-    _free_cam_state(cam_id)
-    gc.collect()
-    _malloc_trim()
-
-    save_service_state()
+    resp, status = await perform_stop_inference(cam_id)
     return jsonify(resp), status
+
+
+@app.route("/dashboard")
+async def dashboard():
+    return redirect("/home")
+
+
+@app.route("/api/dashboard", methods=["GET"])
+async def api_dashboard():
+    payload = await build_dashboard_response()
+    return jsonify(payload)
 
 
 @app.route('/start_roi_stream/<string:cam_id>', methods=["POST"])
