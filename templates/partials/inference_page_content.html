@@ -71,6 +71,10 @@ function createController(cellId){
     let roiSocket;
     let running=false;
     const cam=`page_${cellId}`;
+    const sessionRegistry=window.InferenceSessions;
+    const camRoot=document.getElementById(cellId);
+    const camRow=camRoot?camRoot.closest('.cam-row'):null;
+    const sessionTitle=camRow&&camRow.dataset.rowLabel?camRow.dataset.rowLabel:cellId;
     const getEl=suffix=>document.getElementById(`${cellId}-${suffix}`);
     const video=getEl('video');
     const videoCtx=video.getContext('2d');
@@ -249,6 +253,19 @@ function createController(cellId){
         setRunningUI();
         startLogUpdates(cfg.name);
         showAlert('Stream started','success');
+        const sourceOption=sourceSelect.options[sourceSelect.selectedIndex];
+        if(sessionRegistry&&typeof sessionRegistry.upsertSession==='function'){
+            sessionRegistry.upsertSession({
+                id:cam,
+                type:'page',
+                title:sessionTitle,
+                sourceId:sourceSelect.value||'',
+                sourceName:sourceOption?sourceOption.textContent:'',
+                page:pageNameEl?pageNameEl.textContent:'',
+                href:`/inference/page#${cellId}`,
+                status:'running'
+            });
+        }
         }
 
 
@@ -278,6 +295,12 @@ function createController(cellId){
                 if('group' in data){
                     setTimeout(()=>{
                         pageNameEl.innerText=data.group||'';
+                        if(sessionRegistry&&typeof sessionRegistry.updateSession==='function'){
+                            sessionRegistry.updateSession(cam,{
+                                page:data.group||'',
+                                status:'running'
+                            });
+                        }
                         if(Array.isArray(data.scores)){
                             scoreTableBody.innerHTML='';
                             data.scores.forEach(item=>{
@@ -537,6 +560,12 @@ function createController(cellId){
         stopButton.disabled=true;
         statusEl.innerText='Stopped';
         showAlert('Stream stopped','info');
+        if(sessionRegistry&&typeof sessionRegistry.updateSession==='function'){
+            sessionRegistry.updateSession(cam,{
+                status:'stopped',
+                page:''
+            });
+        }
     }
 
     function setRunningUI(){
