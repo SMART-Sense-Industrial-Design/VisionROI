@@ -1,5 +1,52 @@
 (function (window) {
   const STORAGE_KEY = 'visionroi_inference_sessions';
+  const LAST_COUNTER_KEY = 'visionroi_inference_last_cam_index';
+
+  function parseCamIndex(value) {
+    if (!value) {
+      return null;
+    }
+    const match = /cam(\d+)/i.exec(String(value));
+    if (!match) {
+      return null;
+    }
+    const num = parseInt(match[1], 10);
+    return Number.isFinite(num) && num > 0 ? num : null;
+  }
+
+  function updateLastCounterFromSession(session) {
+    if (!session) {
+      return;
+    }
+    const candidates = [session.id, session.href];
+    let maxIndex = null;
+    for (const value of candidates) {
+      const parsed = parseCamIndex(value);
+      if (parsed && (!maxIndex || parsed > maxIndex)) {
+        maxIndex = parsed;
+      }
+    }
+    if (!maxIndex) {
+      return;
+    }
+    const current = parseInt(localStorage.getItem(LAST_COUNTER_KEY), 10);
+    if (Number.isFinite(current) && current >= maxIndex) {
+      return;
+    }
+    try {
+      localStorage.setItem(LAST_COUNTER_KEY, String(maxIndex));
+    } catch (err) {
+      console.warn('Failed to persist inference counter', err);
+    }
+  }
+
+  function resetLastCounter() {
+    try {
+      localStorage.removeItem(LAST_COUNTER_KEY);
+    } catch (err) {
+      console.warn('Failed to reset inference counter', err);
+    }
+  }
 
   function readSessions() {
     try {
@@ -74,6 +121,7 @@
       sessions.push({ ...normalized, createdAt: Date.now(), updatedAt: Date.now() });
     }
     const finalList = writeSessions(sessions);
+    updateLastCounterFromSession(normalized);
     emitChange(sortSessions(finalList));
   }
 
@@ -108,6 +156,7 @@
 
   function clearSessions() {
     localStorage.removeItem(STORAGE_KEY);
+    resetLastCounter();
     emitChange([]);
   }
 
