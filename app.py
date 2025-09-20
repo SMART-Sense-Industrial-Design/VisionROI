@@ -24,6 +24,8 @@ import contextlib
 import inspect
 import gc
 import time
+from datetime import datetime, time as datetime_time
+import uuid
 from typing import Callable, Awaitable, Any
 from concurrent.futures import ThreadPoolExecutor
 from queue import Queue, Empty
@@ -60,6 +62,14 @@ last_inference_times: dict[str, float] = {}
 last_inference_outputs: dict[str, str] = {}
 inference_result_timeouts: dict[str, float] = {}
 inference_draw_page_boxes: dict[str, bool] = {}
+
+recent_notifications: list[dict[str, Any]] = []
+MAX_RECENT_NOTIFICATIONS = 200
+
+SCHEDULE_FILE = "inference_schedules.json"
+inference_schedules: list[dict[str, Any]] = []
+schedule_lock = asyncio.Lock()
+scheduler_task: asyncio.Task | None = None
 
 MQTT_CONFIG_FILE = "mqtt_configs.json"
 mqtt_configs: dict[str, dict[str, Any]] = {}
@@ -245,6 +255,152 @@ def ensure_roi_ids(rois):
             if isinstance(r, dict) and "id" not in r:
                 r["id"] = str(idx + 1)
     return rois
+
+
+def push_recent_notification(entry: dict[str, Any]) -> None:
+    recent_notifications.append(entry)
+    if len(recent_notifications) > MAX_RECENT_NOTIFICATIONS:
+        del recent_notifications[: len(recent_notifications) - MAX_RECENT_NOTIFICATIONS]
+
+
+def get_recent_notifications(limit: int | None = None) -> list[dict[str, Any]]:
+    if limit is not None and limit > 0:
+        return list(recent_notifications[-limit:])
+    return list(recent_notifications)
+
+
+def _clean_time_string(value: str | None, fallback: str) -> str:
+    if not value:
+        return fallback
+    try:
+        parts = str(value).split(":")
+        hour = int(parts[0])
+        minute = int(parts[1]) if len(parts) > 1 else 0
+        hour = max(0, min(23, hour))
+        minute = max(0, min(59, minute))
+        return f"{hour:02d}:{minute:02d}"
+    except Exception:
+        return fallback
+
+
+def _time_from_string(value: str) -> datetime_time:
+    parts = value.split(":")
+    hour = int(parts[0])
+    minute = int(parts[1]) if len(parts) > 1 else 0
+    return datetime_time(hour=hour, minute=minute)
+
+
+def normalize_schedule_entry(entry: dict[str, Any]) -> dict[str, Any]:
+    cam_id = str(entry.get("cam_id") or entry.get("camera_id") or "").strip()
+    if not cam_id:
+        raise ValueError("cam_id is required")
+    start_time = _clean_time_string(entry.get("start_time") or entry.get("start"), "00:00")
+    end_time = _clean_time_string(entry.get("end_time") or entry.get("end"), "23:59")
+    weekdays_raw = entry.get("weekdays") or entry.get("days") or []
+    if isinstance(weekdays_raw, str):
+        weekdays_raw = [w for w in re.split(r"[,;\s]+", weekdays_raw) if w]
+    weekdays: list[int] = []
+    for w in weekdays_raw if isinstance(weekdays_raw, list) else []:
+        try:
+            day = int(w)
+        except (TypeError, ValueError):
+            continue
+        if 0 <= day <= 6 and day not in weekdays:
+            weekdays.append(day)
+    weekdays.sort()
+    group = entry.get("group")
+    group_val = str(group).strip() if isinstance(group, str) else None
+    interval_val = entry.get("interval")
+    try:
+        interval = max(0.1, float(interval_val)) if interval_val is not None else None
+    except (TypeError, ValueError):
+        interval = None
+    timeout_val = entry.get("result_timeout")
+    try:
+        result_timeout = max(0.1, float(timeout_val)) if timeout_val is not None else None
+    except (TypeError, ValueError):
+        result_timeout = None
+    camera_settings = entry.get("camera_settings") or entry.get("settings")
+    if isinstance(camera_settings, dict):
+        settings = dict(camera_settings)
+    else:
+        settings = {}
+    rois_val = entry.get("rois")
+    rois = rois_val if isinstance(rois_val, list) else []
+    schedule_id = str(entry.get("id") or uuid.uuid4().hex)
+    enabled = entry.get("enabled")
+    if not isinstance(enabled, bool):
+        enabled = True
+    label = entry.get("label")
+    if label is not None:
+        label = str(label)
+    description = entry.get("description")
+    if description is not None:
+        description = str(description)
+    created_at = entry.get("created_at")
+    if not isinstance(created_at, str) or not created_at:
+        created_at = datetime.utcnow().isoformat()
+    return {
+        "id": schedule_id,
+        "cam_id": cam_id,
+        "start_time": start_time,
+        "end_time": end_time,
+        "weekdays": weekdays,
+        "group": group_val or None,
+        "interval": interval,
+        "result_timeout": result_timeout,
+        "camera_settings": settings,
+        "rois": rois,
+        "enabled": enabled,
+        "label": label,
+        "description": description,
+        "created_at": created_at,
+        "_active": False,
+    }
+
+
+def serialize_schedule(entry: dict[str, Any]) -> dict[str, Any]:
+    data = {k: v for k, v in entry.items() if not k.startswith("_")}
+    cam_id = entry.get("cam_id")
+    is_running = bool(
+        inference_tasks.get(cam_id)
+        and not inference_tasks[cam_id].done()
+        and entry.get("_active")
+    )
+    data["is_running"] = is_running
+    return data
+
+
+def load_inference_schedules_from_disk() -> list[dict[str, Any]]:
+    path = Path(SCHEDULE_FILE)
+    if not path.exists():
+        return []
+    try:
+        with path.open("r") as f:
+            raw = json.load(f)
+    except Exception:
+        return []
+    if not isinstance(raw, list):
+        return []
+    schedules: list[dict[str, Any]] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        try:
+            schedules.append(normalize_schedule_entry(item))
+        except ValueError:
+            continue
+    return schedules
+
+
+def save_inference_schedules() -> None:
+    data: list[dict[str, Any]] = []
+    for item in inference_schedules:
+        public = {k: v for k, v in item.items() if not k.startswith("_")}
+        data.append(public)
+    with contextlib.suppress(Exception):
+        with open(SCHEDULE_FILE, "w") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
 
 
 def get_mqtt_config_lock() -> asyncio.Lock:
@@ -543,8 +699,234 @@ async def restore_service_state() -> None:
     save_service_state()
 
 
+def schedule_should_run(schedule: dict[str, Any], now: datetime) -> bool:
+    if not schedule.get("enabled", True):
+        return False
+    weekdays = schedule.get("weekdays") or []
+    if weekdays and now.weekday() not in weekdays:
+        return False
+    start_time = _time_from_string(schedule.get("start_time", "00:00"))
+    end_time = _time_from_string(schedule.get("end_time", "23:59"))
+    start_dt = datetime.combine(now.date(), start_time)
+    end_dt = datetime.combine(now.date(), end_time)
+    if end_dt <= start_dt:
+        # ข้ามเที่ยงคืน
+        if now >= start_dt or now < end_dt:
+            return True
+        return False
+    return start_dt <= now < end_dt
+
+
+async def schedule_runner() -> None:
+    logger = get_logger("schedule_runner")
+    try:
+        while True:
+            now = datetime.now()
+            async with schedule_lock:
+                for schedule in inference_schedules:
+                    cam_id = schedule["cam_id"]
+                    should_run = schedule_should_run(schedule, now)
+                    is_running = bool(
+                        inference_tasks.get(cam_id)
+                        and not inference_tasks[cam_id].done()
+                    )
+                    was_active = bool(schedule.get("_active"))
+                    if should_run:
+                        if not is_running:
+                            interval = schedule.get("interval")
+                            if interval is not None:
+                                inference_intervals[cam_id] = interval
+                            else:
+                                inference_intervals.pop(cam_id, None)
+                            timeout_val = schedule.get("result_timeout")
+                            if timeout_val is not None:
+                                inference_result_timeouts[cam_id] = timeout_val
+                            else:
+                                inference_result_timeouts.pop(cam_id, None)
+                            settings = schedule.get("camera_settings") or {}
+                            if settings:
+                                await apply_camera_settings(cam_id, settings)
+                            rois = schedule.get("rois")
+                            group = schedule.get("group")
+                            ok, resp, status = await perform_start_inference(
+                                cam_id, rois=rois, group=group
+                            )
+                            if not ok and logger is not None:
+                                logger.error(
+                                    "ไม่สามารถเริ่มงานตามตารางสำหรับ %s: %s (%s)",
+                                    cam_id,
+                                    resp,
+                                    status,
+                                )
+                                schedule["_active"] = False
+                                continue
+                        schedule["_active"] = True
+                    else:
+                        if was_active and is_running:
+                            await perform_stop_inference(cam_id)
+                        schedule["_active"] = False
+            await asyncio.sleep(30)
+    except asyncio.CancelledError:
+        if logger is not None:
+            logger.info("หยุดตัวจัดการตารางงาน")
+        raise
+
+
+async def ensure_schedule_runner() -> None:
+    global scheduler_task
+    if scheduler_task is None or scheduler_task.done():
+        scheduler_task = asyncio.create_task(schedule_runner())
+
+
+async def stop_schedule_runner() -> None:
+    global scheduler_task
+    task = scheduler_task
+    scheduler_task = None
+    if task is None:
+        return
+    if not task.done():
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+
+
+async def startup_tasks() -> None:
+    await restore_service_state()
+    async with schedule_lock:
+        inference_schedules.clear()
+        inference_schedules.extend(load_inference_schedules_from_disk())
+    await ensure_schedule_runner()
+
+
+async def shutdown_tasks() -> None:
+    await stop_schedule_runner()
+
+
 if hasattr(app, "before_serving"):
-    app.before_serving(restore_service_state)
+    app.before_serving(startup_tasks)
+
+if hasattr(app, "after_serving"):
+    app.after_serving(shutdown_tasks)
+
+
+def _resolve_interval(cam_id: str, persisted: dict[str, dict[str, object]]) -> float | None:
+    interval = inference_intervals.get(cam_id)
+    if interval is not None:
+        return float(interval)
+    persisted_entry = persisted.get(cam_id, {})
+    value = persisted_entry.get("interval")
+    if isinstance(value, (int, float)):
+        try:
+            return max(0.0, float(value))
+        except (TypeError, ValueError):
+            return None
+    return None
+
+
+def build_dashboard_payload() -> dict[str, Any]:
+    persisted = load_service_state()
+    known_ids = set(persisted) | set(camera_sources) | set(active_sources)
+    known_ids |= set(inference_rois)
+    known_ids |= set(inference_tasks)
+    known_ids |= set(roi_tasks)
+    cameras: list[dict[str, Any]] = []
+    running_count = 0
+    online_count = 0
+    intervals: list[float] = []
+    fps_values: list[float] = []
+    now_epoch = time.time()
+    notifications_snapshot = get_recent_notifications()
+    alerts_last_hour = 0
+    for notif in notifications_snapshot:
+        try:
+            ts = float(notif.get("timestamp_epoch", 0.0))
+        except (TypeError, ValueError):
+            ts = 0.0
+        if now_epoch - ts <= 3600:
+            alerts_last_hour += 1
+    for cam_id in sorted(known_ids, key=str):
+        task = inference_tasks.get(cam_id)
+        inference_running = bool(task and not task.done())
+        roi_task = roi_tasks.get(cam_id)
+        roi_running = bool(roi_task and not roi_task.done())
+        persisted_entry = persisted.get(cam_id, {})
+        interval = _resolve_interval(cam_id, persisted)
+        if interval:
+            intervals.append(interval)
+            if interval > 0:
+                fps_values.append(round(1.0 / interval, 3))
+        active_group = inference_groups.get(cam_id) or persisted_entry.get("inference_group")
+        last_result = last_inference_outputs.get(cam_id, "")
+        last_activity = last_inference_times.get(cam_id)
+        if isinstance(last_activity, (int, float)) and last_activity > 0:
+            last_activity_iso = datetime.fromtimestamp(last_activity).isoformat()
+        else:
+            last_activity_iso = None
+        status: str
+        if inference_running:
+            status = "กำลังประมวลผล"
+        elif roi_running:
+            status = "สตรีม ROI"
+        elif persisted_entry.get("inference_running"):
+            status = "รอเริ่มตามตาราง"
+        else:
+            status = "หยุดทำงาน"
+        if inference_running or roi_running:
+            online_count += 1
+        if inference_running:
+            running_count += 1
+        recent_alerts_for_cam = [
+            notif
+            for notif in notifications_snapshot
+            if notif.get("cam_id") == cam_id
+        ]
+        alerts_count = len(recent_alerts_for_cam)
+        camera_entry = {
+            "cam_id": cam_id,
+            "source": camera_sources.get(cam_id, persisted_entry.get("source", "")),
+            "name": active_sources.get(cam_id, persisted_entry.get("active_source", "")),
+            "backend": camera_backends.get(cam_id, persisted_entry.get("backend", "opencv")),
+            "group": active_group,
+            "interval": interval,
+            "fps": (round(1.0 / interval, 3) if interval and interval > 0 else None),
+            "status": status,
+            "last_output": last_result,
+            "last_activity": last_activity_iso,
+            "alerts_count": alerts_count,
+            "roi_count": len(inference_rois.get(cam_id, [])),
+            "inference_running": inference_running,
+            "roi_running": roi_running,
+            "snapshot_url": f"/ws_snapshot/{cam_id}?ts={int(now_epoch)}"
+            if inference_running
+            else None,
+        }
+        cameras.append(camera_entry)
+    average_interval = sum(intervals) / len(intervals) if intervals else 0.0
+    average_fps = sum(fps_values) / len(fps_values) if fps_values else 0.0
+    recent_alerts = notifications_snapshot[-20:]
+    summary = {
+        "total_cameras": len(known_ids),
+        "online_cameras": online_count,
+        "inference_running": running_count,
+        "alerts_last_hour": alerts_last_hour,
+        "average_interval": average_interval,
+        "average_fps": average_fps,
+    }
+    return {
+        "summary": summary,
+        "cameras": cameras,
+        "alerts": recent_alerts,
+        "generated_at": datetime.utcnow().isoformat() + "Z",
+    }
+
+
+async def build_dashboard_response() -> dict[str, Any]:
+    payload = build_dashboard_payload()
+    async with schedule_lock:
+        schedules_public = [serialize_schedule(s) for s in inference_schedules]
+    payload["schedules"] = schedules_public
+    payload["schedule_count"] = len(schedules_public)
+    return payload
 
 
 # ========== stop helpers ==========
@@ -866,6 +1248,25 @@ async def run_inference_loop(cam_id: str):
                     agg_logger.info(
                         "AGGREGATED_ROI %s",
                         json.dumps(log_entry, ensure_ascii=False),
+                    )
+                    try:
+                        ts = datetime.fromtimestamp(
+                            float(payload_dict['result_time'])
+                        ).isoformat()
+                    except Exception:
+                        ts = datetime.utcnow().isoformat()
+                    push_recent_notification(
+                        {
+                            "cam_id": key[0],
+                            "group": group_name or "",
+                            "source": source_name or "",
+                            "count": len(sanitized_results),
+                            "results": sanitized_results[:5],
+                            "timestamp": ts,
+                            "timestamp_epoch": float(
+                                payload_dict.get('result_time', time.time())
+                            ),
+                        }
                     )
         except Exception:
             pass
@@ -1964,6 +2365,41 @@ async def perform_start_inference(cam_id: str, rois=None, group: str | None = No
     return True, resp, status
 
 
+async def perform_stop_inference(cam_id: str, save_state: bool = True):
+    _, resp, status = await stop_camera_task(cam_id, inference_tasks, frame_queues)
+    queue = roi_result_queues.get(cam_id)
+    if queue is not None:
+        await queue.put(None)
+        roi_result_queues.pop(cam_id, None)
+    rois = inference_rois.pop(cam_id, [])
+    seen: set[str] = set()
+    for r in rois:
+        mod_name = r.get("module")
+        if not mod_name or mod_name in seen:
+            continue
+        seen.add(mod_name)
+        mod_key = f"custom_{mod_name}"
+        module = sys.modules.get(mod_key)
+        if module is not None:
+            with contextlib.suppress(Exception):
+                cleanup_fn = getattr(module, "cleanup", None)
+                if callable(cleanup_fn):
+                    cleanup_fn()
+            sys.modules.pop(mod_key, None)
+    inference_groups.pop(cam_id, None)
+    save_roi_flags.pop(cam_id, None)
+    inference_intervals.pop(cam_id, None)
+    last_inference_times.pop(cam_id, None)
+    inference_result_timeouts.pop(cam_id, None)
+    inference_draw_page_boxes.pop(cam_id, None)
+    _free_cam_state(cam_id)
+    gc.collect()
+    _malloc_trim()
+    if save_state:
+        save_service_state()
+    return resp, status
+
+
 @app.route('/start_inference/<string:cam_id>', methods=["POST"])
 async def start_inference(cam_id: str):
     if roi_tasks.get(cam_id) and not roi_tasks[cam_id].done():
@@ -2005,41 +2441,67 @@ async def start_inference(cam_id: str):
 
 @app.route('/stop_inference/<string:cam_id>', methods=["POST"])
 async def stop_inference(cam_id: str):
-    _, resp, status = await stop_camera_task(cam_id, inference_tasks, frame_queues)
-    queue = roi_result_queues.get(cam_id)
-    if queue is not None:
-        await queue.put(None)
-        roi_result_queues.pop(cam_id, None)
-    # clear cached ROI data and flags
-    rois = inference_rois.pop(cam_id, [])
-    # cleanup any loaded custom modules
-    seen: set[str] = set()
-    for r in rois:
-        mod_name = r.get("module")
-        if not mod_name or mod_name in seen:
-            continue
-        seen.add(mod_name)
-        mod_key = f"custom_{mod_name}"
-        module = sys.modules.get(mod_key)
-        if module is not None:
-            with contextlib.suppress(Exception):
-                cleanup_fn = getattr(module, "cleanup", None)
-                if callable(cleanup_fn):
-                    cleanup_fn()
-            sys.modules.pop(mod_key, None)
-    inference_groups.pop(cam_id, None)
-    save_roi_flags.pop(cam_id, None)
-    inference_intervals.pop(cam_id, None)
-    last_inference_times.pop(cam_id, None)
-    inference_draw_page_boxes.pop(cam_id, None)
-
-    # NEW: fully free per-camera state & trim memory
-    _free_cam_state(cam_id)
-    gc.collect()
-    _malloc_trim()
-
-    save_service_state()
+    resp, status = await perform_stop_inference(cam_id)
     return jsonify(resp), status
+
+
+@app.route("/dashboard")
+async def dashboard():
+    return await render_template("dashboard.html")
+
+
+@app.route("/api/dashboard", methods=["GET"])
+async def api_dashboard():
+    payload = await build_dashboard_response()
+    return jsonify(payload)
+
+
+@app.route("/api/schedules", methods=["GET", "POST"])
+async def schedules_handler():
+    if request.method == "GET":
+        async with schedule_lock:
+            schedules_public = [serialize_schedule(s) for s in inference_schedules]
+        return jsonify({"schedules": schedules_public})
+    data = await request.get_json() or {}
+    try:
+        schedule = normalize_schedule_entry(data)
+    except ValueError as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 400
+    async with schedule_lock:
+        inference_schedules.append(schedule)
+        save_inference_schedules()
+    return jsonify({"schedule": serialize_schedule(schedule)}), 201
+
+
+@app.route("/api/schedules/<string:schedule_id>", methods=["PATCH", "DELETE"])
+async def schedule_detail(schedule_id: str):
+    if request.method == "DELETE":
+        async with schedule_lock:
+            schedule = next(
+                (s for s in inference_schedules if s.get("id") == schedule_id), None
+            )
+            if schedule is None:
+                return jsonify({"status": "error", "message": "not found"}), 404
+            inference_schedules.remove(schedule)
+            save_inference_schedules()
+        return jsonify({"status": "deleted"})
+
+    data = await request.get_json() or {}
+    async with schedule_lock:
+        schedule = next(
+            (s for s in inference_schedules if s.get("id") == schedule_id), None
+        )
+        if schedule is None:
+            return jsonify({"status": "error", "message": "not found"}), 404
+        if "enabled" in data:
+            schedule["enabled"] = bool(data["enabled"])
+        if "label" in data:
+            schedule["label"] = str(data["label"])
+        if "description" in data:
+            schedule["description"] = str(data["description"])
+        save_inference_schedules()
+        result = serialize_schedule(schedule)
+    return jsonify({"schedule": result})
 
 
 @app.route('/start_roi_stream/<string:cam_id>', methods=["POST"])
