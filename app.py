@@ -217,6 +217,7 @@ def save_service_state() -> None:
             "interval": inference_intervals.get(cam_id, 1.0),
             "result_timeout": inference_result_timeouts.get(cam_id,
                                                             DEFAULT_PENDING_RESULT_TIMEOUT),
+            "draw_page_boxes": inference_draw_page_boxes.get(cam_id),
         }
         for cam_id in cam_ids
     }
@@ -530,6 +531,11 @@ async def restore_service_state() -> None:
                 inference_result_timeouts.pop(cam_id, None)
         else:
             inference_result_timeouts.pop(cam_id, None)
+        draw_flag = cfg.get("draw_page_boxes")
+        if draw_flag is None:
+            inference_draw_page_boxes.pop(cam_id, None)
+        else:
+            inference_draw_page_boxes[cam_id] = bool(draw_flag)
         if cfg.get("inference_running"):
             await perform_start_inference(cam_id, group=group, save_state=False)
         elif group is not None:
