@@ -38,6 +38,37 @@
 </div>
   <script>
       (function() {
+      function initRoiLayout(cellId) {
+        const videoCell = document.getElementById(cellId);
+        const videoCol = videoCell ? videoCell.closest('.video-col') : null;
+        const roiContainer = document.getElementById(`${cellId}-rois`);
+        const roiCard = roiContainer ? roiContainer.closest('.roi-list-card') : null;
+        if (!videoCol || !roiCard) {
+          return;
+        }
+
+        const roiGrid = roiCard.querySelector('.roi-grid');
+        if (roiGrid) {
+          roiGrid.style.height = '100%';
+        }
+
+        const updateHeight = () => {
+          const rect = videoCol.getBoundingClientRect();
+          if (rect && rect.height) {
+            roiCard.style.maxHeight = `${rect.height}px`;
+          }
+        };
+
+        updateHeight();
+
+        if ('ResizeObserver' in window) {
+          const observer = new ResizeObserver(() => updateHeight());
+          observer.observe(videoCol);
+        }
+
+        window.addEventListener('resize', updateHeight);
+      }
+
       function createCameraController(cellId) {
         let socket;
         let roiSocket;
@@ -632,6 +663,7 @@
     }
 
   // initialize controllers immediately (DOMContentLoaded already fired in fragments)
+  initRoiLayout('cam1');
   const controllers = [
       createCameraController('cam1')
   ];

@@ -383,7 +383,7 @@ button.delete {
 
 .cam-row {
   display: flex;
-  align-items: stretch;
+  align-items: flex-start;
   gap: 1.25rem;
   margin-bottom: 2rem;
   flex-wrap: nowrap;
@@ -395,6 +395,7 @@ button.delete {
   flex-direction: column;
   gap: 1rem;
   min-width: 0;
+  align-self: flex-start;
 }
 
 .video-card {
@@ -406,6 +407,8 @@ button.delete {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  align-self: stretch;
+  overflow: hidden;
 
 }
 
@@ -428,6 +431,7 @@ button.delete {
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
+  max-height: 100%;
 
 }
 
