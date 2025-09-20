@@ -82,6 +82,7 @@ function createController(cellId){
     let rois=[];
     let logTimer;
     let isLogUpdating=false;
+    let logSessionId=0;
 
     function populateLogRoiSelect(){
         logRoiSelect.innerHTML='';
@@ -437,14 +438,18 @@ function createController(cellId){
 
     function startLogUpdates(sourceName){
         stopLogUpdates();
+        const sessionId=logSessionId;
         isLogUpdating=true;
         async function fetchLog(){
-            if(!isLogUpdating){
+            if(!isLogUpdating||sessionId!==logSessionId){
                 return;
             }
             try{
                 const res=await fetch(`/read_log?source=${encodeURIComponent(sourceName)}&lines=40&_=${Date.now()}`);
                 const data=await res.json();
+                if(sessionId!==logSessionId){
+                    return;
+                }
                 logBody.innerHTML='';
                 const filter=logRoiSelect.value;
                 const lines=(data.lines||[]).slice().reverse();
@@ -497,7 +502,7 @@ function createController(cellId){
                 });
             }catch(e){}
             finally{
-                if(isLogUpdating){
+                if(isLogUpdating&&sessionId===logSessionId){
                     logTimer=setTimeout(fetchLog,1000);
                 }
             }
@@ -507,6 +512,7 @@ function createController(cellId){
 
     function stopLogUpdates(){
         isLogUpdating=false;
+        logSessionId++;
         if(logTimer){
             clearTimeout(logTimer);
             logTimer=null;

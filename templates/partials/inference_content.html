@@ -90,6 +90,7 @@
         const intervalInput = getEl('intervalInput');
         let logTimer;
         let isLogUpdating = false;
+        let logSessionId = 0;
         let currentLogSource;
         intervalInput.value = localStorage.getItem(`${cellId}-interval`) || '1';
         const groupStorageKey = `${cellId}-group`;
@@ -283,14 +284,18 @@
         function startLogUpdates(sourceName){
             currentLogSource = sourceName;
             stopLogUpdates();
+            const sessionId = logSessionId;
             isLogUpdating = true;
             async function fetchLog(){
-                if(!isLogUpdating){
+                if(!isLogUpdating || sessionId !== logSessionId){
                     return;
                 }
                 try{
                     const res=await fetch(`/read_log?source=${encodeURIComponent(sourceName)}&lines=40&_=${Date.now()}`);
                     const data=await res.json();
+                    if(sessionId !== logSessionId){
+                        return;
+                    }
                     const selectedRoi=logRoiSelect.value;
                     logBody.innerHTML='';
                     const lines=(data.lines||[]).slice().reverse();
@@ -344,7 +349,7 @@
                     });
                 }catch(e){}
                 finally{
-                    if(isLogUpdating){
+                    if(isLogUpdating && sessionId === logSessionId){
                         logTimer=setTimeout(fetchLog,1000);
                     }
                 }
@@ -354,6 +359,7 @@
 
         function stopLogUpdates(){
             isLogUpdating=false;
+            logSessionId++;
             if(logTimer){
                 clearTimeout(logTimer);
                 logTimer=null;
