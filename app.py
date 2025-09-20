@@ -1011,6 +1011,11 @@ async def home():
     return await render_template("home.html")
 
 
+@app.route("/docs")
+async def docs():
+    return await render_template("docs.html")
+
+
 @app.route("/roi")
 async def roi_page():
     return await render_template("roi_selection.html")
@@ -2447,7 +2452,7 @@ async def stop_inference(cam_id: str):
 
 @app.route("/dashboard")
 async def dashboard():
-    return await render_template("dashboard.html")
+    return redirect("/home")
 
 
 @app.route("/api/dashboard", methods=["GET"])
