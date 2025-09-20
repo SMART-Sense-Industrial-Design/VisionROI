@@ -207,9 +207,16 @@
             moduleEl.textContent = moduleName ? `โมดูล: ${moduleName}` : 'โมดูล: -';
         }
 
+        function isRoiType(data) {
+            return (data?.type ?? 'roi') === 'roi';
+        }
+
         function ensureRoiItem(id) {
             if (document.getElementById(`${cellId}-roi-${id}`)) return;
             const r = findRoiDataById(id) || { id };
+            if (!isRoiType(r)) {
+                return;
+            }
             const item = document.createElement('div');
             item.className = 'roi-item';
             const title = document.createElement('h4');
@@ -240,6 +247,10 @@
             if (!result) return;
             const roiId = result.id;
             if (roiId === undefined || roiId === null) return;
+            const roiData = findRoiDataById(roiId);
+            if (roiData && !isRoiType(roiData)) {
+                return;
+            }
             ensureRoiItem(roiId);
             updateRoiModuleLabel(roiId, result.module);
             const imgEl = document.getElementById(`${cellId}-roi-${roiId}`);
