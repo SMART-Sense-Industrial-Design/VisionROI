@@ -1,3 +1,23 @@
+<div class="inference-session-toolbar card shadow-sm mb-4">
+    <div class="inference-session-toolbar__body">
+        <div class="inference-session-toolbar__info">
+            <h1 class="inference-session-toolbar__title">Page Inference</h1>
+            <p class="inference-session-toolbar__subtitle">สร้างหลายหน้าควบคุมได้ด้วยรหัส cam1, cam2, ... เพื่อเก็บคะแนนแยกหน้า</p>
+        </div>
+        <div class="inference-session-toolbar__actions">
+            <span class="badge bg-info-subtle text-info inference-session-toolbar__badge">
+                <i class="bi bi-hash me-1"></i><span>Cam ปัจจุบัน:</span>
+                <strong class="ms-1" data-current-session-id>cam1</strong>
+            </span>
+            <a href="{{ url_for('inference_hub') }}" class="btn btn-outline-secondary">
+                <i class="bi bi-arrow-left-circle me-1"></i>กลับหน้า Inference Hub
+            </a>
+            <button type="button" class="btn btn-info text-white" data-action="create-new-session" data-base-href="{{ url_for('inference_page_alias') }}">
+                <i class="bi bi-plus-circle me-1"></i>สร้างหน้าใหม่
+            </button>
+        </div>
+    </div>
+</div>
 
 <div class="cam-row" data-row-label="สตรีม 1">
     <div class="video-col">
@@ -42,6 +62,7 @@
 <script>
 (function(){
 const DEFAULT_CELL_ID='cam1';
+const sessionRegistry=window.InferenceSessions;
 
 function resolveCellId(defaultId){
     const raw=String(window.location.hash||'').replace(/^#/,'').trim();
@@ -108,6 +129,57 @@ const cellId=remapDomIds(DEFAULT_CELL_ID,requestedCellId)||DEFAULT_CELL_ID;
 updateRowLabel(cellId);
 ensureLocationHash(cellId);
 
+const sessionIndicator=document.querySelector('[data-current-session-id]');
+if(sessionIndicator){
+    sessionIndicator.textContent=cellId;
+}
+
+function fallbackNextCamId(currentId){
+    const match=/^cam(\d+)$/i.exec(currentId||'');
+    if(!match){
+        return'cam2';
+    }
+    const nextIndex=parseInt(match[1],10)+1;
+    return`cam${Number.isFinite(nextIndex)&&nextIndex>0?nextIndex:2}`;
+}
+
+function computeNextCamId(){
+    if(sessionRegistry&&typeof sessionRegistry.getNextCamId==='function'){
+        try{
+            const next=sessionRegistry.getNextCamId();
+            if(typeof next==='string'&&next){
+                return next;
+            }
+            if(next&&typeof next.id==='string'&&next.id){
+                return next.id;
+            }
+            if(next&&typeof next.index==='number'&&next.index>0){
+                return`cam${next.index}`;
+            }
+        }catch(err){
+            console.warn('ไม่สามารถอ่านหมายเลข cam ถัดไปจากรีจิสทรีได้',err);
+        }
+    }
+    return fallbackNextCamId(cellId);
+}
+
+function buildTargetHref(baseHref,cam){
+    const href=typeof baseHref==='string'&&baseHref.length>0?baseHref:window.location.pathname;
+    const hashIndex=href.indexOf('#');
+    const cleanBase=hashIndex>-1?href.slice(0,hashIndex):href;
+    return`${cleanBase}#${cam}`;
+}
+
+document.querySelectorAll('[data-action="create-new-session"]').forEach(button=>{
+    button.addEventListener('click',event=>{
+        event.preventDefault();
+        const baseHref=button.getAttribute('data-base-href')||window.location.pathname;
+        const nextCam=computeNextCamId();
+        const target=buildTargetHref(baseHref,nextCam);
+        window.location.href=target;
+    });
+});
+
 function initRoiLayout(cellId){
     const videoCell=document.getElementById(cellId);
     const videoCol=videoCell?videoCell.closest('.video-col'):null;
@@ -138,7 +210,6 @@ function createController(cellId){
     let roiSocket;
     let running=false;
     const cam=`page_${cellId}`;
-    const sessionRegistry=window.InferenceSessions;
     const camRoot=document.getElementById(cellId);
     const camRow=camRoot?camRoot.closest('.cam-row'):null;
     const sessionTitle=camRow&&camRow.dataset.rowLabel?camRow.dataset.rowLabel:cellId;

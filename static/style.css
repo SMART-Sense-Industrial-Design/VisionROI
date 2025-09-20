@@ -899,6 +899,77 @@ button.delete {
   box-shadow: 0 20px 40px -30px rgba(15, 23, 42, 0.6);
 }
 
+.inference-session-toolbar {
+  padding: 1.5rem 1.75rem;
+  border-radius: 24px;
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.12), rgba(14, 165, 233, 0.08));
+  border: 1px solid rgba(59, 130, 246, 0.18);
+  color: var(--color-text);
+}
+
+.inference-session-toolbar__body {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 1.25rem;
+}
+
+.inference-session-toolbar__info {
+  flex: 1 1 320px;
+  min-width: 0;
+}
+
+.inference-session-toolbar__title {
+  font-size: 1.6rem;
+  font-weight: 700;
+  margin-bottom: 0.35rem;
+  color: #0f172a;
+}
+
+.inference-session-toolbar__subtitle {
+  margin: 0;
+  color: rgba(15, 23, 42, 0.72);
+  font-size: 0.98rem;
+}
+
+.inference-session-toolbar__actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.inference-session-toolbar__badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.95rem;
+  padding: 0.45rem 0.75rem;
+  border-radius: 999px;
+  box-shadow: 0 10px 25px -18px rgba(59, 130, 246, 0.55);
+}
+
+.inference-session-toolbar__badge strong {
+  font-weight: 700;
+  color: inherit;
+}
+
+@media (max-width: 768px) {
+  .inference-session-toolbar {
+    padding: 1.25rem 1.25rem;
+  }
+
+  .inference-session-toolbar__title {
+    font-size: 1.35rem;
+  }
+
+  .inference-session-toolbar__actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+}
+
 .cam-row {
   position: relative;
   display: flex;

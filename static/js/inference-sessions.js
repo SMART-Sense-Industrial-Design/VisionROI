@@ -2,6 +2,22 @@
   const STORAGE_KEY = 'visionroi_inference_sessions';
   const LAST_COUNTER_KEY = 'visionroi_inference_last_cam_index';
 
+  function readLastCounter() {
+    const value = parseInt(localStorage.getItem(LAST_COUNTER_KEY), 10);
+    return Number.isFinite(value) && value > 0 ? value : 0;
+  }
+
+  function writeLastCounter(value) {
+    if (!Number.isFinite(value) || value < 0) {
+      return;
+    }
+    try {
+      localStorage.setItem(LAST_COUNTER_KEY, String(value));
+    } catch (err) {
+      console.warn('Failed to persist inference counter', err);
+    }
+  }
+
   function parseCamIndex(value) {
     if (!value) {
       return null;
@@ -29,15 +45,7 @@
     if (!maxIndex) {
       return;
     }
-    const current = parseInt(localStorage.getItem(LAST_COUNTER_KEY), 10);
-    if (Number.isFinite(current) && current >= maxIndex) {
-      return;
-    }
-    try {
-      localStorage.setItem(LAST_COUNTER_KEY, String(maxIndex));
-    } catch (err) {
-      console.warn('Failed to persist inference counter', err);
-    }
+    ensureLastCounterAtLeast(maxIndex);
   }
 
   function resetLastCounter() {
@@ -70,6 +78,16 @@
     return list;
   }
 
+  function ensureLastCounterAtLeast(value) {
+    if (!Number.isFinite(value) || value <= 0) {
+      return;
+    }
+    const current = readLastCounter();
+    if (value > current) {
+      writeLastCounter(value);
+    }
+  }
+
   function emitChange(list) {
     window.dispatchEvent(
       new CustomEvent('inferenceSessions:change', {
@@ -100,6 +118,39 @@
     return list
       .slice()
       .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+  }
+
+  function getMaxCamIndexFromList(list) {
+    let maxIndex = 0;
+    list.forEach((session) => {
+      if (!session) {
+        return;
+      }
+      const candidates = [session.id, session.href];
+      candidates.forEach((value) => {
+        const parsed = parseCamIndex(value);
+        if (parsed && parsed > maxIndex) {
+          maxIndex = parsed;
+        }
+      });
+    });
+    return maxIndex;
+  }
+
+  function buildCamId(index) {
+    return `cam${index}`;
+  }
+
+  function getNextCamId() {
+    const sessions = readSessions();
+    const highestFromSessions = getMaxCamIndexFromList(sessions);
+    const storedCounter = readLastCounter();
+    const nextIndex = Math.max(highestFromSessions, storedCounter) + 1;
+    writeLastCounter(nextIndex);
+    return {
+      id: buildCamId(nextIndex),
+      index: nextIndex,
+    };
   }
 
   function upsertSession(data) {
@@ -171,5 +222,6 @@
     updateSession,
     remove: removeSession,
     clear: clearSessions,
+    getNextCamId,
   };
 })(window);

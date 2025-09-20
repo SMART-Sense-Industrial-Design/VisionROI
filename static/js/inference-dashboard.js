@@ -39,7 +39,7 @@
     return maxIndex;
   }
 
-  function getNextCamId() {
+  function fallbackNextCamId() {
     let stored = parseInt(localStorage.getItem(LAST_COUNTER_KEY), 10);
     if (!Number.isFinite(stored) || stored < 0) {
       stored = 0;
@@ -52,6 +52,26 @@
       console.warn('Failed to persist inference counter', err);
     }
     return `cam${nextIndex}`;
+  }
+
+  function resolveNextCamId() {
+    if (registry && typeof registry.getNextCamId === 'function') {
+      try {
+        const next = registry.getNextCamId();
+        if (typeof next === 'string' && next) {
+          return next;
+        }
+        if (next && typeof next.id === 'string' && next.id) {
+          return next.id;
+        }
+        if (next && typeof next.index === 'number' && next.index > 0) {
+          return `cam${next.index}`;
+        }
+      } catch (err) {
+        console.warn('Failed to obtain next camera id from registry', err);
+      }
+    }
+    return fallbackNextCamId();
   }
 
   function buildTargetHref(baseHref, camId) {
@@ -67,7 +87,7 @@
         return;
       }
       event.preventDefault();
-      const camId = getNextCamId();
+      const camId = resolveNextCamId();
       const target = buildTargetHref(link.getAttribute('href'), camId);
       window.location.href = target;
     });
