@@ -390,53 +390,6 @@ main.app-main {
   border: 1px dashed rgba(148, 163, 184, 0.25);
 }
 
-.schedule-list {
-  display: flex;
-  flex-direction: column;
-  gap: 0.85rem;
-}
-
-.schedule-card {
-  border-radius: var(--radius-md);
-  border: 1px solid rgba(37, 99, 235, 0.15);
-  background: rgba(37, 99, 235, 0.08);
-  padding: 0.85rem 1rem;
-  display: grid;
-  gap: 0.35rem;
-}
-
-.schedule-card__header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.schedule-card__title {
-  margin: 0;
-  font-weight: 600;
-  color: var(--color-text);
-}
-
-.schedule-card__meta {
-  font-size: 0.82rem;
-  color: rgba(15, 23, 42, 0.6);
-}
-
-.schedule-card__status {
-  font-size: 0.78rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-}
-
-.schedule-list__empty {
-  text-align: center;
-  padding: 1.5rem 1rem;
-  border-radius: var(--radius-md);
-  border: 1px dashed rgba(148, 163, 184, 0.25);
-  background: rgba(15, 23, 42, 0.04);
-}
-
 .stream-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));

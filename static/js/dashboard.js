@@ -1,6 +1,5 @@
 const DASHBOARD_ENDPOINT = '/api/dashboard';
 const REFRESH_INTERVAL = 6000;
-const WEEKDAY_NAMES = ['จันทร์', 'อังคาร', 'พุธ', 'พฤหัสบดี', 'ศุกร์', 'เสาร์', 'อาทิตย์'];
 
 function formatDateTime(value) {
   if (!value) {
@@ -186,64 +185,6 @@ function updateAlerts(alerts = []) {
   });
 }
 
-function formatWeekdays(weekdays = []) {
-  if (!weekdays.length) {
-    return 'ทุกวัน';
-  }
-  return weekdays
-    .map((index) => WEEKDAY_NAMES[index] || index)
-    .join(', ');
-}
-
-function renderSchedule(schedule) {
-  const card = document.createElement('div');
-  card.className = 'schedule-card';
-
-  const header = document.createElement('div');
-  header.className = 'schedule-card__header';
-
-  const title = document.createElement('p');
-  title.className = 'schedule-card__title mb-0';
-  title.textContent = schedule.label || schedule.cam_id || '-';
-
-  const status = document.createElement('span');
-  const statusClass = schedule.enabled ? 'text-success' : 'text-muted';
-  status.className = `schedule-card__status ${statusClass}`;
-  const statusText = schedule.enabled ? 'เปิดใช้งาน' : 'ปิดอยู่';
-  status.textContent = schedule.is_running ? 'กำลังทำงาน' : statusText;
-
-  header.append(title, status);
-
-  const timeMeta = document.createElement('div');
-  timeMeta.className = 'schedule-card__meta';
-  timeMeta.textContent = `${schedule.start_time} - ${schedule.end_time} · ${formatWeekdays(schedule.weekdays)}`;
-
-  const camMeta = document.createElement('div');
-  camMeta.className = 'schedule-card__meta';
-  const groupSuffix = schedule.group ? ` · กลุ่ม ${schedule.group}` : '';
-  camMeta.textContent = `กล้อง: ${schedule.cam_id}${groupSuffix}`;
-
-  card.append(header, timeMeta, camMeta);
-
-  return card;
-}
-
-function updateSchedules(schedules = []) {
-  const container = document.getElementById('schedule-list');
-  if (!container) return;
-  container.innerHTML = '';
-  if (!schedules.length) {
-    const empty = document.createElement('div');
-    empty.className = 'schedule-list__empty text-muted';
-    empty.textContent = 'ยังไม่มีการตั้งตารางงาน';
-    container.appendChild(empty);
-    return;
-  }
-  schedules.forEach((schedule) => {
-    container.appendChild(renderSchedule(schedule));
-  });
-}
-
 function updateStreams(cameras = []) {
   const container = document.getElementById('stream-grid');
   if (!container) return;
@@ -309,7 +250,6 @@ async function loadDashboard() {
     updateSummary(data.summary);
     updateCameraTable(data.cameras);
     updateAlerts(data.alerts);
-    updateSchedules(data.schedules);
     updateStreams(data.cameras);
     updateGeneratedAt(data.generated_at);
   } catch (error) {
