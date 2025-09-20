@@ -59,6 +59,7 @@ inference_intervals: dict[str, float] = {}
 last_inference_times: dict[str, float] = {}
 last_inference_outputs: dict[str, str] = {}
 inference_result_timeouts: dict[str, float] = {}
+inference_draw_page_boxes: dict[str, bool] = {}
 
 MQTT_CONFIG_FILE = "mqtt_configs.json"
 mqtt_configs: dict[str, dict[str, Any]] = {}
@@ -879,6 +880,7 @@ async def run_inference_loop(cam_id: str):
             forced_group if forced_group and forced_group != 'all' else None
         )
         source_name = active_sources.get(cam_id, '')
+        draw_page_boxes = inference_draw_page_boxes.get(cam_id, True)
         if not rois:
             return cv2.resize(frame, (0, 0), fx=0.5, fy=0.5)
         now = time.time()
@@ -931,18 +933,19 @@ async def run_inference_loop(cam_id: str):
                                 output = r.get('page', '')
                         except Exception:
                             pass
-                cv2.polylines(frame, [src.astype(int)], True, color, 2)
-                label_pt = src[0].astype(int)
-                cv2.putText(
-                    frame,
-                    str(r.get('id', i + 1)),
-                    (int(label_pt[0]), max(0, int(label_pt[1]) - 5)),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.5,
-                    color,
-                    1,
-                    cv2.LINE_AA,
-                )
+                if draw_page_boxes:
+                    cv2.polylines(frame, [src.astype(int)], True, color, 2)
+                    label_pt = src[0].astype(int)
+                    cv2.putText(
+                        frame,
+                        str(r.get('id', i + 1)),
+                        (int(label_pt[0]), max(0, int(label_pt[1]) - 5)),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.5,
+                        color,
+                        1,
+                        cv2.LINE_AA,
+                    )
 
             if not has_page:
                 output = forced_group or ''
@@ -969,26 +972,27 @@ async def run_inference_loop(cam_id: str):
 
             last_inference_outputs[cam_id] = active_group
         else:
-            for i, r in enumerate(rois):
-                if np is None or r.get('type') != 'page':
-                    continue
-                pts = r.get('points', [])
-                if len(pts) != 4:
-                    continue
-                src = np.array([[p['x'], p['y']] for p in pts], dtype=np.float32)
-                color = (0, 255, 0)
-                cv2.polylines(frame, [src.astype(int)], True, color, 2)
-                label_pt = src[0].astype(int)
-                cv2.putText(
-                    frame,
-                    str(r.get('id', i + 1)),
-                    (int(label_pt[0]), max(0, int(label_pt[1]) - 5)),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.5,
-                    color,
-                    1,
-                    cv2.LINE_AA,
-                )
+            if draw_page_boxes:
+                for i, r in enumerate(rois):
+                    if np is None or r.get('type') != 'page':
+                        continue
+                    pts = r.get('points', [])
+                    if len(pts) != 4:
+                        continue
+                    src = np.array([[p['x'], p['y']] for p in pts], dtype=np.float32)
+                    color = (0, 255, 0)
+                    cv2.polylines(frame, [src.astype(int)], True, color, 2)
+                    label_pt = src[0].astype(int)
+                    cv2.putText(
+                        frame,
+                        str(r.get('id', i + 1)),
+                        (int(label_pt[0]), max(0, int(label_pt[1]) - 5)),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.5,
+                        color,
+                        1,
+                        cv2.LINE_AA,
+                    )
 
         if selected_group is None:
             if forced_group and forced_group != 'all':
@@ -1963,8 +1967,13 @@ async def start_inference(cam_id: str):
     rois = cfg.pop("rois", None)
     group = cfg.pop("group", None)
     interval = cfg.pop("interval", None)
+    draw_page_boxes = cfg.pop("draw_page_boxes", None)
     timeout_sentinel = object()
     result_timeout = cfg.pop("result_timeout", timeout_sentinel)
+    if draw_page_boxes is None:
+        inference_draw_page_boxes.pop(cam_id, None)
+    else:
+        inference_draw_page_boxes[cam_id] = bool(draw_page_boxes)
     if interval is not None:
         try:
             inference_intervals[cam_id] = float(interval)
@@ -2016,6 +2025,7 @@ async def stop_inference(cam_id: str):
     save_roi_flags.pop(cam_id, None)
     inference_intervals.pop(cam_id, None)
     last_inference_times.pop(cam_id, None)
+    inference_draw_page_boxes.pop(cam_id, None)
 
     # NEW: fully free per-camera state & trim memory
     _free_cam_state(cam_id)
