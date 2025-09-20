@@ -39,6 +39,73 @@
 
   <script>
       (function() {
+      const DEFAULT_CELL_ID = 'cam1';
+
+      function resolveCellId(defaultId) {
+        const raw = String(window.location.hash || '').replace(/^#/, '').trim();
+        if (!raw) {
+          return defaultId;
+        }
+        const match = /^cam(\d+)$/i.exec(raw);
+        if (!match) {
+          return defaultId;
+        }
+        const num = parseInt(match[1], 10);
+        return Number.isFinite(num) && num > 0 ? `cam${num}` : defaultId;
+      }
+
+      function ensureLocationHash(cellId) {
+        const expectedHash = `#${cellId}`;
+        if (window.location.hash === expectedHash) {
+          return;
+        }
+        const baseUrl = `${window.location.pathname}${window.location.search || ''}`;
+        window.history.replaceState(null, '', `${baseUrl}${expectedHash}`);
+      }
+
+      function remapDomIds(baseId, targetId) {
+        if (!baseId || !targetId || baseId === targetId) {
+          return baseId;
+        }
+        const basePrefix = `${baseId}-`;
+        const targetPrefix = `${targetId}-`;
+        document.querySelectorAll(`[id^="${baseId}"]`).forEach((el) => {
+          if (el.id === baseId) {
+            el.id = targetId;
+          } else if (el.id.startsWith(basePrefix)) {
+            el.id = `${targetPrefix}${el.id.slice(basePrefix.length)}`;
+          }
+        });
+        document.querySelectorAll(`[for^="${baseId}"]`).forEach((label) => {
+          const current = label.getAttribute('for');
+          if (!current) {
+            return;
+          }
+          if (current === baseId) {
+            label.setAttribute('for', targetId);
+          } else if (current.startsWith(basePrefix)) {
+            label.setAttribute('for', `${targetPrefix}${current.slice(basePrefix.length)}`);
+          }
+        });
+        return targetId;
+      }
+
+      function updateRowLabel(cellId) {
+        const row = document.querySelector('.cam-row');
+        if (!row) {
+          return;
+        }
+        const match = /^cam(\d+)$/i.exec(cellId);
+        if (match) {
+          row.dataset.rowLabel = `สตรีม ${match[1]}`;
+        }
+      }
+
+      const requestedCellId = resolveCellId(DEFAULT_CELL_ID);
+      const cellId = remapDomIds(DEFAULT_CELL_ID, requestedCellId) || DEFAULT_CELL_ID;
+      updateRowLabel(cellId);
+      ensureLocationHash(cellId);
+
       function initRoiLayout(cellId) {
         const videoCell = document.getElementById(cellId);
         const videoCol = videoCell ? videoCell.closest('.video-col') : null;
@@ -734,9 +801,9 @@
     }
 
   // initialize controllers immediately (DOMContentLoaded already fired in fragments)
-  ['cam1'].forEach(initRoiLayout);
+  [cellId].forEach(initRoiLayout);
   const controllers = [
-      createCameraController('cam1')
+      createCameraController(cellId)
   ];
-  })();
+      })();
   </script>

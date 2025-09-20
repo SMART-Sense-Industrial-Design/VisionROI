@@ -8,6 +8,70 @@
   const emptyState = document.getElementById('inferenceSessionsEmpty');
   const refreshBtn = document.getElementById('refreshSessions');
   const clearBtn = document.getElementById('clearSessions');
+  const createLinks = document.querySelectorAll('.js-create-inference');
+
+  const LAST_COUNTER_KEY = 'visionroi_inference_last_cam_index';
+
+  function parseCamIndex(value) {
+    if (!value) {
+      return null;
+    }
+    const match = /cam(\d+)/i.exec(String(value));
+    if (!match) {
+      return null;
+    }
+    const num = parseInt(match[1], 10);
+    return Number.isFinite(num) ? num : null;
+  }
+
+  function getMaxIndexFromSessions() {
+    const sessions = registry.getAll();
+    let maxIndex = 0;
+    sessions.forEach((session) => {
+      const candidates = [session?.id, session?.href];
+      candidates.forEach((value) => {
+        const parsed = parseCamIndex(value);
+        if (parsed && parsed > maxIndex) {
+          maxIndex = parsed;
+        }
+      });
+    });
+    return maxIndex;
+  }
+
+  function getNextCamId() {
+    let stored = parseInt(localStorage.getItem(LAST_COUNTER_KEY), 10);
+    if (!Number.isFinite(stored) || stored < 0) {
+      stored = 0;
+    }
+    const maxExisting = getMaxIndexFromSessions();
+    const nextIndex = Math.max(stored, maxExisting) + 1;
+    try {
+      localStorage.setItem(LAST_COUNTER_KEY, String(nextIndex));
+    } catch (err) {
+      console.warn('Failed to persist inference counter', err);
+    }
+    return `cam${nextIndex}`;
+  }
+
+  function buildTargetHref(baseHref, camId) {
+    const href = typeof baseHref === 'string' && baseHref.length > 0 ? baseHref : '/inference';
+    const hashIndex = href.indexOf('#');
+    const cleanBase = hashIndex > -1 ? href.slice(0, hashIndex) : href;
+    return `${cleanBase}#${camId}`;
+  }
+
+  createLinks.forEach((link) => {
+    link.addEventListener('click', (event) => {
+      if (event.button && event.button !== 0) {
+        return;
+      }
+      event.preventDefault();
+      const camId = getNextCamId();
+      const target = buildTargetHref(link.getAttribute('href'), camId);
+      window.location.href = target;
+    });
+  });
 
   const STATUS_BADGES = {
     running: { text: 'กำลังทำงาน', className: 'badge bg-success-subtle text-success' },
