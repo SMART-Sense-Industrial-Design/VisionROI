@@ -81,14 +81,7 @@ class TrOCROCR(BaseOCR):
             text = self._generate_text(image)
         except Exception as exc:  # pragma: no cover - จัดการข้อผิดพลาด OCR
             self.logger.exception(
-                f"roi_id={roi_id} {self.MODULE_NAME} OCR error: {exc}"
-            )
-
-        if text:
-            self.logger.info(
-                f"roi_id={roi_id} {self.MODULE_NAME} OCR result: {text}"
-                if roi_id is not None
-                else f"{self.MODULE_NAME} OCR result: {text}"
+                f"{self.MODULE_NAME} OCR error: {exc}"
             )
 
         if save:
