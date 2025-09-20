@@ -81,6 +81,7 @@ function createController(cellId){
     const logRoiSelect=getEl('logRoiSelect');
     let rois=[];
     let logTimer;
+    let isLogUpdating=false;
 
     function populateLogRoiSelect(){
         logRoiSelect.innerHTML='';
@@ -436,7 +437,11 @@ function createController(cellId){
 
     function startLogUpdates(sourceName){
         stopLogUpdates();
+        isLogUpdating=true;
         async function fetchLog(){
+            if(!isLogUpdating){
+                return;
+            }
             try{
                 const res=await fetch(`/read_log?source=${encodeURIComponent(sourceName)}&lines=40&_=${Date.now()}`);
                 const data=await res.json();
@@ -491,13 +496,21 @@ function createController(cellId){
                     logBody.appendChild(tr);
                 });
             }catch(e){}
+            finally{
+                if(isLogUpdating){
+                    logTimer=setTimeout(fetchLog,1000);
+                }
+            }
         }
         fetchLog();
-        logTimer=setInterval(fetchLog,1000);
     }
 
     function stopLogUpdates(){
-        if(logTimer){clearInterval(logTimer);logTimer=null;}
+        isLogUpdating=false;
+        if(logTimer){
+            clearTimeout(logTimer);
+            logTimer=null;
+        }
         logBody.innerHTML='';
     }
 
