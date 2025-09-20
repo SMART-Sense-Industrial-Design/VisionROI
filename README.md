@@ -132,11 +132,15 @@ VisionROI/
 - `requests`
 
 ### Dependencies เพิ่มเติม (Extras)
-- `server` – รวม `uvicorn`, `websockets` สำหรับการรันเซิร์ฟเวอร์ผ่าน Uvicorn และรองรับการจัดการ WebSocket client
-- `onnx` – รวม `onnx`, `onnxruntime` สำหรับโหลดและรันโมเดล ONNX
-- `torch` – รวม `torch`, `torchvision`, `transformers` สำหรับโมเดลที่อาศัย PyTorch หรือ Hugging Face
-- `tflite` – รวม `tensorflow` สำหรับโมเดล TensorFlow Lite
-- `tensorrt` – รวม `tensorrt`, `pycuda`, `torch`, `torchvision`, `onnx` เพื่อใช้งาน TensorRT backend (รวมส่วนพึ่งพาที่จำเป็น)
+| Extra | แพ็กเกจที่ติดตั้ง | การใช้งานหลัก |
+| --- | --- | --- |
+| `server` | `uvicorn`, `websockets` | รันแอปด้วย Uvicorn และรองรับ WebSocket client จำนวนมาก |
+| `onnx` | `onnx`, `onnxruntime` | โหลด/รันโมเดลในรูปแบบ ONNX |
+| `torch` | `torch`, `torchvision`, `transformers` | ทำงานกับโมเดลที่พึ่งพา PyTorch หรือ Hugging Face |
+| `tflite` | `tensorflow` | ใช้งานโมเดล TensorFlow Lite |
+| `tensorrt` | `tensorrt`, `pycuda`, `torch`, `torchvision`, `onnx` | เตรียม TensorRT backend และเครื่องมือที่เกี่ยวข้อง |
+
+เมื่อต้องการติดตั้งหลายชุดพร้อมกันสามารถระบุในคำสั่งเดียว เช่น `pip install ".[server,onnx]"` เพื่อยืดหยุ่นกับกรณีการใช้งานจริง
 
 ## การติดตั้ง
 แนะนำให้สร้าง virtual environment ก่อน:
@@ -218,6 +222,23 @@ pip install -e "."
 ## การรันโปรเจ็กต์
 1. รัน `python app.py` (ระบุพอร์ตเองได้ด้วย `--port`; ระหว่างพัฒนาอาจใช้ `quart --app app:app run --reload --port 12000`)
 2. เปิดเบราว์เซอร์ไปที่ `http://localhost:5000/` หรือพอร์ตที่กำหนด (ระบบจะรีไดเรกต์ไปหน้า `/home`)
+
+### ตรวจสอบสุขภาพระบบอย่างรวดเร็ว
+หลังการติดตั้งและเริ่มเซิร์ฟเวอร์แล้ว สามารถยืนยันสถานะของบริการและปิดระบบอย่างปลอดภัยด้วยคำสั่งต่อไปนี้:
+
+- ตรวจสอบว่าเซิร์ฟเวอร์พร้อมให้บริการ:
+
+  ```bash
+  curl http://localhost:5000/_healthz
+  ```
+
+- สั่งปิดเซิร์ฟเวอร์อย่างนุ่มนวลเมื่อทดสอบเสร็จ:
+
+  ```bash
+  curl -X POST http://localhost:5000/_quit
+  ```
+
+ทั้งสอง endpoint จะตอบกลับเป็น JSON หากมีปัญหาจะช่วยให้ระบุสาเหตุได้ง่ายขึ้น (เช่น บริการไม่พร้อม, worker ไม่ตอบสนอง หรือการยืนยันสิทธิ์ล้มเหลว)
 
 ### ตัวอย่าง: ทดสอบด้วยไฟล์ภาพนิ่ง (`screen.jpg`)
 ในกรณีที่ต้องการทดสอบฟีเจอร์ของ VisionROI โดยไม่มีสตรีมวิดีโอหรือกล้องจริง สามารถใช้ไฟล์ภาพนิ่งเพื่อจำลองแหล่งภาพได้ตามขั้นตอนนี้ โดยโปรเจ็กต์เตรียมไฟล์ `screen.jpg` ไว้ให้แล้ว (อยู่ที่รากโปรเจ็กต์เดียวกับ `app.py`) เพียงนำไฟล์นี้ไปตั้งเป็นแหล่งภาพของกล้องก็สามารถเปิดหน้าเว็บทดสอบได้ทันที:
@@ -503,6 +524,11 @@ text = ocr.process(frame, roi_id="1", save=True, source="demo")
 - หากพบปัญหาหรือมีข้อเสนอแนะ สามารถเปิด issue ได้
 - ก่อนส่ง pull request กรุณารัน `pytest` เพื่อให้แน่ใจว่าเทสต์ทั้งหมดผ่าน
 - อธิบายรายละเอียดการเปลี่ยนแปลงใน PR เพื่อให้รีวิวได้ง่ายขึ้น
+
+### เคล็ดลับการแก้ปัญหาเบื้องต้น
+- หากเปิดสตรีมด้วย `ffmpeg` แล้วไม่ขึ้นภาพ ให้ตรวจสอบว่าคำสั่ง `ffmpeg` สามารถรันได้จากเทอร์มินัลเดียวกัน (`ffmpeg -version`).
+- เมื่อโมดูล inference แจ้งว่าไม่พบบริการ OCR ให้ยืนยันว่าได้ติดตั้ง extras ที่ตรงกับโมดูลนั้น เช่น `pip install ".[torch]"` สำหรับโมดูลที่ใช้ PyTorch.
+- หากแอปอ่านไฟล์ ROI ไม่ได้ ตรวจสอบสิทธิ์การเข้าถึงโฟลเดอร์ `data_sources/<name>` และความถูกต้องของ JSON ด้วย `python -m json.tool data_sources/<name>/rois.json`.
 
 ## การทดสอบ
 โปรเจ็กต์มีเทสต์ตัวอย่างใช้ `pytest`
