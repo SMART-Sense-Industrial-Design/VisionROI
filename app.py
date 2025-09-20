@@ -786,8 +786,13 @@ async def inference_hub() -> str:
 
 
 @app.route("/inference/group")
-async def inference_group() -> str:
-    return await render_template("inference_group.html")
+async def inference_group_template() -> str:
+    return await render_template("inference_group.html", session_id=None)
+
+
+@app.route("/inference/group/<string:session_id>")
+async def inference_group_session(session_id: str) -> str:
+    return await render_template("inference_group.html", session_id=session_id)
 
 
 @app.route("/inference_page")

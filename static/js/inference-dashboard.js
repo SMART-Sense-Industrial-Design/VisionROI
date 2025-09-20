@@ -86,6 +86,10 @@
       if (event.button && event.button !== 0) {
         return;
       }
+      const type = link.getAttribute('data-inference-type') || '';
+      if (type === 'group') {
+        return;
+      }
       event.preventDefault();
       const camId = resolveNextCamId();
       const target = buildTargetHref(link.getAttribute('href'), camId);

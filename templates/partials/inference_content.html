@@ -1,3 +1,8 @@
+{% set current_session_id = session_id or '' %}
+{% set base_cam_id = current_session_id if current_session_id else 'cam-template' %}
+{% set session_base = url_for('inference_group_template').rstrip('/') ~ '/' %}
+{% set default_row_label = ('สตรีม ' ~ current_session_id[3:]) if current_session_id and current_session_id.startswith('cam') else (current_session_id or 'สตรีมใหม่') %}
+<div class="inference-session-root" data-session-root data-template-mode="{{ 'true' if not current_session_id else 'false' }}" data-session-id="{{ current_session_id }}" data-default-cell-id="{{ base_cam_id }}" data-session-base="{{ session_base }}">
 <div class="inference-session-toolbar card shadow-sm mb-4">
     <div class="inference-session-toolbar__body">
         <div class="inference-session-toolbar__info">
@@ -7,82 +12,75 @@
         <div class="inference-session-toolbar__actions">
             <span class="badge bg-primary-subtle text-primary inference-session-toolbar__badge">
                 <i class="bi bi-hash me-1"></i><span>Cam ปัจจุบัน:</span>
-                <strong class="ms-1" data-current-session-id>cam1</strong>
+                <strong class="ms-1" data-current-session-id>{{ current_session_id or '—' }}</strong>
             </span>
             <a href="{{ url_for('inference_hub') }}" class="btn btn-outline-secondary">
                 <i class="bi bi-arrow-left-circle me-1"></i>กลับหน้า Inference Hub
             </a>
-            <button type="button" class="btn btn-primary" data-action="create-new-session" data-base-href="{{ url_for('inference_group') }}">
+            <button type="button" class="btn btn-primary" data-action="create-new-session" data-base-href="{{ url_for('inference_group_template') }}">
                 <i class="bi bi-plus-circle me-1"></i>สร้างหน้าใหม่
             </button>
         </div>
     </div>
 </div>
 
-<div class="cam-row" data-row-label="สตรีม 1">
+<div class="cam-row" data-row-label="{{ default_row_label }}">
     <div class="video-col">
         <div class="card roi-card video-card">
-            <div id="cam1" class="cam-cell">
+            <div id="{{ base_cam_id }}" class="cam-cell">
                 <div class="d-flex align-items-center mb-2 gap-2 menu-select-list flex-wrap">
-                    <label for="cam1-sourceSelect" class="form-label mb-0">Source:</label>
-                    <select id="cam1-sourceSelect" class="form-select w-auto"></select>
-                    <label for="cam1-intervalInput" class="form-label mb-0">Time (interval):</label>
-                    <input id="cam1-intervalInput" type="number" class="form-control w-auto" min="0" step="0.1" value="1" />
-                    <label for="cam1-groupSelect" class="form-label mb-0">Group:</label>
-                    <select id="cam1-groupSelect" class="form-select w-auto flex-grow-1" style="min-width:0;"></select>
+                    <label for="{{ base_cam_id }}-sourceSelect" class="form-label mb-0">Source:</label>
+                    <select id="{{ base_cam_id }}-sourceSelect" class="form-select w-auto"></select>
+                    <label for="{{ base_cam_id }}-intervalInput" class="form-label mb-0">Time (interval):</label>
+                    <input id="{{ base_cam_id }}-intervalInput" type="number" class="form-control w-auto" min="0" step="0.1" value="1" />
+                    <label for="{{ base_cam_id }}-groupSelect" class="form-label mb-0">Group:</label>
+                    <select id="{{ base_cam_id }}-groupSelect" class="form-select w-auto flex-grow-1" style="min-width:0;"></select>
                 </div>
-                <button id="cam1-startButton" class="btn btn-primary me-2">Start</button>
-                <button id="cam1-stopButton" class="btn btn-danger" disabled>Stop</button>
-                <p id="cam1-status"></p>
+                <button id="{{ base_cam_id }}-startButton" class="btn btn-primary me-2">Start</button>
+                <button id="{{ base_cam_id }}-stopButton" class="btn btn-danger" disabled>Stop</button>
+                <p id="{{ base_cam_id }}-status"></p>
                 <div class="video-wrapper">
-                    <canvas id="cam1-video" class="stream-video"></canvas>
+                    <canvas id="{{ base_cam_id }}-video" class="stream-video"></canvas>
                 </div>
             </div>
         </div>
         <div class="card roi-card log-card">
             <div class="d-flex align-items-center mb-2 gap-2 menu-select-list">
-                <label for="cam1-logRoiSelect" class="form-label mb-0">ROI:</label>
-                <select id="cam1-logRoiSelect" class="form-select w-auto"></select>
+                <label for="{{ base_cam_id }}-logRoiSelect" class="form-label mb-0">ROI:</label>
+                <select id="{{ base_cam_id }}-logRoiSelect" class="form-select w-auto"></select>
             </div>
             <div class="log-wrapper">
-                <table id="cam1-logTable" class="table table-striped">
+                <table id="{{ base_cam_id }}-logTable" class="table table-striped">
                     <thead><tr><th>Log</th></tr></thead>
-                    <tbody id="cam1-logBody"></tbody>
+                    <tbody id="{{ base_cam_id }}-logBody"></tbody>
                 </table>
             </div>
         </div>
     </div>
     <div class="card roi-card roi-list-card">
-        <div id="cam1-rois" class="roi-grid"></div>
+        <div id="{{ base_cam_id }}-rois" class="roi-grid"></div>
     </div>
 </div>
 
   <script>
       (function() {
-      const DEFAULT_CELL_ID = 'cam1';
+      const DEFAULT_CELL_ID = '{{ base_cam_id }}';
       const sessionRegistry = window.InferenceSessions;
 
-      function resolveCellId(defaultId) {
-        const raw = String(window.location.hash || '').replace(/^#/, '').trim();
-        if (!raw) {
-          return defaultId;
+      const root = document.querySelector('[data-session-root]');
+      const sessionIndicator = document.querySelector('[data-current-session-id]');
+
+      function ensureTrailingSlash(value) {
+        if (!value) {
+          return '/inference/group/';
         }
-        const match = /^cam(\d+)$/i.exec(raw);
-        if (!match) {
-          return defaultId;
-        }
-        const num = parseInt(match[1], 10);
-        return Number.isFinite(num) && num > 0 ? `cam${num}` : defaultId;
+        return value.endsWith('/') ? value : `${value}/`;
       }
 
-      function ensureLocationHash(cellId) {
-        const expectedHash = `#${cellId}`;
-        if (window.location.hash === expectedHash) {
-          return;
-        }
-        const baseUrl = `${window.location.pathname}${window.location.search || ''}`;
-        window.history.replaceState(null, '', `${baseUrl}${expectedHash}`);
-      }
+      const sessionBase = ensureTrailingSlash(root?.dataset.sessionBase || '/inference/group');
+      const placeholderId = root?.dataset.defaultCellId || DEFAULT_CELL_ID;
+      let cellId = placeholderId;
+      let templateMode = root?.dataset.templateMode === 'true';
 
       function remapDomIds(baseId, targetId) {
         if (!baseId || !targetId || baseId === targetId) {
@@ -117,18 +115,11 @@
           return;
         }
         const match = /^cam(\d+)$/i.exec(cellId);
-        if (match) {
-          row.dataset.rowLabel = `สตรีม ${match[1]}`;
-        }
+        row.dataset.rowLabel = match ? `สตรีม ${match[1]}` : 'สตรีมใหม่';
       }
 
-      const requestedCellId = resolveCellId(DEFAULT_CELL_ID);
-      const cellId = remapDomIds(DEFAULT_CELL_ID, requestedCellId) || DEFAULT_CELL_ID;
       updateRowLabel(cellId);
-      ensureLocationHash(cellId);
-
-      const sessionIndicator = document.querySelector('[data-current-session-id]');
-      if (sessionIndicator) {
+      if (!templateMode && sessionIndicator) {
         sessionIndicator.textContent = cellId;
       }
 
@@ -161,22 +152,73 @@
         return fallbackNextCamId(cellId);
       }
 
-      function buildTargetHref(baseHref, cam) {
-        const href = typeof baseHref === 'string' && baseHref.length > 0 ? baseHref : window.location.pathname;
-        const hashIndex = href.indexOf('#');
-        const cleanBase = hashIndex > -1 ? href.slice(0, hashIndex) : href;
-        return `${cleanBase}#${cam}`;
+      function buildSessionHref(cam) {
+        return `${sessionBase}${cam}`;
+      }
+
+      function replaceUrlWithSession(cam) {
+        const target = buildSessionHref(cam);
+        const query = window.location.search || '';
+        if (window.location.pathname !== target || window.location.hash) {
+          window.history.replaceState(null, '', `${target}${query}`);
+        }
+      }
+
+      function migratePersistedValues(fromId, toId) {
+        const suffixes = ['source', 'interval', 'group'];
+        suffixes.forEach((suffix) => {
+          const fromKey = `${fromId}-${suffix}`;
+          const value = localStorage.getItem(fromKey);
+          if (value !== null) {
+            const toKey = `${toId}-${suffix}`;
+            try {
+              localStorage.setItem(toKey, value);
+            } catch (err) {
+              console.warn('ไม่สามารถย้ายข้อมูลการตั้งค่าได้', err);
+            }
+            localStorage.removeItem(fromKey);
+          }
+        });
+      }
+
+      function applySessionId(newId) {
+        cellId = newId;
+        updateRowLabel(cellId);
+        if (sessionIndicator) {
+          sessionIndicator.textContent = cellId;
+        }
+        if (root) {
+          root.dataset.sessionId = cellId;
+        }
+        return cellId;
+      }
+
+      function promoteTemplateSession() {
+        if (!templateMode) {
+          return cellId;
+        }
+        const nextCam = computeNextCamId();
+        const newCellId = remapDomIds(placeholderId, nextCam) || nextCam;
+        migratePersistedValues(placeholderId, newCellId);
+        templateMode = false;
+        if (root) {
+          root.dataset.templateMode = 'false';
+        }
+        applySessionId(newCellId);
+        return cellId;
       }
 
       document.querySelectorAll('[data-action="create-new-session"]').forEach((button) => {
         button.addEventListener('click', (event) => {
           event.preventDefault();
-          const baseHref = button.getAttribute('data-base-href') || window.location.pathname;
-          const nextCam = computeNextCamId();
-          const target = buildTargetHref(baseHref, nextCam);
-          window.location.href = target;
+          const baseHref = button.getAttribute('data-base-href') || '/inference/group';
+          window.location.href = baseHref;
         });
       });
+
+      if (!templateMode) {
+        replaceUrlWithSession(cellId);
+      }
 
       function initRoiLayout(cellId) {
         const videoCell = document.getElementById(cellId);
@@ -209,16 +251,16 @@
         window.addEventListener('resize', updateHeight);
       }
 
-      function createCameraController(cellId) {
+      function createCameraController() {
         let socket;
         let roiSocket;
         let rois = [];
         let allRois = [];
         let running = false;
-        const cam = `inf_${cellId}`;
+        let cam = `inf_${cellId}`;
         const camRoot = document.getElementById(cellId);
         const camRow = camRoot ? camRoot.closest('.cam-row') : null;
-        const sessionTitle = camRow && camRow.dataset.rowLabel ? camRow.dataset.rowLabel : cellId;
+        let sessionTitle = camRow && camRow.dataset.rowLabel ? camRow.dataset.rowLabel : cellId;
         const getEl = suffix => document.getElementById(`${cellId}-${suffix}`);
         const video = getEl('video');
         const videoCtx = video.getContext('2d');
@@ -235,18 +277,37 @@
         let isLogUpdating = false;
         let logSessionId = 0;
         let currentLogSource;
-        intervalInput.value = localStorage.getItem(`${cellId}-interval`) || '1';
-        const groupStorageKey = `${cellId}-group`;
+        const getStorageKey = (suffix) => `${cellId}-${suffix}`;
+        intervalInput.value = localStorage.getItem(getStorageKey('interval')) || '1';
         let lastActiveGroup = '';
-
-        const getStoredGroup = () => localStorage.getItem(groupStorageKey) || '';
+        const getStoredGroup = () => localStorage.getItem(getStorageKey('group')) || '';
         const storeGroupSelection = value => {
             if (value) {
-                localStorage.setItem(groupStorageKey, value);
+                localStorage.setItem(getStorageKey('group'), value);
             } else {
-                localStorage.removeItem(groupStorageKey);
+                localStorage.removeItem(getStorageKey('group'));
             }
         };
+
+        function syncSessionMetadata() {
+            sessionTitle = camRow && camRow.dataset.rowLabel ? camRow.dataset.rowLabel : cellId;
+            cam = `inf_${cellId}`;
+        }
+
+        function restorePersistedSelections() {
+            const storedInterval = localStorage.getItem(getStorageKey('interval'));
+            if (storedInterval !== null) {
+                intervalInput.value = storedInterval;
+            }
+            const storedSource = localStorage.getItem(getStorageKey('source'));
+            if (storedSource && sourceSelect.options.length) {
+                sourceSelect.value = storedSource;
+            }
+            lastActiveGroup = getStoredGroup();
+            if (lastActiveGroup && groupSelect.options.length) {
+                groupSelect.value = lastActiveGroup;
+            }
+        }
 
         const formatTs = ts => {
             if (!ts) return '';
@@ -267,7 +328,7 @@
         };
 
         sourceSelect.onchange = () => {
-            localStorage.setItem(`${cellId}-source`, sourceSelect.value);
+            localStorage.setItem(getStorageKey('source'), sourceSelect.value);
         };
 
         startButton.onclick = startInference;
@@ -278,6 +339,10 @@
                 startLogUpdates(currentLogSource);
             }
         };
+
+        if (!templateMode) {
+            restorePersistedSelections();
+        }
 
         async function fetchWithStatus(url, options = {}) {
             statusEl.innerText = 'กำลังโหลด...';
@@ -312,7 +377,7 @@
                         opt.textContent = item.name;
                         sourceSelect.appendChild(opt);
                     });
-                    const stored = localStorage.getItem(`${cellId}-source`) || '';
+                    const stored = localStorage.getItem(getStorageKey('source')) || '';
                     if (stored) {
                         sourceSelect.value = stored;
                     }
@@ -574,6 +639,12 @@
             if (running) return;
             running = true;
             startButton.disabled = true;
+            const previousId = cellId;
+            const assignedId = promoteTemplateSession();
+            if (assignedId !== previousId) {
+                syncSessionMetadata();
+                restorePersistedSelections();
+            }
             const name = sourceSelect.value;
             if (!name) {
                 statusEl.innerText = 'Select source first';
@@ -582,14 +653,14 @@
                 showAlert('Select source first', 'error');
                 return;
             }
-            localStorage.setItem(`${cellId}-source`, name);
+            localStorage.setItem(getStorageKey('source'), name);
 
             const cfgRes = await fetchWithStatus(`/source_config?name=${encodeURIComponent(name)}`);
             const cfg = await cfgRes.json();
 
             const { module: _unused, rois: roiPathRaw, ...camCfg } = cfg;
             const interval = parseFloat(intervalInput.value) || 1;
-            localStorage.setItem(`${cellId}-interval`, interval);
+            localStorage.setItem(getStorageKey('interval'), interval);
             let roiPath = roiPathRaw;
             if (!roiPath.startsWith('/')) {
                 roiPath = `data_sources/${cfg.name}/${roiPath}`;
@@ -673,6 +744,7 @@
             setRunningUI();
             const sourceOption = sourceSelect.options[sourceSelect.selectedIndex];
             const groupLabel = groupToUse === 'all' ? 'ทั้งหมด (All ROI)' : groupToUse;
+            replaceUrlWithSession(cellId);
             if (sessionRegistry && typeof sessionRegistry.upsertSession === 'function') {
                 sessionRegistry.upsertSession({
                     id: cam,
@@ -681,7 +753,7 @@
                     sourceId: sourceSelect.value || '',
                     sourceName: sourceOption ? sourceOption.textContent : '',
                     group: groupLabel || '',
-                    href: `/inference/group#${cellId}`,
+                    href: buildSessionHref(cellId),
                     status: 'running'
                 });
             }
@@ -872,9 +944,10 @@
     }
 
   // initialize controllers immediately (DOMContentLoaded already fired in fragments)
-  [cellId].forEach(initRoiLayout);
+  initRoiLayout(cellId);
   const controllers = [
-      createCameraController(cellId)
+      createCameraController()
   ];
       })();
   </script>
+</div>
