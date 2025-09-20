@@ -45,36 +45,75 @@ function updateSummary(summary = {}) {
 
 function createCameraRow(camera) {
   const tr = document.createElement('tr');
-  const intervalDisplay = camera.interval ? `${camera.interval.toFixed(2)}s` : '-';
-  const fpsDisplay = camera.fps ? camera.fps.toFixed(2) : '-';
+
+  const firstCell = document.createElement('td');
+  const camId = document.createElement('div');
+  camId.className = 'fw-semibold';
+  camId.textContent = camera.cam_id ?? '-';
+  const camMeta = document.createElement('div');
+  camMeta.className = 'text-muted small';
+  const backend = camera.backend || '-';
+  const roiInfo = camera.roi_count ? ` · ROI ${camera.roi_count}` : '';
+  camMeta.textContent = `${backend}${roiInfo}`;
+  firstCell.append(camId, camMeta);
+
+  const secondCell = document.createElement('td');
+  const camName = document.createElement('div');
+  camName.className = 'fw-semibold';
+  camName.textContent = camera.name || '-';
+  const camSource = document.createElement('div');
+  camSource.className = 'text-muted small';
+  camSource.textContent = camera.source || '-';
+  secondCell.append(camName, camSource);
+
+  const statusCell = document.createElement('td');
+  const statusBadge = document.createElement('span');
   const statusBadgeClass = camera.inference_running
     ? 'bg-success'
     : camera.roi_running
       ? 'bg-info text-dark'
       : 'bg-secondary';
-  tr.innerHTML = `
-    <td>
-      <div class="fw-semibold">${camera.cam_id}</div>
-      <div class="text-muted small">${camera.backend || '-'}${camera.roi_count ? ` · ROI ${camera.roi_count}` : ''}</div>
-    </td>
-    <td>
-      <div class="fw-semibold">${camera.name || '-'}</div>
-      <div class="text-muted small">${camera.source || '-'}</div>
-    </td>
-    <td>
-      <span class="badge ${statusBadgeClass} bg-opacity-75">${camera.status}</span>
-    </td>
-    <td>${camera.group || '-'}</td>
-    <td>${intervalDisplay}</td>
-    <td>${fpsDisplay}</td>
-    <td>
-      <div class="small text-truncate" style="max-width: 180px;">${camera.last_output || '-'}</div>
-    </td>
-    <td>
-      <span class="badge bg-primary-subtle text-primary">${camera.alerts_count ?? 0}</span>
-    </td>
-    <td>${formatDateTime(camera.last_activity)}</td>
-  `;
+  statusBadge.className = `badge ${statusBadgeClass} bg-opacity-75`;
+  statusBadge.textContent = camera.status || '-';
+  statusCell.appendChild(statusBadge);
+
+  const groupCell = document.createElement('td');
+  groupCell.textContent = camera.group || '-';
+
+  const intervalCell = document.createElement('td');
+  intervalCell.textContent = camera.interval ? `${camera.interval.toFixed(2)}s` : '-';
+
+  const fpsCell = document.createElement('td');
+  fpsCell.textContent = camera.fps ? camera.fps.toFixed(2) : '-';
+
+  const outputCell = document.createElement('td');
+  const outputWrapper = document.createElement('div');
+  outputWrapper.className = 'small text-truncate';
+  outputWrapper.style.maxWidth = '180px';
+  outputWrapper.textContent = camera.last_output || '-';
+  outputCell.appendChild(outputWrapper);
+
+  const alertCell = document.createElement('td');
+  const alertBadge = document.createElement('span');
+  alertBadge.className = 'badge bg-primary-subtle text-primary';
+  alertBadge.textContent = String(camera.alerts_count ?? 0);
+  alertCell.appendChild(alertBadge);
+
+  const activityCell = document.createElement('td');
+  activityCell.textContent = formatDateTime(camera.last_activity);
+
+  tr.append(
+    firstCell,
+    secondCell,
+    statusCell,
+    groupCell,
+    intervalCell,
+    fpsCell,
+    outputCell,
+    alertCell,
+    activityCell,
+  );
+
   return tr;
 }
 
@@ -96,17 +135,38 @@ function updateCameraTable(cameras = []) {
 function renderAlertItem(alert) {
   const li = document.createElement('li');
   li.className = 'timeline__item';
-  const resultsPreview = (alert.results || []).map((item) => item.text || item.name || '').filter(Boolean);
-  li.innerHTML = `
-    <div class="timeline__icon">
-      <i class="bi bi-bell-fill"></i>
-    </div>
-    <div class="timeline__content">
-      <p class="timeline__title mb-1">${alert.cam_id || 'ไม่ทราบกล้อง'}${alert.group ? ` · ${alert.group}` : ''}</p>
-      <p class="timeline__meta mb-1">${formatDateTime(alert.timestamp)} · ${alert.source || 'ไม่ระบุแหล่ง'}</p>
-      <div class="small text-muted">${resultsPreview.length ? resultsPreview.join(', ') : 'ไม่มีรายละเอียดเพิ่มเติม'}</div>
-    </div>
-  `;
+
+  const icon = document.createElement('div');
+  icon.className = 'timeline__icon';
+  const iconInner = document.createElement('i');
+  iconInner.className = 'bi bi-bell-fill';
+  icon.appendChild(iconInner);
+
+  const content = document.createElement('div');
+  content.className = 'timeline__content';
+
+  const title = document.createElement('p');
+  title.className = 'timeline__title mb-1';
+  const groupSuffix = alert.group ? ` · ${alert.group}` : '';
+  title.textContent = `${alert.cam_id || 'ไม่ทราบกล้อง'}${groupSuffix}`;
+
+  const meta = document.createElement('p');
+  meta.className = 'timeline__meta mb-1';
+  const sourceText = alert.source || 'ไม่ระบุแหล่ง';
+  meta.textContent = `${formatDateTime(alert.timestamp)} · ${sourceText}`;
+
+  const details = document.createElement('div');
+  details.className = 'small text-muted';
+  const resultsPreview = (alert.results || [])
+    .map((item) => item.text || item.name || '')
+    .filter(Boolean);
+  details.textContent = resultsPreview.length
+    ? resultsPreview.join(', ')
+    : 'ไม่มีรายละเอียดเพิ่มเติม';
+
+  content.append(title, meta, details);
+  li.append(icon, content);
+
   return li;
 }
 
@@ -138,16 +198,33 @@ function formatWeekdays(weekdays = []) {
 function renderSchedule(schedule) {
   const card = document.createElement('div');
   card.className = 'schedule-card';
-  const statusText = schedule.enabled ? 'เปิดใช้งาน' : 'ปิดอยู่';
+
+  const header = document.createElement('div');
+  header.className = 'schedule-card__header';
+
+  const title = document.createElement('p');
+  title.className = 'schedule-card__title mb-0';
+  title.textContent = schedule.label || schedule.cam_id || '-';
+
+  const status = document.createElement('span');
   const statusClass = schedule.enabled ? 'text-success' : 'text-muted';
-  card.innerHTML = `
-    <div class="schedule-card__header">
-      <p class="schedule-card__title mb-0">${schedule.label || schedule.cam_id}</p>
-      <span class="schedule-card__status ${statusClass}">${schedule.is_running ? 'กำลังทำงาน' : statusText}</span>
-    </div>
-    <div class="schedule-card__meta">${schedule.start_time} - ${schedule.end_time} · ${formatWeekdays(schedule.weekdays)}</div>
-    <div class="schedule-card__meta">กล้อง: ${schedule.cam_id}${schedule.group ? ` · กลุ่ม ${schedule.group}` : ''}</div>
-  `;
+  status.className = `schedule-card__status ${statusClass}`;
+  const statusText = schedule.enabled ? 'เปิดใช้งาน' : 'ปิดอยู่';
+  status.textContent = schedule.is_running ? 'กำลังทำงาน' : statusText;
+
+  header.append(title, status);
+
+  const timeMeta = document.createElement('div');
+  timeMeta.className = 'schedule-card__meta';
+  timeMeta.textContent = `${schedule.start_time} - ${schedule.end_time} · ${formatWeekdays(schedule.weekdays)}`;
+
+  const camMeta = document.createElement('div');
+  camMeta.className = 'schedule-card__meta';
+  const groupSuffix = schedule.group ? ` · กลุ่ม ${schedule.group}` : '';
+  camMeta.textContent = `กล้อง: ${schedule.cam_id}${groupSuffix}`;
+
+  card.append(header, timeMeta, camMeta);
+
   return card;
 }
 
@@ -182,15 +259,31 @@ function updateStreams(cameras = []) {
   running.forEach((camera) => {
     const item = document.createElement('div');
     item.className = 'stream-grid__item';
-    item.innerHTML = `
-      <a href="/inference?cam_id=${encodeURIComponent(camera.cam_id)}" class="text-decoration-none text-white">
-        <img src="${camera.snapshot_url}" alt="snapshot-${camera.cam_id}" loading="lazy">
-        <div class="stream-grid__caption">
-          <p class="stream-grid__title mb-1">${camera.cam_id}</p>
-          <p class="stream-grid__meta mb-0">${camera.group || 'ไม่มีข้อมูลกลุ่ม'} · FPS ${camera.fps ? camera.fps.toFixed(2) : '-'}</p>
-        </div>
-      </a>
-    `;
+
+    const link = document.createElement('a');
+    link.className = 'text-decoration-none text-white';
+    link.href = `/inference?cam_id=${encodeURIComponent(camera.cam_id)}`;
+
+    const img = document.createElement('img');
+    img.loading = 'lazy';
+    img.src = camera.snapshot_url;
+    img.alt = `snapshot-${camera.cam_id}`;
+
+    const caption = document.createElement('div');
+    caption.className = 'stream-grid__caption';
+
+    const title = document.createElement('p');
+    title.className = 'stream-grid__title mb-1';
+    title.textContent = camera.cam_id || '-';
+
+    const meta = document.createElement('p');
+    meta.className = 'stream-grid__meta mb-0';
+    const fpsText = camera.fps ? camera.fps.toFixed(2) : '-';
+    meta.textContent = `${camera.group || 'ไม่มีข้อมูลกลุ่ม'} · FPS ${fpsText}`;
+
+    caption.append(title, meta);
+    link.append(img, caption);
+    item.appendChild(link);
     container.appendChild(item);
   });
 }
