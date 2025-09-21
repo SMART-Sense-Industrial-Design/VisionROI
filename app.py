@@ -653,6 +653,30 @@ def build_dashboard_payload() -> dict[str, Any]:
             if ts >= float(module_entry.get("latest_timestamp", 0.0) or 0.0):
                 module_entry["latest_duration"] = duration_val
                 module_entry["latest_timestamp"] = ts
+                roi_identifier = result.get("id")
+                roi_name = result.get("name")
+                source_name = notif.get("source")
+                cam_identifier = notif.get("cam_id")
+                module_entry["latest_roi_id"] = (
+                    str(roi_identifier)
+                    if roi_identifier is not None and str(roi_identifier)
+                    else None
+                )
+                module_entry["latest_roi_name"] = (
+                    str(roi_name)
+                    if roi_name is not None and str(roi_name).strip()
+                    else None
+                )
+                module_entry["latest_source"] = (
+                    str(source_name)
+                    if source_name is not None and str(source_name).strip()
+                    else None
+                )
+                module_entry["latest_cam_id"] = (
+                    str(cam_identifier)
+                    if cam_identifier is not None and str(cam_identifier)
+                    else None
+                )
         cam_id = notif.get("cam_id")
         if cam_id and total_duration > 0:
             source_entry = source_duration_stats.setdefault(
@@ -907,6 +931,10 @@ def build_dashboard_payload() -> dict[str, Any]:
                 "sample_count": duration_count,
                 "latest_duration": durations.get("latest_duration"),
                 "latest_timestamp": durations.get("latest_timestamp"),
+                "latest_roi_id": durations.get("latest_roi_id"),
+                "latest_roi_name": durations.get("latest_roi_name"),
+                "latest_cam_id": durations.get("latest_cam_id"),
+                "latest_source": durations.get("latest_source"),
             }
         )
 
