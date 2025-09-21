@@ -61,7 +61,6 @@
         title: providedTitle,
         defaultSource: providedSource,
         defaultInterval,
-        defaultGroup,
       } = options || {};
       const cam = typeof camIdOverride === 'string' && camIdOverride.length > 0
         ? camIdOverride
@@ -75,7 +74,6 @@
       const titleEl = getEl('title');
       const labelEl = getEl('label');
       const sourceSelect = getEl('sourceSelect');
-      const groupSelect = getEl('groupSelect');
       const roiGrid = getEl('rois');
       const logBody = getEl('logBody');
       const logRoiSelect = getEl('logRoiSelect');
@@ -106,23 +104,6 @@
       } else {
         intervalInput.value = '1';
       }
-      const normalizedDefaultGroup = typeof defaultGroup === 'string' ? defaultGroup : '';
-      const groupStorageKey = `${cellId}-group`;
-      const getStoredGroup = () => {
-        const stored = localStorage.getItem(groupStorageKey);
-        if (stored !== null) {
-          return stored;
-        }
-        return normalizedDefaultGroup;
-      };
-      const storeGroupSelection = value => {
-        if (value) {
-          localStorage.setItem(groupStorageKey, value);
-        } else {
-          localStorage.removeItem(groupStorageKey);
-        }
-      };
-      let lastActiveGroup = getStoredGroup();
 
       const formatTs = ts => {
         if (!ts) return '';
@@ -193,7 +174,6 @@
 
       startButton.onclick = () => { startInference(); };
       stopButton.onclick = () => { stopInference(); };
-      groupSelect.onchange = () => { switchGroup(); };
       logRoiSelect.onchange = () => {
         if (currentLogSource) {
           startLogUpdates(currentLogSource);
@@ -451,47 +431,7 @@
         });
       }
 
-      function loadGroupOptions(list, selected) {
-        groupSelect.innerHTML = '';
-        const optSelect = document.createElement('option');
-        optSelect.value = '';
-        optSelect.textContent = '-- Select --';
-        groupSelect.appendChild(optSelect);
-        const optAll = document.createElement('option');
-        optAll.value = 'all';
-        optAll.textContent = 'All';
-        groupSelect.appendChild(optAll);
-        const groups = Array.from(
-          new Set(
-            list
-              .filter(r => (r.type ?? 'roi') === 'roi')
-              .map(r => r.group ?? r.page ?? r.name)
-              .filter(p => p)
-          ),
-        );
-        groups.forEach(p => {
-          const opt = document.createElement('option');
-          opt.value = p;
-          opt.textContent = p;
-          groupSelect.appendChild(opt);
-        });
-        const stored = getStoredGroup();
-        const hasSelected = typeof selected === 'string' && selected.length > 0;
-        const requested = hasSelected ? selected : stored;
-        const validGroups = new Set(groups);
-        const currentSelection = (requested === 'all' || validGroups.has(requested)) ? requested : '';
-        groupSelect.value = currentSelection;
-        storeGroupSelection(currentSelection);
-        const roiForLog = currentSelection
-          ? currentSelection === 'all'
-            ? list
-            : list.filter(r => (r.group ?? r.page ?? r.name) === currentSelection)
-          : [];
-        updateLogRoiOptions(roiForLog);
-        return currentSelection;
-      }
-
-      async function startInference(roisOverride = null, selectedGroup = '') {
+      async function startInference(roisOverride = null) {
         if (running) return;
         running = true;
         startButton.disabled = true;
@@ -520,25 +460,12 @@
         statusEl.innerText = '';
         allRois = data.rois || [];
         const roiList = allRois.filter(r => (r.type ?? 'roi') === 'roi');
-        const fallbackGroup = lastActiveGroup || '';
-        const selectedGroupName = typeof selectedGroup === 'string' && selectedGroup.length > 0
-          ? selectedGroup
-          : fallbackGroup;
-        if (!selectedGroupName) {
-          storeGroupSelection('');
-        }
-        const activeGroup = loadGroupOptions(roiList, selectedGroupName);
-        const groupToUse = selectedGroupName || activeGroup;
-        const requestGroup = groupToUse || null;
         if (Array.isArray(roisOverride)) {
           rois = roisOverride;
-        } else if (groupToUse === 'all') {
-          rois = roiList;
-        } else if (groupToUse) {
-          rois = roiList.filter(r => (r.group ?? r.page ?? r.name) === groupToUse);
         } else {
-          rois = [];
+          rois = roiList;
         }
+        updateLogRoiOptions(roiList);
         roiGrid.innerHTML = '';
         resetScoreboard();
         rois.forEach(r => {
@@ -558,7 +485,6 @@
             body: JSON.stringify({
               ...camCfg,
               rois,
-              group: requestGroup,
               interval,
               draw_page_boxes: false
             })
@@ -583,7 +509,6 @@
           return;
         }
         statusEl.innerText = 'สำเร็จ';
-        lastActiveGroup = groupToUse || '';
         openSocket();
         if (rois.length > 0) {
           openRoiSocket();
@@ -638,8 +563,6 @@
         startButton.innerText = 'Resume';
         startButton.disabled = false;
         stopButton.disabled = true;
-        groupSelect.value = '';
-        storeGroupSelection('');
         updateLogRoiOptions([]);
         if (!silent) {
           showAlert('Inference stopped', 'info');
@@ -717,15 +640,8 @@
           const roiData = await roiRes.json();
           allRois = roiData.rois || [];
           const roiList = allRois.filter(r => (r.type ?? 'roi') === 'roi');
-          const activeGroup = loadGroupOptions(roiList);
-          const groupToUse = activeGroup || '';
-          if (groupToUse === 'all') {
-            rois = roiList;
-          } else if (groupToUse) {
-            rois = roiList.filter(r => (r.group ?? r.page ?? r.name) === groupToUse);
-          } else {
-            rois = [];
-          }
+          rois = roiList;
+          updateLogRoiOptions(roiList);
           roiGrid.innerHTML = '';
           rois.forEach(r => {
             if (r && r.id !== undefined && r.id !== null) {
@@ -751,29 +667,6 @@
           stopLogUpdates();
           resetScoreboard();
         }
-      }
-
-      async function switchGroup() {
-        const selected = groupSelect.value;
-        storeGroupSelection(selected);
-        if (!selected) {
-          updateLogRoiOptions([]);
-          return;
-        }
-
-        const roiList = allRois.filter(r => (r.type ?? 'roi') === 'roi');
-        const filtered = selected === 'all'
-          ? roiList
-          : roiList.filter(r => (r.group ?? r.page ?? r.name) === selected);
-
-        updateLogRoiOptions(filtered);
-
-        if (running) {
-          await stopInference();
-        }
-
-        const hasCachedRois = allRois.length > 0;
-        await startInference(hasCachedRois ? filtered : null, selected);
       }
 
       function setRunningUI() {
@@ -854,8 +747,6 @@
                 <select id="${cellId}-sourceSelect" class="form-select w-auto"></select>
                 <label for="${cellId}-intervalInput" class="form-label mb-0">Time (interval):</label>
                 <input id="${cellId}-intervalInput" type="number" class="form-control w-auto" min="0" step="0.1" value="1" />
-                <label for="${cellId}-groupSelect" class="form-label mb-0">Group:</label>
-                <select id="${cellId}-groupSelect" class="form-select w-auto flex-grow-1" style="min-width:0;"></select>
               </div>
               <div class="d-flex align-items-center gap-2 flex-wrap mb-2">
                 <button id="${cellId}-startButton" class="btn btn-primary">Start</button>
@@ -908,7 +799,7 @@
       return row;
     }
 
-    function addInferenceRow({ cellId, camId, title, defaultSource, defaultInterval, defaultGroup } = {}) {
+    function addInferenceRow({ cellId, camId, title, defaultSource, defaultInterval } = {}) {
       let desiredCellId = cellId ? sanitizeCellId(cellId) : '';
       if (desiredCellId) {
         desiredCellId = ensureUniqueCellId(desiredCellId);
@@ -926,7 +817,6 @@
         title: displayTitle,
         defaultSource,
         defaultInterval,
-        defaultGroup,
       });
       controllers.set(actualCellId, controller);
       camIdToCell.set(actualCamId, actualCellId);
@@ -950,7 +840,7 @@
       if (row) {
         row.remove();
       }
-      ['source', 'interval', 'group'].forEach(key => localStorage.removeItem(`${cellId}-${key}`));
+      ['source', 'interval'].forEach(key => localStorage.removeItem(`${cellId}-${key}`));
       showAlert('ลบงาน Inference แล้ว', 'info');
       if (controllers.size === 0) {
         addInferenceRow();
@@ -1007,7 +897,6 @@
                 title: cam.name || camId,
                 defaultSource: cam.name || '',
                 defaultInterval: cam.interval,
-                defaultGroup: cam.group,
               });
               createdAny = true;
             });
