@@ -25,15 +25,6 @@ function formatDateTime(value) {
   }
 }
 
-function setMetric(id, value, decimals = 0) {
-  const el = document.getElementById(id);
-  if (!el) return;
-  const display = typeof value === 'number' && !Number.isNaN(value)
-    ? value.toFixed(decimals)
-    : value ?? '-';
-  el.textContent = display;
-}
-
 function setElementText(id, value) {
   const el = document.getElementById(id);
   if (el !== null && el !== undefined) {
@@ -85,20 +76,6 @@ function formatSeconds(value, decimals = 2) {
 }
 
 function updateSummary(summary = {}, analytics = null) {
-  setMetric('metric-total', summary.total_cameras ?? 0);
-  setMetric('metric-online', summary.online_cameras ?? 0);
-  setMetric('metric-running', summary.inference_running ?? 0);
-  setMetric('metric-alerts', summary.alerts_last_hour ?? 0);
-  setMetric('metric-interval', summary.average_interval ?? 0, 2);
-  setMetric('metric-fps', summary.average_fps ?? 0, 2);
-  setMetric('metric-groups', summary.total_groups ?? 0);
-  setMetric('metric-pages', summary.page_jobs ?? 0);
-
-  if (summary.total_roi !== undefined) {
-    setMetric('metric-total-roi', summary.total_roi ?? 0);
-    setElementText('metric-total-roi-chip', summary.total_roi ?? 0);
-  }
-
   const total = summary.total_cameras ?? 0;
   const online = summary.online_cameras ?? 0;
   const running = summary.inference_running ?? 0;
@@ -108,6 +85,10 @@ function updateSummary(summary = {}, analytics = null) {
   const totalRoi = summary.total_roi ?? 0;
   const moduleTypes = summary.module_types ?? 0;
 
+  if (summary.total_roi !== undefined) {
+    setElementText('metric-total-roi-chip', totalRoi);
+  }
+
   const offline = Math.max(total - online, 0);
   const onlineRate = total ? (online / total) * 100 : 0;
   const runningRate = total ? (running / Math.max(total, 1)) * 100 : 0;
@@ -116,11 +97,6 @@ function updateSummary(summary = {}, analytics = null) {
   setElementText('summary-online-rate', `${onlineRate.toFixed(0)}%`);
   setElementText('summary-offline', offline);
   setElementText('summary-alert-density', alertDensity.toFixed(2));
-  setElementText('metric-online-rate-meta', `${onlineRate.toFixed(0)}%`);
-  setElementText('metric-running-ratio', `${runningRate.toFixed(0)}%`);
-  setElementText('metric-alert-density', alertDensity.toFixed(2));
-  setElementText('metric-groups-running', runningGroups);
-  setElementText('metric-pages-running', pageJobsRunning);
   setElementText('chip-group-running', runningGroups);
   setElementText('chip-page-running', pageJobsRunning);
   setElementText('chip-inference-running', running);
@@ -176,14 +152,9 @@ function updateCameraInsights(cameras = [], roiTotalOverride = null) {
   if (Number.isFinite(Number(roiTotalOverride))) {
     stats.totalRoi = Number(roiTotalOverride);
   }
-  const minInterval = stats.intervalCount ? stats.minInterval : null;
-  const maxFps = stats.fpsCount ? stats.maxFps : null;
   const averageFps = stats.fpsCount ? stats.fpsTotal / stats.fpsCount : 0;
 
-  setElementText('metric-total-roi', stats.totalRoi);
   setElementText('metric-total-roi-chip', stats.totalRoi);
-  setElementText('metric-min-interval', minInterval !== null ? `${minInterval.toFixed(2)}s` : '-');
-  setElementText('metric-max-fps', maxFps !== null ? maxFps.toFixed(2) : '-');
   setElementText('insight-average-fps', stats.fpsCount ? averageFps.toFixed(2) : '0.0');
 }
 
