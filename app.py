@@ -634,19 +634,46 @@ def build_dashboard_payload() -> dict[str, Any]:
                 fps_values.append(round(1.0 / interval, 3))
         active_group = inference_groups.get(cam_id) or persisted_entry.get("inference_group")
         last_result = last_inference_outputs.get(cam_id, "")
-        last_activity = last_inference_times.get(cam_id)
+        worker = camera_workers.get(cam_id)
+        last_frame_ts = None
+        if worker is not None:
+            getter = getattr(worker, "get_last_frame_at", None)
+            if callable(getter):
+                with contextlib.suppress(Exception):
+                    ts_val = getter()
+                    if isinstance(ts_val, (int, float)):
+                        last_frame_ts = float(ts_val)
+            if last_frame_ts is None:
+                raw_attr = getattr(worker, "_last_frame_ts", None)
+                if isinstance(raw_attr, (int, float)):
+                    last_frame_ts = float(raw_attr)
+        last_activity = last_frame_ts or last_inference_times.get(cam_id)
+        last_activity_iso = None
         if isinstance(last_activity, (int, float)) and last_activity > 0:
-            last_activity_iso = datetime.fromtimestamp(last_activity).isoformat()
+            try:
+                last_activity_iso = datetime.fromtimestamp(last_activity).isoformat()
+            except Exception:
+                last_activity_iso = None
+        stream_active = inference_running or roi_running
+        if interval and interval > 0:
+            offline_threshold = max(interval * 3.0, 5.0)
         else:
-            last_activity_iso = None
+            offline_threshold = 10.0
+        stream_offline = False
+        if stream_active:
+            if not last_frame_ts or (now_epoch - last_frame_ts) > offline_threshold:
+                stream_offline = True
+        is_online = stream_active and not stream_offline
         status: str
-        if inference_running:
+        if stream_offline:
+            status = "สัญญาณขาดหาย"
+        elif inference_running:
             status = "กำลังประมวลผล"
         elif roi_running:
             status = "สตรีม ROI"
         else:
             status = "หยุดทำงาน"
-        if inference_running or roi_running:
+        if is_online:
             online_count += 1
         if inference_running:
             running_count += 1
@@ -684,6 +711,8 @@ def build_dashboard_payload() -> dict[str, Any]:
             "roi_count": len(inference_rois.get(cam_id, [])),
             "inference_running": inference_running,
             "roi_running": roi_running,
+            "is_online": is_online,
+            "stream_offline": stream_offline,
             "resolution": {"width": width, "height": height},
             "snapshot_url": f"/ws_snapshot/{cam_id}?ts={int(now_epoch)}"
             if inference_running

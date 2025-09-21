@@ -67,6 +67,7 @@ class CameraWorker:
         self._q: Queue = Queue(maxsize=1)
         self._last_frame = None
         self._fail_count = 0
+        self._last_frame_ts: float = 0.0
         self._ffmpeg_cmd = None
 
         if backend == "ffmpeg":
@@ -318,6 +319,7 @@ class CameraWorker:
 
             self._fail_count = 0
             self._last_frame = frame
+            self._last_frame_ts = time.time()
             frame_copy = frame
             if self._q.full():
                 with silent():
@@ -327,6 +329,10 @@ class CameraWorker:
 
             if self.read_interval > 0:
                 time.sleep(self.read_interval)
+
+    def get_last_frame_at(self) -> float:
+        """Return UNIX timestamp of the last successfully captured frame."""
+        return self._last_frame_ts
 
     async def read(self, timeout: float = 0.1):
         """อ่านเฟรมล่าสุดแบบ non-blocking; คืน ``None`` เมื่อรอเกินกำหนด"""

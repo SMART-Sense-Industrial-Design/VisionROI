@@ -791,11 +791,17 @@ function createCameraRow(camera) {
 
   const statusCell = document.createElement('td');
   const statusBadge = document.createElement('span');
-  const statusBadgeClass = camera.inference_running
-    ? 'bg-success'
-    : camera.roi_running
-      ? 'bg-info text-dark'
-      : 'bg-secondary';
+  const streamOffline = camera?.stream_offline || camera?.is_online === false;
+  let statusBadgeClass;
+  if (streamOffline && (camera?.inference_running || camera?.roi_running)) {
+    statusBadgeClass = 'bg-danger';
+  } else if (camera?.inference_running) {
+    statusBadgeClass = 'bg-success';
+  } else if (camera?.roi_running) {
+    statusBadgeClass = 'bg-info text-dark';
+  } else {
+    statusBadgeClass = 'bg-secondary';
+  }
   statusBadge.className = `badge ${statusBadgeClass} bg-opacity-75`;
   statusBadge.textContent = camera.status || '-';
   statusCell.appendChild(statusBadge);
