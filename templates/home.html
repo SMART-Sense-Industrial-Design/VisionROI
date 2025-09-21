@@ -18,6 +18,10 @@
           <i class="bi bi-layers"></i>
           Page รันอยู่ <span id="chip-page-running">0</span>
         </span>
+        <span class="status-chip status-chip--inference">
+          <i class="bi bi-activity"></i>
+          กล้องกำลังรัน <span id="chip-inference-running">0</span>
+        </span>
         <span class="status-chip status-chip--sync">
           <i class="bi bi-arrow-repeat"></i>
           รีเฟรชทุก <span id="chip-refresh">6</span> วินาที
@@ -51,7 +55,68 @@
       <p class="summary-stat__value" id="summary-alert-density">0.00</p>
       <p class="summary-stat__meta">ต่อกล้อง/ชั่วโมง</p>
     </div>
+    <div class="summary-stat">
+      <p class="summary-stat__label">โมดูลที่ใช้งาน</p>
+      <p class="summary-stat__value" id="summary-module-types">0</p>
+      <p class="summary-stat__meta">ครอบคลุม <span id="summary-total-roi">0</span> ROI</p>
+    </div>
+    <div class="summary-stat">
+      <p class="summary-stat__label">Interval เฉลี่ย</p>
+      <p class="summary-stat__value" id="summary-average-interval">0.0s</p>
+      <p class="summary-stat__meta">OCR ใช้ <span id="summary-average-cycle">0.0s</span></p>
+    </div>
   </div>
+
+  <section class="dashboard__analytics">
+    <article class="analytics-card">
+      <div class="analytics-card__header">
+        <span class="analytics-card__icon bg-primary-subtle text-primary"><i class="bi bi-diagram-3"></i></span>
+        <div>
+          <h2 class="analytics-card__title">ภาพรวมโมดูล Inference</h2>
+          <p class="analytics-card__subtitle">ดูจำนวน ROI ที่แต่ละโมดูลดูแลและจำนวนกล้องที่ใช้งาน</p>
+        </div>
+      </div>
+      <div class="analytics-card__body" id="module-summary">
+        <p class="analytics-card__empty">ยังไม่มีโมดูลที่ถูกกำหนดใน ROI</p>
+      </div>
+    </article>
+
+    <article class="analytics-card analytics-card--dark">
+      <div class="analytics-card__header">
+        <span class="analytics-card__icon analytics-card__icon--dark"><i class="bi bi-speedometer2"></i></span>
+        <div>
+          <h2 class="analytics-card__title">ประสิทธิภาพ OCR และ Interval</h2>
+          <p class="analytics-card__subtitle">ตรวจสอบเวลาที่ระบบใช้ต่อรอบและความสอดคล้องกับค่า interval ที่ตั้งไว้</p>
+        </div>
+      </div>
+      <div class="analytics-card__body">
+        <div class="processing-metrics">
+          <div class="processing-metrics__item">
+            <p class="processing-metrics__label">เวลารวมต่อรอบ</p>
+            <p class="processing-metrics__value" id="processing-cycle-average">0.00s</p>
+            <p class="processing-metrics__meta">สูงสุด <span id="processing-cycle-max">0.00s</span></p>
+          </div>
+          <div class="processing-metrics__item">
+            <p class="processing-metrics__label">เวลาเฉลี่ยต่อ ROI</p>
+            <p class="processing-metrics__value" id="processing-roi-average">0.00s</p>
+            <p class="processing-metrics__meta">P95 <span id="processing-roi-p95">0.00s</span></p>
+          </div>
+          <div class="processing-metrics__item processing-metrics__item--status">
+            <p class="processing-metrics__label">สถานะ Interval</p>
+            <p class="processing-metrics__value" id="processing-interval-status">รอข้อมูล</p>
+            <p class="processing-metrics__meta" id="processing-interval-meta">-</p>
+          </div>
+        </div>
+        <div class="processing-metrics__divider"></div>
+        <div class="interval-issues">
+          <h4 class="interval-issues__title">กล้องที่อาจต้องปรับ interval</h4>
+          <ul class="interval-issues__list" id="interval-issues">
+            <li class="interval-issues__empty">ยังไม่พบความล่าช้า</li>
+          </ul>
+        </div>
+      </div>
+    </article>
+  </section>
 
   <section class="dashboard__metrics">
     <div class="metric-card" data-metric="total">

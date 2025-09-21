@@ -76,7 +76,15 @@ function formatResolution(value) {
   return '-';
 }
 
-function updateSummary(summary = {}) {
+function formatSeconds(value, decimals = 2) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return '-';
+  }
+  return `${Math.max(0, numeric).toFixed(decimals)}s`;
+}
+
+function updateSummary(summary = {}, analytics = null) {
   setMetric('metric-total', summary.total_cameras ?? 0);
   setMetric('metric-online', summary.online_cameras ?? 0);
   setMetric('metric-running', summary.inference_running ?? 0);
@@ -86,12 +94,19 @@ function updateSummary(summary = {}) {
   setMetric('metric-groups', summary.total_groups ?? 0);
   setMetric('metric-pages', summary.page_jobs ?? 0);
 
+  if (summary.total_roi !== undefined) {
+    setMetric('metric-total-roi', summary.total_roi ?? 0);
+    setElementText('metric-total-roi-chip', summary.total_roi ?? 0);
+  }
+
   const total = summary.total_cameras ?? 0;
   const online = summary.online_cameras ?? 0;
   const running = summary.inference_running ?? 0;
   const alerts = summary.alerts_last_hour ?? 0;
   const runningGroups = summary.running_groups ?? 0;
   const pageJobsRunning = summary.page_jobs_running ?? 0;
+  const totalRoi = summary.total_roi ?? 0;
+  const moduleTypes = summary.module_types ?? 0;
 
   const offline = Math.max(total - online, 0);
   const onlineRate = total ? (online / total) * 100 : 0;
@@ -108,6 +123,21 @@ function updateSummary(summary = {}) {
   setElementText('metric-pages-running', pageJobsRunning);
   setElementText('chip-group-running', runningGroups);
   setElementText('chip-page-running', pageJobsRunning);
+  setElementText('chip-inference-running', running);
+  setElementText('summary-module-types', moduleTypes);
+  setElementText('summary-total-roi', totalRoi);
+
+  const cycleStats = analytics?.processing?.per_cycle;
+  const intervalAverageDisplay = formatSeconds(summary.average_interval ?? 0, 2);
+  setElementText('summary-average-interval', intervalAverageDisplay);
+
+  if (cycleStats && cycleStats.count) {
+    setElementText('summary-average-cycle', formatSeconds(cycleStats.average ?? 0, 2));
+  } else if (analytics?.interval_health?.average_cycle) {
+    setElementText('summary-average-cycle', formatSeconds(analytics.interval_health.average_cycle, 2));
+  } else {
+    setElementText('summary-average-cycle', '-');
+  }
 }
 
 function calculateCameraInsights(cameras = []) {
@@ -141,8 +171,11 @@ function calculateCameraInsights(cameras = []) {
   });
 }
 
-function updateCameraInsights(cameras = []) {
+function updateCameraInsights(cameras = [], roiTotalOverride = null) {
   const stats = calculateCameraInsights(cameras);
+  if (Number.isFinite(Number(roiTotalOverride))) {
+    stats.totalRoi = Number(roiTotalOverride);
+  }
   const minInterval = stats.intervalCount ? stats.minInterval : null;
   const maxFps = stats.fpsCount ? stats.maxFps : null;
   const averageFps = stats.fpsCount ? stats.fpsTotal / stats.fpsCount : 0;
@@ -152,6 +185,163 @@ function updateCameraInsights(cameras = []) {
   setElementText('metric-min-interval', minInterval !== null ? `${minInterval.toFixed(2)}s` : '-');
   setElementText('metric-max-fps', maxFps !== null ? maxFps.toFixed(2) : '-');
   setElementText('insight-average-fps', stats.fpsCount ? averageFps.toFixed(2) : '0.0');
+}
+
+function updateModuleSummary(modules = [], roiSummary = {}) {
+  const container = document.getElementById('module-summary');
+  if (!container) return;
+  container.innerHTML = '';
+
+  const moduleList = Array.isArray(modules) ? modules : [];
+  const totalRoi = Number(roiSummary?.total ?? 0);
+
+  if (!moduleList.length) {
+    const empty = document.createElement('p');
+    empty.className = 'analytics-card__empty';
+    empty.textContent = 'ยังไม่มีโมดูลที่ถูกกำหนดใน ROI';
+    container.appendChild(empty);
+    return;
+  }
+
+  const overview = document.createElement('div');
+  overview.className = 'module-summary__overview';
+  overview.innerHTML = `
+    <span>${moduleList.length} โมดูล</span>
+    <span>${totalRoi} ROI</span>
+  `;
+  container.appendChild(overview);
+
+  const grid = document.createElement('div');
+  grid.className = 'module-summary__grid';
+
+  moduleList.forEach((module) => {
+    const shareValue = Number(module?.share ?? 0);
+    const roiCount = Number(module?.roi ?? 0);
+    const cameraCount = Number(module?.cameras ?? 0);
+
+    const item = document.createElement('div');
+    item.className = 'module-summary__item';
+
+    const top = document.createElement('div');
+    top.className = 'module-summary__top';
+
+    const badge = document.createElement('span');
+    badge.className = 'module-summary__badge';
+    badge.textContent = `${cameraCount} กล้อง`;
+
+    const share = document.createElement('span');
+    share.className = 'module-summary__share';
+    share.textContent = `${Number.isFinite(shareValue) ? shareValue.toFixed(1) : '0.0'}%`;
+
+    top.append(badge, share);
+
+    const title = document.createElement('p');
+    title.className = 'module-summary__title';
+    title.textContent = module?.name || 'ไม่ระบุโมดูล';
+
+    const meta = document.createElement('p');
+    meta.className = 'module-summary__meta';
+    meta.textContent = `ROI ${roiCount} โซน`;
+
+    const progress = document.createElement('div');
+    progress.className = 'module-summary__progress';
+    const fill = document.createElement('div');
+    fill.className = 'module-summary__progress-fill';
+    const width = Number.isFinite(shareValue) ? Math.max(8, Math.min(shareValue, 100)) : 0;
+    fill.style.width = `${width.toFixed(0)}%`;
+    progress.appendChild(fill);
+
+    item.append(top, title, meta, progress);
+    grid.appendChild(item);
+  });
+
+  container.appendChild(grid);
+}
+
+function renderIntervalIssues(examples = []) {
+  const container = document.getElementById('interval-issues');
+  if (!container) return;
+  container.innerHTML = '';
+
+  const items = Array.isArray(examples) ? examples : [];
+  if (!items.length) {
+    const empty = document.createElement('li');
+    empty.className = 'interval-issues__empty';
+    empty.textContent = 'ยังไม่พบความล่าช้า';
+    container.appendChild(empty);
+    return;
+  }
+
+  items.forEach((entry) => {
+    const li = document.createElement('li');
+    li.className = 'interval-issues__item';
+
+    const header = document.createElement('div');
+    header.className = 'interval-issues__header';
+
+    const name = document.createElement('p');
+    name.className = 'interval-issues__cam';
+    name.textContent = entry?.cam_id || 'ไม่ทราบกล้อง';
+    header.appendChild(name);
+
+    if (entry?.group) {
+      const badge = document.createElement('span');
+      badge.className = 'interval-issues__badge';
+      badge.textContent = entry.group;
+      header.appendChild(badge);
+    }
+
+    li.appendChild(header);
+
+    const intervalText = formatSeconds(entry?.interval ?? 0, 2);
+    const averageText = formatSeconds(entry?.average_cycle ?? 0, 2);
+    const latestText = formatSeconds(entry?.latest_cycle ?? 0, 2);
+
+    const meta = document.createElement('p');
+    meta.className = 'interval-issues__meta';
+    meta.textContent = `Interval ${intervalText} · ใช้จริง ${averageText}`;
+
+    const latest = document.createElement('p');
+    latest.className = 'interval-issues__latest';
+    latest.textContent = `รอบล่าสุด ${latestText}`;
+
+    li.append(meta, latest);
+    container.appendChild(li);
+  });
+}
+
+function updateProcessingAnalytics(analytics = {}) {
+  const processing = analytics?.processing || {};
+  const cycleStats = processing.per_cycle || {};
+  const roiStats = processing.per_roi || {};
+  const intervalHealth = analytics?.interval_health || {};
+
+  const cycleCount = cycleStats.count ?? 0;
+  const roiCount = roiStats.count ?? 0;
+
+  setElementText(
+    'processing-cycle-average',
+    cycleCount ? formatSeconds(cycleStats.average ?? 0, 2) : '-',
+  );
+  setElementText(
+    'processing-cycle-max',
+    cycleCount ? formatSeconds(cycleStats.max ?? 0, 2) : '-',
+  );
+  setElementText(
+    'processing-roi-average',
+    roiCount ? formatSeconds(roiStats.average ?? 0, 2) : '-',
+  );
+  setElementText(
+    'processing-roi-p95',
+    roiCount ? formatSeconds(roiStats.p95 ?? 0, 2) : '-',
+  );
+
+  const statusText = intervalHealth.status_text || 'รอข้อมูล';
+  const metaText = intervalHealth.meta || '-';
+  setElementText('processing-interval-status', statusText);
+  setElementText('processing-interval-meta', metaText);
+
+  renderIntervalIssues(intervalHealth.examples || []);
 }
 
 function getAlertAnalytics(alerts = []) {
@@ -783,15 +973,18 @@ async function loadDashboard() {
     }
     const data = await response.json();
     const alertAnalytics = getAlertAnalytics(data.alerts);
+    const analytics = data.analytics || {};
 
-    updateSummary(data.summary);
-    updateCameraInsights(data.cameras);
+    updateSummary(data.summary, analytics);
+    updateCameraInsights(data.cameras, analytics?.roi?.total);
     updateInsights(data.summary, data.cameras, data.alerts, alertAnalytics);
     updateCameraTable(data.cameras);
     updateAlerts(data.alerts);
     updateAlertSummary(data.alerts, alertAnalytics);
     updateGroupOverview(data.groups, data.cameras);
     updatePageOverview(data.page_jobs);
+    updateModuleSummary(analytics.modules, analytics.roi);
+    updateProcessingAnalytics(analytics);
     updateStreams(data.cameras);
     updateGeneratedAt(data.generated_at);
   } catch (error) {

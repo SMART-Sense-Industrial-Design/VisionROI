@@ -17,7 +17,8 @@ import os
 import re
 import sys
 import argparse
-from collections import defaultdict
+import math
+from collections import defaultdict, Counter
 from types import ModuleType
 from pathlib import Path
 import contextlib
@@ -601,6 +602,14 @@ def build_dashboard_payload() -> dict[str, Any]:
     online_count = 0
     intervals: list[float] = []
     fps_values: list[float] = []
+    roi_total_count = 0
+    module_counter: Counter[str] = Counter()
+    module_cameras: dict[str, set[str]] = defaultdict(set)
+    interval_map: dict[str, float | None] = {}
+    roi_duration_samples: list[float] = []
+    cycle_duration_samples: list[float] = []
+    cycle_duration_by_cam: dict[str, list[float]] = defaultdict(list)
+    cycle_group_map: dict[str, str] = {}
     now_epoch = time.time()
     notifications_snapshot = get_recent_notifications()
     alerts_last_hour = 0
@@ -618,6 +627,7 @@ def build_dashboard_payload() -> dict[str, Any]:
         roi_running = bool(roi_task and not roi_task.done())
         persisted_entry = persisted.get(cam_id, {})
         interval = _resolve_interval(cam_id, persisted)
+        interval_map[cam_id] = interval
         if interval:
             intervals.append(interval)
             if interval > 0:
@@ -680,6 +690,17 @@ def build_dashboard_payload() -> dict[str, Any]:
             else None,
         }
         cameras.append(camera_entry)
+        roi_total_count += camera_entry["roi_count"]
+
+        rois_for_cam = inference_rois.get(cam_id, [])
+        for roi_def in rois_for_cam:
+            module_name_raw = roi_def.get("module") or "ไม่ระบุ"
+            module_name = str(module_name_raw)
+            module_counter[module_name] += 1
+            module_cameras[module_name].add(cam_id)
+
+        if active_group:
+            cycle_group_map.setdefault(cam_id, active_group)
 
         group_key = active_group or "ไม่ระบุกลุ่ม"
         group_entry = group_accumulator.setdefault(
@@ -725,6 +746,76 @@ def build_dashboard_payload() -> dict[str, Any]:
                 }
             )
 
+    for notif in notifications_snapshot:
+        results = notif.get("results") or []
+        cycle_total = 0.0
+        has_duration = False
+        for res in results:
+            duration_val = res.get("duration")
+            if isinstance(duration_val, (int, float)):
+                duration = max(0.0, float(duration_val))
+                roi_duration_samples.append(duration)
+                cycle_total += duration
+                has_duration = True
+        if has_duration and cycle_total > 0:
+            cycle_duration_samples.append(cycle_total)
+            cam_key = notif.get("cam_id")
+            if cam_key:
+                cycle_duration_by_cam[cam_key].append(cycle_total)
+                group_name = notif.get("group")
+                if group_name:
+                    cycle_group_map[cam_key] = str(group_name)
+
+    def _compute_stats(values: list[float]) -> dict[str, float | int]:
+        if not values:
+            return {
+                "count": 0,
+                "average": 0.0,
+                "p95": 0.0,
+                "max": 0.0,
+                "latest": 0.0,
+            }
+        ordered = sorted(values)
+        count = len(ordered)
+        average_value = sum(ordered) / count
+        max_value = ordered[-1]
+        p95_index = max(0, math.ceil(0.95 * count) - 1)
+        p95_value = ordered[p95_index]
+        latest_value = values[-1]
+        return {
+            "count": count,
+            "average": average_value,
+            "p95": p95_value,
+            "max": max_value,
+            "latest": latest_value,
+        }
+
+    roi_stats = _compute_stats(roi_duration_samples)
+    cycle_stats = _compute_stats(cycle_duration_samples)
+
+    interval_assessment: list[dict[str, Any]] = []
+    for cam_id, durations in cycle_duration_by_cam.items():
+        if not durations:
+            continue
+        interval_value = interval_map.get(cam_id)
+        if interval_value is None:
+            continue
+        avg_cycle = sum(durations) / len(durations)
+        latest_cycle = durations[-1]
+        diff = avg_cycle - interval_value
+        status = "on_time" if avg_cycle <= interval_value else "delayed"
+        interval_assessment.append(
+            {
+                "cam_id": cam_id,
+                "group": cycle_group_map.get(cam_id, ""),
+                "interval": interval_value,
+                "average_cycle": avg_cycle,
+                "latest_cycle": latest_cycle,
+                "difference": diff,
+                "status": status,
+            }
+        )
+
     average_interval = sum(intervals) / len(intervals) if intervals else 0.0
     average_fps = sum(fps_values) / len(fps_values) if fps_values else 0.0
     recent_alerts = notifications_snapshot[-20:]
@@ -744,6 +835,71 @@ def build_dashboard_payload() -> dict[str, Any]:
         )
 
     page_jobs_running = sum(1 for job in page_jobs if job.get("inference_running"))
+
+    module_summary = [
+        {
+            "name": name,
+            "roi": count,
+            "cameras": len(module_cameras.get(name, set())),
+            "share": (count / roi_total_count * 100.0) if roi_total_count else 0.0,
+        }
+        for name, count in module_counter.most_common()
+    ]
+
+    on_schedule = sum(1 for item in interval_assessment if item.get("status") == "on_time")
+    delayed = sum(1 for item in interval_assessment if item.get("status") == "delayed")
+    if not interval_assessment:
+        interval_status_text = "รอข้อมูลการประมวลผล"
+        interval_status_meta = "ระบบยังไม่มีตัวอย่างเวลาประมวลผล"
+    elif delayed:
+        interval_status_text = "ช้ากว่ากำหนด"
+        interval_status_meta = f"{delayed} กล้องใช้เวลานานกว่า interval ที่ตั้งไว้"
+    else:
+        interval_status_text = "ทันตามกำหนด"
+        interval_status_meta = "ทุกกล้องใช้เวลาน้อยกว่า interval ที่ตั้งไว้"
+
+    lagging_examples = sorted(
+        (item for item in interval_assessment if item.get("status") == "delayed"),
+        key=lambda item: item.get("difference", 0.0),
+        reverse=True,
+    )[:3]
+
+    interval_examples = [
+        {
+            "cam_id": item.get("cam_id"),
+            "group": item.get("group"),
+            "interval": item.get("interval"),
+            "average_cycle": item.get("average_cycle"),
+            "latest_cycle": item.get("latest_cycle"),
+        }
+        for item in lagging_examples
+    ]
+
+    interval_health = {
+        "total_tracked": len(interval_assessment),
+        "on_schedule": on_schedule,
+        "delayed": delayed,
+        "status_text": interval_status_text,
+        "meta": interval_status_meta,
+        "examples": interval_examples,
+        "average_interval": average_interval,
+        "average_cycle": cycle_stats["average"],
+        "latest_cycle": cycle_stats["latest"],
+    }
+
+    analytics = {
+        "roi": {
+            "total": roi_total_count,
+            "average_per_camera": (roi_total_count / len(known_ids)) if known_ids else 0.0,
+        },
+        "modules": module_summary,
+        "processing": {
+            "per_roi": roi_stats,
+            "per_cycle": cycle_stats,
+        },
+        "interval_health": interval_health,
+    }
+
     summary = {
         "total_cameras": len(known_ids),
         "online_cameras": online_count,
@@ -755,6 +911,8 @@ def build_dashboard_payload() -> dict[str, Any]:
         "running_groups": running_groups,
         "page_jobs": len(page_jobs),
         "page_jobs_running": page_jobs_running,
+        "total_roi": roi_total_count,
+        "module_types": len(module_summary),
     }
     return {
         "summary": summary,
@@ -768,6 +926,7 @@ def build_dashboard_payload() -> dict[str, Any]:
                 job.get("cam_id") or "",
             ),
         ),
+        "analytics": analytics,
         "generated_at": datetime.utcnow().isoformat() + "Z",
     }
 
