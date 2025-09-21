@@ -697,6 +697,18 @@ def build_dashboard_payload() -> dict[str, Any]:
         else:
             width = height = None
 
+        rois_for_cam_all = inference_rois.get(cam_id, [])
+        active_roi_defs: list[dict[str, Any]] = []
+        for roi_def in rois_for_cam_all:
+            if not isinstance(roi_def, dict):
+                continue
+            roi_type_raw = str(roi_def.get("type") or "").strip().lower()
+            if roi_type_raw == "page":
+                roi_type_counter["page"] += 1
+                continue
+            roi_type_counter["roi"] += 1
+            active_roi_defs.append(roi_def)
+
         camera_entry = {
             "cam_id": cam_id,
             "source": camera_sources.get(cam_id, persisted_entry.get("source", "")),
@@ -709,7 +721,7 @@ def build_dashboard_payload() -> dict[str, Any]:
             "last_output": last_result,
             "last_activity": last_activity_iso,
             "alerts_count": alerts_count,
-            "roi_count": len(inference_rois.get(cam_id, [])),
+            "roi_count": len(active_roi_defs),
             "inference_running": inference_running,
             "roi_running": roi_running,
             "is_online": is_online,
@@ -722,16 +734,11 @@ def build_dashboard_payload() -> dict[str, Any]:
         cameras.append(camera_entry)
         roi_total_count += camera_entry["roi_count"]
 
-        rois_for_cam = inference_rois.get(cam_id, [])
-        for roi_def in rois_for_cam:
+        for roi_def in active_roi_defs:
             module_name_raw = roi_def.get("module") or "ไม่ระบุ"
             module_name = str(module_name_raw)
             module_counter[module_name] += 1
             module_cameras[module_name].add(cam_id)
-
-            roi_type_raw = str(roi_def.get("type") or "").strip().lower()
-            roi_type = "page" if roi_type_raw == "page" else "roi"
-            roi_type_counter[roi_type] += 1
 
         if active_group:
             cycle_group_map.setdefault(cam_id, active_group)

@@ -46,14 +46,9 @@
       <p class="summary-stat__meta">จากกล้องทั้งหมด</p>
     </div>
     <div class="summary-stat">
-      <p class="summary-stat__label">ROI แบบโซน</p>
-      <p class="summary-stat__value" id="summary-roi-zones">0</p>
-      <p class="summary-stat__meta">โซนสำหรับกล้องสด</p>
-    </div>
-    <div class="summary-stat">
-      <p class="summary-stat__label">Page Templates</p>
-      <p class="summary-stat__value" id="summary-page-templates">0</p>
-      <p class="summary-stat__meta">ใช้ OCR แบบเอกสาร</p>
+      <p class="summary-stat__label">ROI สำหรับ Inference</p>
+      <p class="summary-stat__value" id="summary-roi-inference">0</p>
+      <p class="summary-stat__meta">นับเฉพาะ ROI ที่มี type = 'roi'</p>
     </div>
     <div class="summary-stat">
       <p class="summary-stat__label">ความหนาแน่นแจ้งเตือน</p>
@@ -129,41 +124,19 @@
         <span class="insight-card__icon bg-success-subtle text-success"><i class="bi bi-activity"></i></span>
         <div>
           <h3 class="insight-card__title">ภาพรวม ROI</h3>
-          <p class="insight-card__subtitle">ดูจำนวนโซนกับเทมเพลตเอกสารที่ระบบกำลังใช้</p>
+          <p class="insight-card__subtitle">ดูจำนวน ROI ที่ระบบใช้สำหรับงาน Inference</p>
         </div>
       </div>
       <div class="insight-card__body">
-        <p class="insight-card__value"><span id="insight-roi-total">0</span> ROI</p>
+        <p class="insight-card__value"><span id="insight-roi-total">0</span> ROI สำหรับ Inference</p>
+        <p class="insight-card__meta">ข้อมูลนี้นับเฉพาะ ROI ที่ตั้งค่า type = 'roi'</p>
         <div class="insight-distribution">
           <div class="insight-distribution__item">
             <div class="insight-distribution__top">
-              <span>ROI โซน</span>
-              <span id="insight-roi-zones">0</span>
+              <span>ROI ที่ใช้งาน</span>
+              <span id="insight-roi-active">0</span>
             </div>
-            <div class="insight-card__progress">
-              <div class="insight-card__progress-track">
-                <div class="insight-card__progress-fill" id="progress-roi-zone"></div>
-              </div>
-              <div class="insight-card__progress-meta">
-                <span>สัดส่วน</span>
-                <span id="insight-roi-zone-share">0%</span>
-              </div>
-            </div>
-          </div>
-          <div class="insight-distribution__item">
-            <div class="insight-distribution__top">
-              <span>Page Templates</span>
-              <span id="insight-roi-pages">0</span>
-            </div>
-            <div class="insight-card__progress">
-              <div class="insight-card__progress-track">
-                <div class="insight-card__progress-fill insight-card__progress-fill--warm" id="progress-roi-page"></div>
-              </div>
-              <div class="insight-card__progress-meta">
-                <span>สัดส่วน</span>
-                <span id="insight-roi-page-share">0%</span>
-              </div>
-            </div>
+            <p class="insight-card__meta">Page Template จะไม่ถูกนับรวม</p>
           </div>
         </div>
       </div>

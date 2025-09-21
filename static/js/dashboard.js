@@ -85,15 +85,13 @@ function updateSummary(summary = {}, analytics = null) {
   const totalRoi = summary.total_roi ?? 0;
   const moduleTypes = summary.module_types ?? 0;
   const roiBreakdown = summary.roi_breakdown || {};
-  const roiZones = roiBreakdown.roi ?? 0;
-  const pageTemplates = roiBreakdown.page ?? 0;
+  const roiActive = Number(roiBreakdown.roi ?? summary.total_roi ?? 0);
 
   if (summary.total_roi !== undefined) {
     setElementText('metric-total-roi-chip', totalRoi);
   }
 
-  setElementText('summary-roi-zones', roiZones);
-  setElementText('summary-page-templates', pageTemplates);
+  setElementText('summary-roi-inference', roiActive);
 
   const onlineRate = total ? (online / total) * 100 : 0;
   const alertDensity = total ? alerts / Math.max(total, 1) : 0;
@@ -391,20 +389,11 @@ function updateInsights(summary = {}, cameras = [], alerts = [], analytics = nul
   const running = summary.inference_running ?? 0;
   const alertsLastHour = summary.alerts_last_hour ?? 0;
   const roiBreakdown = summary.roi_breakdown || {};
-  const roiZones = Number(roiBreakdown.roi ?? 0);
-  const pageTemplates = Number(roiBreakdown.page ?? 0);
-  const totalRoi = Number(summary.total_roi ?? roiZones + pageTemplates);
-  const zoneShare = totalRoi ? (roiZones / totalRoi) * 100 : 0;
-  const pageShare = totalRoi ? (pageTemplates / totalRoi) * 100 : 0;
+  const roiActive = Number(roiBreakdown.roi ?? summary.total_roi ?? 0);
+  const totalRoi = Number(summary.total_roi ?? roiActive);
 
   setElementText('insight-roi-total', totalRoi);
-  setElementText('insight-roi-zones', roiZones);
-  setElementText('insight-roi-zone-share', `${zoneShare.toFixed(0)}%`);
-  setProgress('progress-roi-zone', zoneShare);
-
-  setElementText('insight-roi-pages', pageTemplates);
-  setElementText('insight-roi-page-share', `${pageShare.toFixed(0)}%`);
-  setProgress('progress-roi-page', pageShare);
+  setElementText('insight-roi-active', roiActive);
 
   const runningRate = total ? (running / Math.max(total, 1)) * 100 : 0;
 
