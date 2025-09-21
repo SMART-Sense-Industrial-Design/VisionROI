@@ -48,6 +48,34 @@ function setProgress(id, value) {
   el.style.width = `${percent}%`;
 }
 
+function formatResolution(value) {
+  if (!value) {
+    return '-';
+  }
+  let width;
+  let height;
+  if (typeof value === 'string') {
+    return value;
+  }
+  if (Array.isArray(value)) {
+    [width, height] = value;
+  } else if (typeof value === 'object') {
+    ({ width, height } = value);
+  }
+  const w = Number(width);
+  const h = Number(height);
+  if (Number.isFinite(w) && Number.isFinite(h) && w > 0 && h > 0) {
+    return `${w}×${h}`;
+  }
+  if (Number.isFinite(w) && w > 0) {
+    return `${w}`;
+  }
+  if (Number.isFinite(h) && h > 0) {
+    return `${h}`;
+  }
+  return '-';
+}
+
 function updateSummary(summary = {}) {
   setMetric('metric-total', summary.total_cameras ?? 0);
   setMetric('metric-online', summary.online_cameras ?? 0);
@@ -55,11 +83,15 @@ function updateSummary(summary = {}) {
   setMetric('metric-alerts', summary.alerts_last_hour ?? 0);
   setMetric('metric-interval', summary.average_interval ?? 0, 2);
   setMetric('metric-fps', summary.average_fps ?? 0, 2);
+  setMetric('metric-groups', summary.total_groups ?? 0);
+  setMetric('metric-pages', summary.page_jobs ?? 0);
 
   const total = summary.total_cameras ?? 0;
   const online = summary.online_cameras ?? 0;
   const running = summary.inference_running ?? 0;
   const alerts = summary.alerts_last_hour ?? 0;
+  const runningGroups = summary.running_groups ?? 0;
+  const pageJobsRunning = summary.page_jobs_running ?? 0;
 
   const offline = Math.max(total - online, 0);
   const onlineRate = total ? (online / total) * 100 : 0;
@@ -72,7 +104,10 @@ function updateSummary(summary = {}) {
   setElementText('metric-online-rate-meta', `${onlineRate.toFixed(0)}%`);
   setElementText('metric-running-ratio', `${runningRate.toFixed(0)}%`);
   setElementText('metric-alert-density', alertDensity.toFixed(2));
-  setElementText('chip-running', running);
+  setElementText('metric-groups-running', runningGroups);
+  setElementText('metric-pages-running', pageJobsRunning);
+  setElementText('chip-group-running', runningGroups);
+  setElementText('chip-page-running', pageJobsRunning);
 }
 
 function calculateCameraInsights(cameras = []) {
@@ -295,21 +330,8 @@ function updateAlertSummary(alerts = [], analytics = null) {
   });
 }
 
-function updateGroupOverview(cameras = []) {
-  const container = document.getElementById('group-overview');
-  if (!container) return;
-  container.innerHTML = '';
-
-  if (!cameras.length) {
-    const empty = document.createElement('div');
-    empty.className = 'group-overview__empty';
-    empty.textContent = 'ยังไม่มีกลุ่มที่สร้างไว้';
-    container.appendChild(empty);
-    return;
-  }
-
+function aggregateGroupsFromCameras(cameras = []) {
   const groups = new Map();
-
   cameras.forEach((camera) => {
     const key = camera?.group || 'ไม่ระบุกลุ่ม';
     const entry = groups.get(key) || {
@@ -320,6 +342,7 @@ function updateGroupOverview(cameras = []) {
       roi: 0,
       fpsTotal: 0,
       fpsCount: 0,
+      alerts: 0,
     };
 
     entry.cameras += 1;
@@ -343,10 +366,64 @@ function updateGroupOverview(cameras = []) {
       entry.fpsCount += 1;
     }
 
+    const alertsCount = Number(camera?.alerts_count);
+    if (Number.isFinite(alertsCount)) {
+      entry.alerts += alertsCount;
+    }
+
     groups.set(key, entry);
   });
 
-  const sorted = [...groups.values()].sort((a, b) => {
+  return [...groups.values()].map((group) => {
+    const averageFps = group.fpsCount ? group.fpsTotal / group.fpsCount : 0;
+    return {
+      name: group.name,
+      cameras: group.cameras,
+      running: group.running,
+      online: group.online,
+      roi: group.roi,
+      average_fps: averageFps,
+      alerts: group.alerts,
+    };
+  });
+}
+
+function normalizeGroupEntry(group) {
+  const cameras = Number(group?.cameras ?? group?.total ?? 0);
+  const running = Number(group?.running ?? 0);
+  const online = Number(group?.online ?? 0);
+  const roi = Number(group?.roi ?? group?.roi_total ?? 0);
+  const averageFps = Number(group?.average_fps ?? group?.avg_fps ?? 0);
+  const alerts = Number(group?.alerts ?? 0);
+  return {
+    name: group?.name || group?.group || 'ไม่ระบุกลุ่ม',
+    cameras: Number.isFinite(cameras) ? cameras : 0,
+    running: Number.isFinite(running) ? running : 0,
+    online: Number.isFinite(online) ? online : 0,
+    roi: Number.isFinite(roi) ? roi : 0,
+    averageFps: Number.isFinite(averageFps) ? averageFps : 0,
+    alerts: Number.isFinite(alerts) ? alerts : 0,
+  };
+}
+
+function updateGroupOverview(groups = [], cameras = []) {
+  const container = document.getElementById('group-overview');
+  if (!container) return;
+  container.innerHTML = '';
+
+  const dataset = Array.isArray(groups) && groups.length
+    ? groups.map(normalizeGroupEntry)
+    : aggregateGroupsFromCameras(cameras);
+
+  if (!dataset.length) {
+    const empty = document.createElement('div');
+    empty.className = 'group-overview__empty';
+    empty.textContent = 'ยังไม่มีกลุ่มที่สร้างไว้';
+    container.appendChild(empty);
+    return;
+  }
+
+  const sorted = dataset.sort((a, b) => {
     if (b.running !== a.running) {
       return b.running - a.running;
     }
@@ -355,7 +432,6 @@ function updateGroupOverview(cameras = []) {
 
   sorted.forEach((group) => {
     const runningRate = group.cameras ? (group.running / group.cameras) * 100 : 0;
-    const averageFps = group.fpsCount ? group.fpsTotal / group.fpsCount : 0;
 
     const card = document.createElement('article');
     card.className = 'group-card';
@@ -375,7 +451,8 @@ function updateGroupOverview(cameras = []) {
 
     const meta = document.createElement('p');
     meta.className = 'group-card__meta';
-    meta.textContent = `FPS เฉลี่ย ${averageFps.toFixed(1)} · ROI ${group.roi}`;
+    const roiText = Number.isFinite(group.roi) ? group.roi : 0;
+    meta.textContent = `FPS เฉลี่ย ${group.averageFps.toFixed(1)} · ROI ${roiText} · แจ้งเตือน ${group.alerts}`;
 
     const progressTrack = document.createElement('div');
     progressTrack.className = 'group-card__progress-track';
@@ -394,10 +471,105 @@ function updateGroupOverview(cameras = []) {
     footer.innerHTML = `
       <span><i class="bi bi-wifi"></i>ออนไลน์ ${group.online}</span>
       <span><i class="bi bi-camera-video"></i> ${group.cameras} กล้อง</span>
+      <span><i class="bi bi-bell"></i> ${group.alerts}</span>
     `;
 
     card.append(header, meta, progressTrack, progressMeta, footer);
     container.appendChild(card);
+  });
+}
+
+function renderPageCard(job) {
+  const card = document.createElement('article');
+  card.className = 'page-card';
+
+  const header = document.createElement('div');
+  header.className = 'page-card__header';
+
+  const titleWrap = document.createElement('div');
+  titleWrap.className = 'page-card__titles';
+
+  const title = document.createElement('p');
+  title.className = 'page-card__title';
+  title.textContent = job.title || job.cam_id || 'งาน Page';
+
+  const subtitle = document.createElement('p');
+  subtitle.className = 'page-card__subtitle';
+  const groupText = job.group ? `กลุ่ม ${job.group}` : 'ไม่มีกลุ่ม';
+  subtitle.textContent = `${groupText} · ${job.cam_id || '-'}`;
+
+  titleWrap.append(title, subtitle);
+
+  const badge = document.createElement('span');
+  const isRunning = Boolean(job.inference_running);
+  badge.className = `page-card__badge ${isRunning ? 'page-card__badge--running' : 'page-card__badge--idle'}`;
+  badge.textContent = isRunning ? 'กำลังรัน' : (job.status || 'พร้อม');
+
+  header.append(titleWrap, badge);
+
+  const metrics = document.createElement('div');
+  metrics.className = 'page-card__metrics';
+
+  const interval = Number(job.interval);
+  const fps = Number(job.fps);
+  const alerts = Number(job.alerts_count ?? 0);
+
+  const metricData = [
+    { label: 'Interval', value: Number.isFinite(interval) ? `${interval.toFixed(2)}s` : '-' },
+    { label: 'FPS', value: Number.isFinite(fps) ? fps.toFixed(2) : '-' },
+    { label: 'แจ้งเตือน', value: alerts },
+  ];
+
+  metricData.forEach((item) => {
+    const metric = document.createElement('div');
+    metric.className = 'page-card__metric';
+    const label = document.createElement('span');
+    label.className = 'page-card__metric-label';
+    label.textContent = item.label;
+    const value = document.createElement('span');
+    value.className = 'page-card__metric-value';
+    value.textContent = item.value ?? '-';
+    metric.append(label, value);
+    metrics.appendChild(metric);
+  });
+
+  const output = document.createElement('div');
+  output.className = 'page-card__output';
+  const outputLabel = document.createElement('span');
+  outputLabel.className = 'page-card__output-label';
+  outputLabel.textContent = 'ผลล่าสุด';
+  const outputValue = document.createElement('span');
+  outputValue.className = 'page-card__output-value';
+  outputValue.textContent = job.last_output || '-';
+  outputValue.title = job.last_output || '';
+  output.append(outputLabel, outputValue);
+
+  const footer = document.createElement('div');
+  footer.className = 'page-card__footer';
+  footer.innerHTML = `
+    <span><i class="bi bi-clock-history"></i> ${formatDateTime(job.last_activity)}</span>
+    <span><i class="bi bi-bell"></i> ${alerts} ครั้ง</span>
+  `;
+
+  card.append(header, metrics, output, footer);
+  return card;
+}
+
+function updatePageOverview(pageJobs = []) {
+  const container = document.getElementById('page-overview');
+  if (!container) return;
+  container.innerHTML = '';
+
+  if (!Array.isArray(pageJobs) || !pageJobs.length) {
+    const empty = document.createElement('div');
+    empty.className = 'page-overview__empty';
+    empty.textContent = 'ยังไม่มีงาน Page Inference';
+    container.appendChild(empty);
+    return;
+  }
+
+  pageJobs.forEach((job) => {
+    container.appendChild(renderPageCard(job));
   });
 }
 
@@ -423,6 +595,9 @@ function createCameraRow(camera) {
   camSource.className = 'text-muted small';
   camSource.textContent = camera.source || '-';
   secondCell.append(camName, camSource);
+
+  const resolutionCell = document.createElement('td');
+  resolutionCell.textContent = formatResolution(camera.resolution);
 
   const statusCell = document.createElement('td');
   const statusBadge = document.createElement('span');
@@ -463,6 +638,7 @@ function createCameraRow(camera) {
   tr.append(
     firstCell,
     secondCell,
+    resolutionCell,
     statusCell,
     groupCell,
     intervalCell,
@@ -481,7 +657,7 @@ function updateCameraTable(cameras = []) {
   tbody.innerHTML = '';
   if (!cameras.length) {
     const emptyRow = document.createElement('tr');
-    emptyRow.innerHTML = '<td colspan="9" class="text-center text-muted py-4">ไม่มีข้อมูลกล้อง</td>';
+    emptyRow.innerHTML = '<td colspan="10" class="text-center text-muted py-4">ไม่มีข้อมูลกล้อง</td>';
     tbody.appendChild(emptyRow);
     return;
   }
@@ -614,7 +790,8 @@ async function loadDashboard() {
     updateCameraTable(data.cameras);
     updateAlerts(data.alerts);
     updateAlertSummary(data.alerts, alertAnalytics);
-    updateGroupOverview(data.cameras);
+    updateGroupOverview(data.groups, data.cameras);
+    updatePageOverview(data.page_jobs);
     updateStreams(data.cameras);
     updateGeneratedAt(data.generated_at);
   } catch (error) {
