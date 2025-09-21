@@ -61,7 +61,6 @@
         title: providedTitle,
         defaultSource: providedSource,
         defaultInterval,
-        defaultGroup,
       } = options || {};
       const cam = typeof camIdOverride === 'string' && camIdOverride.length > 0
         ? camIdOverride
@@ -75,17 +74,20 @@
       const titleEl = getEl('title');
       const labelEl = getEl('label');
       const sourceSelect = getEl('sourceSelect');
-      const groupSelect = getEl('groupSelect');
       const roiGrid = getEl('rois');
       const logBody = getEl('logBody');
       const logRoiSelect = getEl('logRoiSelect');
       const intervalInput = getEl('intervalInput');
       const pageNameEl = getEl('pageName');
       const scoreTableBody = getEl('pageScoresBody');
+      const scoreTableWrapper = getEl('pageScoresWrapper');
+      const scoreEmptyEl = getEl('pageScoresEmpty');
       let logTimer;
       let isLogUpdating = false;
       let logSessionId = 0;
       let currentLogSource;
+      let roiGroupIndex = new Map();
+      let activeGroupName = '';
       const baseTitle = typeof providedTitle === 'string' && providedTitle.length > 0
         ? providedTitle
         : 'งาน Inference';
@@ -104,23 +106,6 @@
       } else {
         intervalInput.value = '1';
       }
-      const normalizedDefaultGroup = typeof defaultGroup === 'string' ? defaultGroup : '';
-      const groupStorageKey = `${cellId}-group`;
-      const getStoredGroup = () => {
-        const stored = localStorage.getItem(groupStorageKey);
-        if (stored !== null) {
-          return stored;
-        }
-        return normalizedDefaultGroup;
-      };
-      const storeGroupSelection = value => {
-        if (value) {
-          localStorage.setItem(groupStorageKey, value);
-        } else {
-          localStorage.removeItem(groupStorageKey);
-        }
-      };
-      let lastActiveGroup = getStoredGroup();
 
       const formatTs = ts => {
         if (!ts) return '';
@@ -140,13 +125,82 @@
         return `${(seconds * 1000).toFixed(2)} ms`;
       };
 
+      const normalizeGroupName = value => (typeof value === 'string' ? value.trim() : '');
+      const getRoiGroupName = roi => normalizeGroupName(roi?.group ?? roi?.page ?? '');
+      const ensureArray = value => (Array.isArray(value) ? value : []);
+
+      function rebuildRoiGroupIndex(list) {
+        roiGroupIndex = new Map();
+        ensureArray(list).forEach(entry => {
+          if (!isRoiType(entry)) {
+            return;
+          }
+          const groupName = getRoiGroupName(entry);
+          if (!groupName) {
+            return;
+          }
+          if (!roiGroupIndex.has(groupName)) {
+            roiGroupIndex.set(groupName, []);
+          }
+          roiGroupIndex.get(groupName).push(entry);
+        });
+      }
+
+      function setActiveGroup(groupName) {
+        const normalized = normalizeGroupName(groupName);
+        if (normalized === activeGroupName) {
+          return;
+        }
+        activeGroupName = normalized;
+        roiGrid.innerHTML = '';
+        rois = [];
+        if (!normalized) {
+          updateLogRoiOptions([]);
+          return;
+        }
+        const list = roiGroupIndex.get(normalized) || [];
+        rois = list;
+        list.forEach(r => {
+          if (r && r.id !== undefined && r.id !== null) {
+            ensureRoiItem(r.id);
+            updateRoiModuleLabel(r.id);
+          }
+        });
+        updateLogRoiOptions(list);
+      }
+
+      const renderScoreboard = (scores = []) => {
+        if (!scoreTableBody) {
+          return;
+        }
+        scoreTableBody.innerHTML = '';
+        const list = Array.isArray(scores) ? scores : [];
+        list.forEach(item => {
+          const tr = document.createElement('tr');
+          const tdPage = document.createElement('td');
+          tdPage.textContent = item?.page ?? '';
+          const tdScore = document.createElement('td');
+          const scoreValue = typeof item?.score === 'number' ? item.score : null;
+          tdScore.textContent = scoreValue !== null ? scoreValue.toFixed(2) : '';
+          tr.appendChild(tdPage);
+          tr.appendChild(tdScore);
+          scoreTableBody.appendChild(tr);
+        });
+        const hasScores = list.length > 0;
+        if (scoreTableWrapper) {
+          scoreTableWrapper.classList.toggle('d-none', !hasScores);
+        }
+        if (scoreEmptyEl) {
+          scoreEmptyEl.classList.toggle('d-none', hasScores);
+        }
+      };
+
       const resetScoreboard = () => {
         if (pageNameEl) {
-          pageNameEl.textContent = '';
+          pageNameEl.textContent = '-';
         }
-        if (scoreTableBody) {
-          scoreTableBody.innerHTML = '';
-        }
+        renderScoreboard([]);
+        setActiveGroup('');
       };
       resetScoreboard();
 
@@ -167,7 +221,6 @@
 
       startButton.onclick = () => { startInference(); };
       stopButton.onclick = () => { stopInference(); };
-      groupSelect.onchange = () => { switchGroup(); };
       logRoiSelect.onchange = () => {
         if (currentLogSource) {
           startLogUpdates(currentLogSource);
@@ -258,9 +311,15 @@
       }
 
       function ensureRoiItem(id) {
+        if (!activeGroupName) {
+          return;
+        }
         if (document.getElementById(`${cellId}-roi-${id}`)) return;
         const r = findRoiDataById(id) || { id };
         if (!isRoiType(r)) {
+          return;
+        }
+        if (getRoiGroupName(r) !== activeGroupName) {
           return;
         }
         const item = document.createElement('div');
@@ -425,47 +484,7 @@
         });
       }
 
-      function loadGroupOptions(list, selected) {
-        groupSelect.innerHTML = '';
-        const optSelect = document.createElement('option');
-        optSelect.value = '';
-        optSelect.textContent = '-- Select --';
-        groupSelect.appendChild(optSelect);
-        const optAll = document.createElement('option');
-        optAll.value = 'all';
-        optAll.textContent = 'All';
-        groupSelect.appendChild(optAll);
-        const groups = Array.from(
-          new Set(
-            list
-              .filter(r => (r.type ?? 'roi') === 'roi')
-              .map(r => r.group ?? r.page ?? r.name)
-              .filter(p => p)
-          ),
-        );
-        groups.forEach(p => {
-          const opt = document.createElement('option');
-          opt.value = p;
-          opt.textContent = p;
-          groupSelect.appendChild(opt);
-        });
-        const stored = getStoredGroup();
-        const hasSelected = typeof selected === 'string' && selected.length > 0;
-        const requested = hasSelected ? selected : stored;
-        const validGroups = new Set(groups);
-        const currentSelection = (requested === 'all' || validGroups.has(requested)) ? requested : '';
-        groupSelect.value = currentSelection;
-        storeGroupSelection(currentSelection);
-        const roiForLog = currentSelection
-          ? currentSelection === 'all'
-            ? list
-            : list.filter(r => (r.group ?? r.page ?? r.name) === currentSelection)
-          : [];
-        updateLogRoiOptions(roiForLog);
-        return currentSelection;
-      }
-
-      async function startInference(roisOverride = null, selectedGroup = '') {
+      async function startInference(roisOverride = null) {
         if (running) return;
         running = true;
         startButton.disabled = true;
@@ -492,35 +511,12 @@
         const res = await fetchWithStatus(`/load_roi_file?path=${encodeURIComponent(roiPath)}`);
         const data = await res.json();
         statusEl.innerText = '';
-        allRois = data.rois || [];
-        const roiList = allRois.filter(r => (r.type ?? 'roi') === 'roi');
-        const fallbackGroup = lastActiveGroup || '';
-        const selectedGroupName = typeof selectedGroup === 'string' && selectedGroup.length > 0
-          ? selectedGroup
-          : fallbackGroup;
-        if (!selectedGroupName) {
-          storeGroupSelection('');
-        }
-        const activeGroup = loadGroupOptions(roiList, selectedGroupName);
-        const groupToUse = selectedGroupName || activeGroup;
-        const requestGroup = groupToUse || null;
-        if (Array.isArray(roisOverride)) {
-          rois = roisOverride;
-        } else if (groupToUse === 'all') {
-          rois = roiList;
-        } else if (groupToUse) {
-          rois = roiList.filter(r => (r.group ?? r.page ?? r.name) === groupToUse);
-        } else {
-          rois = [];
-        }
-        roiGrid.innerHTML = '';
+        const roiEntries = Array.isArray(data.rois) ? data.rois : [];
+        allRois = roiEntries;
+        rebuildRoiGroupIndex(roiEntries);
         resetScoreboard();
-        rois.forEach(r => {
-          if (r && r.id !== undefined && r.id !== null) {
-            ensureRoiItem(r.id);
-            updateRoiModuleLabel(r.id);
-          }
-        });
+        const payloadRois = roiEntries;
+        const hasAnyRoiEntry = roiEntries.length > 0;
 
         let startData;
         let startRes;
@@ -531,10 +527,9 @@
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({
               ...camCfg,
-              rois,
-              group: requestGroup,
+              rois: payloadRois,
               interval,
-              draw_page_boxes: false
+              draw_page_boxes: true
             })
           });
           startData = await startRes.json().catch(() => ({}));
@@ -557,9 +552,8 @@
           return;
         }
         statusEl.innerText = 'สำเร็จ';
-        lastActiveGroup = groupToUse || '';
         openSocket();
-        if (rois.length > 0) {
+        if (hasAnyRoiEntry) {
           openRoiSocket();
           showAlert('Inference started', 'success');
         } else {
@@ -608,12 +602,12 @@
         allRois = [];
         roiGrid.innerHTML = '';
         resetScoreboard();
+        roiGroupIndex = new Map();
+        activeGroupName = '';
         statusEl.innerText = 'Stopped';
         startButton.innerText = 'Resume';
         startButton.disabled = false;
         stopButton.disabled = true;
-        groupSelect.value = '';
-        storeGroupSelection('');
         updateLogRoiOptions([]);
         if (!silent) {
           showAlert('Inference stopped', 'info');
@@ -652,24 +646,7 @@
             const data = JSON.parse(event.data);
             if ('group' in data || Array.isArray(data.scores)) {
               setTimeout(() => {
-                if (pageNameEl) {
-                  pageNameEl.textContent = data.group || '';
-                }
-                if (scoreTableBody) {
-                  scoreTableBody.innerHTML = '';
-                  const scores = Array.isArray(data.scores) ? data.scores : [];
-                  scores.forEach(item => {
-                    const tr = document.createElement('tr');
-                    const tdPage = document.createElement('td');
-                    tdPage.textContent = item?.page ?? '';
-                    const tdScore = document.createElement('td');
-                    const scoreValue = typeof item?.score === 'number' ? item.score : null;
-                    tdScore.textContent = scoreValue !== null ? scoreValue.toFixed(2) : '';
-                    tr.appendChild(tdPage);
-                    tr.appendChild(tdScore);
-                    scoreTableBody.appendChild(tr);
-                  });
-                }
+                handlePageSummaryUpdate(data.group, data.scores);
               }, 0);
             }
             if (Array.isArray(data.results)) {
@@ -703,29 +680,18 @@
           }
           const roiRes = await fetchWithStatus(`/load_roi_file?path=${encodeURIComponent(roiPath)}`);
           const roiData = await roiRes.json();
-          allRois = roiData.rois || [];
-          const roiList = allRois.filter(r => (r.type ?? 'roi') === 'roi');
-          const activeGroup = loadGroupOptions(roiList);
-          const groupToUse = activeGroup || '';
-          if (groupToUse === 'all') {
-            rois = roiList;
-          } else if (groupToUse) {
-            rois = roiList.filter(r => (r.group ?? r.page ?? r.name) === groupToUse);
-          } else {
-            rois = [];
-          }
-          roiGrid.innerHTML = '';
-          rois.forEach(r => {
-            if (r && r.id !== undefined && r.id !== null) {
-              ensureRoiItem(r.id);
-              updateRoiModuleLabel(r.id);
-            }
-          });
+          const roiEntries = Array.isArray(roiData.rois) ? roiData.rois : [];
+          allRois = roiEntries;
+          rebuildRoiGroupIndex(roiEntries);
+          resetScoreboard();
+          const hasAnyRoiEntry = roiEntries.length > 0;
           if (roiSocket) {
             roiSocket.close();
             roiSocket = null;
           }
-          openRoiSocket();
+          if (hasAnyRoiEntry) {
+            openRoiSocket();
+          }
           stopLogUpdates();
           startLogUpdates(cfg.name);
           setRunningUI();
@@ -741,34 +707,22 @@
         }
       }
 
-      async function switchGroup() {
-        const selected = groupSelect.value;
-        storeGroupSelection(selected);
-        if (!selected) {
-          updateLogRoiOptions([]);
-          return;
-        }
-
-        const roiList = allRois.filter(r => (r.type ?? 'roi') === 'roi');
-        const filtered = selected === 'all'
-          ? roiList
-          : roiList.filter(r => (r.group ?? r.page ?? r.name) === selected);
-
-        updateLogRoiOptions(filtered);
-
-        if (running) {
-          await stopInference();
-        }
-
-        const hasCachedRois = allRois.length > 0;
-        await startInference(hasCachedRois ? filtered : null, selected);
-      }
-
       function setRunningUI() {
         statusEl.innerText = 'Running';
         startButton.disabled = true;
         stopButton.disabled = false;
         startButton.innerText = 'Start';
+      }
+
+      function handlePageSummaryUpdate(groupName, scores) {
+        const normalizedGroup = normalizeGroupName(groupName);
+        if (pageNameEl) {
+          pageNameEl.textContent = normalizedGroup || '-';
+        }
+        if (Array.isArray(scores)) {
+          renderScoreboard(scores);
+        }
+        setActiveGroup(normalizedGroup);
       }
 
       (async () => {
@@ -842,8 +796,6 @@
                 <select id="${cellId}-sourceSelect" class="form-select w-auto"></select>
                 <label for="${cellId}-intervalInput" class="form-label mb-0">Time (interval):</label>
                 <input id="${cellId}-intervalInput" type="number" class="form-control w-auto" min="0" step="0.1" value="1" />
-                <label for="${cellId}-groupSelect" class="form-label mb-0">Group:</label>
-                <select id="${cellId}-groupSelect" class="form-select w-auto flex-grow-1" style="min-width:0;"></select>
               </div>
               <div class="d-flex align-items-center gap-2 flex-wrap mb-2">
                 <button id="${cellId}-startButton" class="btn btn-primary">Start</button>
@@ -853,14 +805,26 @@
               <div class="video-wrapper">
                 <canvas id="${cellId}-video" class="stream-video"></canvas>
               </div>
-              <div class="mt-3">
-                <p class="mb-1">Page: <span id="${cellId}-pageName"></span></p>
-                <div class="table-responsive mb-0">
-                  <table id="${cellId}-pageScores" class="table table-striped table-sm mb-0">
-                    <thead><tr><th>Page</th><th>Score</th></tr></thead>
-                    <tbody id="${cellId}-pageScoresBody"></tbody>
-                  </table>
-                </div>
+            </div>
+          </div>
+          <div class="card page-summary-card">
+            <div class="d-flex align-items-start justify-content-between flex-wrap gap-3 mb-2">
+              <div>
+                <h6 class="mb-1">ผลการจับหน้าล่าสุด</h6>
+                <p class="mb-0 text-muted small">เรียงตามคะแนนสูงสุดจากงานนี้</p>
+              </div>
+              <div class="page-score-chip text-end">
+                <div class="text-muted small">หน้าปัจจุบัน</div>
+                <div class="page-score-current" id="${cellId}-pageName">-</div>
+              </div>
+            </div>
+            <div class="page-score-body">
+              <div id="${cellId}-pageScoresEmpty" class="page-score-empty">ยังไม่มีผลคะแนน</div>
+              <div id="${cellId}-pageScoresWrapper" class="table-responsive page-score-table d-none">
+                <table id="${cellId}-pageScores" class="table table-striped table-sm mb-0">
+                  <thead><tr><th>Page</th><th>Score</th></tr></thead>
+                  <tbody id="${cellId}-pageScoresBody"></tbody>
+                </table>
               </div>
             </div>
           </div>
@@ -884,7 +848,7 @@
       return row;
     }
 
-    function addInferenceRow({ cellId, camId, title, defaultSource, defaultInterval, defaultGroup } = {}) {
+    function addInferenceRow({ cellId, camId, title, defaultSource, defaultInterval } = {}) {
       let desiredCellId = cellId ? sanitizeCellId(cellId) : '';
       if (desiredCellId) {
         desiredCellId = ensureUniqueCellId(desiredCellId);
@@ -902,7 +866,6 @@
         title: displayTitle,
         defaultSource,
         defaultInterval,
-        defaultGroup,
       });
       controllers.set(actualCellId, controller);
       camIdToCell.set(actualCamId, actualCellId);
@@ -926,7 +889,7 @@
       if (row) {
         row.remove();
       }
-      ['source', 'interval', 'group'].forEach(key => localStorage.removeItem(`${cellId}-${key}`));
+      ['source', 'interval'].forEach(key => localStorage.removeItem(`${cellId}-${key}`));
       showAlert('ลบงาน Inference แล้ว', 'info');
       if (controllers.size === 0) {
         addInferenceRow();
@@ -983,7 +946,6 @@
                 title: cam.name || camId,
                 defaultSource: cam.name || '',
                 defaultInterval: cam.interval,
-                defaultGroup: cam.group,
               });
               createdAny = true;
             });
