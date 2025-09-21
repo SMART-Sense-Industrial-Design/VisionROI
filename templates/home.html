@@ -14,6 +14,10 @@
           <span class="status-chip__dot"></span>
           กลุ่มรันอยู่ <span id="chip-group-running">0</span>
         </span>
+        <span class="status-chip status-chip--processing">
+          <i class="bi bi-camera-video"></i>
+          กล้องรันอยู่ <span id="chip-camera-running">0</span>
+        </span>
         <span class="status-chip status-chip--page">
           <i class="bi bi-layers"></i>
           Page รันอยู่ <span id="chip-page-running">0</span>
@@ -117,6 +121,94 @@
         <p class="metric-card__value" id="metric-pages">0</p>
         <p class="metric-card__meta">กำลังรัน <span id="metric-pages-running">0</span> งาน</p>
       </div>
+    </div>
+  </section>
+
+  <section class="dashboard__panel dashboard__panel--wide">
+    <div class="panel-header">
+      <div>
+        <h2 class="panel-title">ROI และโมดูลที่ใช้งาน</h2>
+        <p class="panel-subtitle">สรุปจำนวน ROI ทั้งหมด โมดูลที่ทำงานอยู่ และประสิทธิภาพการประมวลผลล่าสุด</p>
+      </div>
+    </div>
+    <div class="roi-overview">
+      <div class="roi-overview__stats">
+        <div class="roi-stat">
+          <p class="roi-stat__label">ROI ทั้งหมด</p>
+          <p class="roi-stat__value" id="roi-total-count">0</p>
+          <p class="roi-stat__meta">รวมทุกแหล่งสัญญาณ</p>
+        </div>
+        <div class="roi-stat">
+          <p class="roi-stat__label">โมดูลที่ใช้งาน</p>
+          <p class="roi-stat__value" id="roi-module-count">0</p>
+          <p class="roi-stat__meta">โมดูลที่แตกต่างกัน</p>
+        </div>
+        <div class="roi-stat">
+          <p class="roi-stat__label">แหล่งสัญญาณมี ROI</p>
+          <p class="roi-stat__value" id="roi-source-count">0</p>
+          <p class="roi-stat__meta">กล้องหรือ Page ที่ตั้งค่าไว้</p>
+        </div>
+        <div class="roi-stat">
+          <p class="roi-stat__label">กล้องรัน Inference</p>
+          <p class="roi-stat__value" id="roi-running-count">0</p>
+          <p class="roi-stat__meta">ออนไลน์ในระบบ</p>
+        </div>
+      </div>
+      <div class="roi-overview__body">
+        <div class="roi-overview__modules">
+          <h3 class="roi-overview__title">โมดูลที่กำลังใช้งาน</h3>
+          <div class="roi-module-list" id="roi-module-list">
+            <div class="roi-module-list__empty">ยังไม่มีการกำหนด ROI</div>
+          </div>
+        </div>
+        <div class="roi-overview__performance">
+          <h3 class="roi-overview__title">เวลาในการประมวลผลของโมดูล</h3>
+          <div class="performance-cards">
+            <div class="performance-card performance-card--fast">
+              <p class="performance-card__label">เร็วที่สุด</p>
+              <h4 class="performance-card__title" id="module-fastest-name">-</h4>
+              <p class="performance-card__value" id="module-fastest-duration">-</p>
+              <p class="performance-card__meta" id="module-fastest-meta">รอข้อมูล</p>
+            </div>
+            <div class="performance-card performance-card--slow">
+              <p class="performance-card__label">ช้าที่สุด</p>
+              <h4 class="performance-card__title" id="module-slowest-name">-</h4>
+              <p class="performance-card__value" id="module-slowest-duration">-</p>
+              <p class="performance-card__meta" id="module-slowest-meta">รอข้อมูล</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="dashboard__panel dashboard__panel--wide">
+    <div class="panel-header">
+      <div>
+        <h2 class="panel-title">ภาพรวม ROI ต่อแหล่งสัญญาณ</h2>
+        <p class="panel-subtitle">ตรวจสอบโมดูลที่ใช้ร่วมกับเวลาประมวลผลจริง เทียบกับ Interval ที่ตั้งไว้</p>
+      </div>
+    </div>
+    <div class="table-responsive dashboard__table-wrapper dashboard__table-wrapper--compact">
+      <table class="table align-middle table-hover" id="roi-source-table">
+        <thead>
+          <tr>
+            <th>แหล่งสัญญาณ</th>
+            <th>กลุ่ม</th>
+            <th>จำนวน ROI</th>
+            <th>โมดูล</th>
+            <th>เวลาเฉลี่ย</th>
+            <th>สูงสุด</th>
+            <th>Interval</th>
+            <th>สถานะ</th>
+          </tr>
+        </thead>
+        <tbody id="roi-source-table-body">
+          <tr>
+            <td colspan="8" class="text-center text-muted py-4">ยังไม่มีการตั้งค่า ROI</td>
+          </tr>
+        </tbody>
+      </table>
     </div>
   </section>
 

@@ -107,7 +107,25 @@ function updateSummary(summary = {}) {
   setElementText('metric-groups-running', runningGroups);
   setElementText('metric-pages-running', pageJobsRunning);
   setElementText('chip-group-running', runningGroups);
+  setElementText('chip-camera-running', running);
   setElementText('chip-page-running', pageJobsRunning);
+}
+
+function formatSeconds(value) {
+  if (value === null || value === undefined) {
+    return '-';
+  }
+  const num = Number(value);
+  if (!Number.isFinite(num)) {
+    return '-';
+  }
+  if (num === 0) {
+    return '0.00s';
+  }
+  if (Math.abs(num) < 1) {
+    return `${Math.round(num * 1000)}ms`;
+  }
+  return `${num.toFixed(2)}s`;
 }
 
 function calculateCameraInsights(cameras = []) {
@@ -152,6 +170,236 @@ function updateCameraInsights(cameras = []) {
   setElementText('metric-min-interval', minInterval !== null ? `${minInterval.toFixed(2)}s` : '-');
   setElementText('metric-max-fps', maxFps !== null ? maxFps.toFixed(2) : '-');
   setElementText('insight-average-fps', stats.fpsCount ? averageFps.toFixed(2) : '0.0');
+}
+
+function renderModuleCards(modules = []) {
+  const container = document.getElementById('roi-module-list');
+  if (!container) return;
+  container.innerHTML = '';
+
+  if (!Array.isArray(modules) || !modules.length) {
+    const empty = document.createElement('div');
+    empty.className = 'roi-module-list__empty';
+    empty.textContent = 'ยังไม่มีการกำหนด ROI';
+    container.appendChild(empty);
+    return;
+  }
+
+  modules.slice(0, 6).forEach((module) => {
+    const card = document.createElement('div');
+    card.className = 'roi-module-card';
+
+    const title = document.createElement('p');
+    title.className = 'roi-module-card__title';
+    title.textContent = module?.name || 'ไม่ระบุโมดูล';
+
+    const meta = document.createElement('p');
+    meta.className = 'roi-module-card__meta';
+    const roiCount = Number(module?.roi_count ?? 0);
+    const sourceCount = Number(module?.source_count ?? 0);
+    meta.textContent = `ROI ${roiCount} · แหล่ง ${sourceCount}`;
+
+    const value = document.createElement('p');
+    value.className = 'roi-module-card__value';
+    value.textContent = module?.average_duration != null
+      ? formatSeconds(module.average_duration)
+      : '-';
+
+    const footer = document.createElement('p');
+    footer.className = 'roi-module-card__footer';
+    const samples = Number(module?.sample_count ?? 0);
+    footer.textContent = samples > 0 ? `จาก ${samples} รอบตัวอย่าง` : 'รอข้อมูลเพิ่มเติม';
+
+    card.append(title, meta, value, footer);
+
+    if (Array.isArray(module?.types) && module.types.length) {
+      const tags = document.createElement('div');
+      tags.className = 'roi-module-card__tags';
+      module.types.forEach((type) => {
+        if (!type) return;
+        const tag = document.createElement('span');
+        tag.className = 'roi-module-card__tag';
+        tag.textContent = type;
+        tags.appendChild(tag);
+      });
+      card.appendChild(tags);
+    }
+
+    container.appendChild(card);
+  });
+}
+
+function updateModulePerformance(performance = {}) {
+  const fastest = performance?.fastest;
+  const slowest = performance?.slowest;
+
+  const fastestMeta = fastest
+    ? [
+      Number(fastest?.roi_count ?? 0) ? `ROI ${fastest.roi_count}` : null,
+      Number(fastest?.sample_count ?? 0) ? `${fastest.sample_count} รอบ` : null,
+    ].filter(Boolean).join(' · ') || 'รอข้อมูล'
+    : 'รอข้อมูล';
+
+  const slowestMeta = slowest
+    ? [
+      Number(slowest?.roi_count ?? 0) ? `ROI ${slowest.roi_count}` : null,
+      Number(slowest?.sample_count ?? 0) ? `${slowest.sample_count} รอบ` : null,
+    ].filter(Boolean).join(' · ') || 'รอข้อมูล'
+    : 'รอข้อมูล';
+
+  setElementText('module-fastest-name', fastest?.name || '-');
+  setElementText(
+    'module-fastest-duration',
+    fastest?.average_duration != null ? formatSeconds(fastest.average_duration) : '-',
+  );
+  setElementText('module-fastest-meta', fastestMeta);
+
+  setElementText('module-slowest-name', slowest?.name || '-');
+  setElementText(
+    'module-slowest-duration',
+    slowest?.average_duration != null ? formatSeconds(slowest.average_duration) : '-',
+  );
+  setElementText('module-slowest-meta', slowestMeta);
+}
+
+function createModuleBadge(name) {
+  const badge = document.createElement('span');
+  badge.className = 'module-badge';
+  badge.textContent = name || 'ไม่ระบุ';
+  return badge;
+}
+
+function createStatusBadge(detail) {
+  const badge = document.createElement('span');
+  badge.className = 'processing-status processing-status--unknown';
+  const icon = document.createElement('i');
+  let text = 'รอข้อมูล';
+  let stateClass = 'processing-status--unknown';
+
+  if (!detail?.roi_count) {
+    stateClass = 'processing-status--idle';
+    text = 'ไม่มี ROI';
+    icon.className = 'bi bi-collection';
+  } else if (!detail?.inference_running) {
+    stateClass = 'processing-status--idle';
+    text = 'หยุดทำงาน';
+    icon.className = 'bi bi-pause-circle';
+  } else if (detail?.meets_interval === true) {
+    stateClass = 'processing-status--ok';
+    text = 'รันทัน';
+    icon.className = 'bi bi-check-circle';
+  } else if (detail?.meets_interval === false) {
+    stateClass = 'processing-status--risk';
+    text = 'ช้ากว่า Interval';
+    icon.className = 'bi bi-exclamation-triangle';
+  } else {
+    stateClass = 'processing-status--unknown';
+    text = 'รอข้อมูล';
+    icon.className = 'bi bi-question-circle';
+  }
+
+  badge.className = `processing-status ${stateClass}`;
+  badge.append(icon, document.createTextNode(text));
+  return badge;
+}
+
+function updateRoiSourceTable(details = []) {
+  const tbody = document.getElementById('roi-source-table-body');
+  if (!tbody) return;
+  tbody.innerHTML = '';
+
+  if (!Array.isArray(details) || !details.length) {
+    const row = document.createElement('tr');
+    const cell = document.createElement('td');
+    cell.colSpan = 8;
+    cell.className = 'text-center text-muted py-4';
+    cell.textContent = 'ยังไม่มีการตั้งค่า ROI';
+    row.appendChild(cell);
+    tbody.appendChild(row);
+    return;
+  }
+
+  details.forEach((detail) => {
+    const row = document.createElement('tr');
+
+    const sourceCell = document.createElement('td');
+    const nameEl = document.createElement('p');
+    nameEl.className = 'roi-source-name mb-0';
+    nameEl.textContent = detail?.display_name || detail?.cam_id || '-';
+
+    const metaEl = document.createElement('p');
+    metaEl.className = 'roi-source-meta';
+    const metaParts = [];
+    if (detail?.cam_id) {
+      metaParts.push(detail.cam_id);
+    }
+    if (detail?.source) {
+      const src = String(detail.source);
+      metaParts.push(src.length > 36 ? `${src.slice(0, 36)}…` : src);
+    }
+    metaEl.textContent = metaParts.join(' · ') || 'ไม่ระบุแหล่ง';
+    sourceCell.append(nameEl, metaEl);
+
+    const groupCell = document.createElement('td');
+    groupCell.textContent = detail?.group || '-';
+
+    const roiCell = document.createElement('td');
+    roiCell.textContent = Number(detail?.roi_count ?? 0);
+
+    const moduleCell = document.createElement('td');
+    if (Array.isArray(detail?.modules) && detail.modules.length) {
+      const wrap = document.createElement('div');
+      wrap.className = 'module-badge-group';
+      detail.modules.forEach((moduleName) => {
+        wrap.appendChild(createModuleBadge(moduleName));
+      });
+      moduleCell.appendChild(wrap);
+    } else {
+      moduleCell.innerHTML = '<span class="text-muted small">ยังไม่กำหนด</span>';
+    }
+    if (Number(detail?.samples ?? 0) > 0) {
+      const sampleMeta = document.createElement('div');
+      sampleMeta.className = 'module-badge-meta';
+      sampleMeta.textContent = `${detail.samples} รอบตัวอย่าง`;
+      moduleCell.appendChild(sampleMeta);
+    }
+
+    const avgCell = document.createElement('td');
+    avgCell.textContent = formatSeconds(detail?.average_duration);
+
+    const maxCell = document.createElement('td');
+    maxCell.textContent = formatSeconds(detail?.max_duration);
+
+    const intervalCell = document.createElement('td');
+    intervalCell.textContent = formatSeconds(detail?.interval);
+
+    const statusCell = document.createElement('td');
+    statusCell.appendChild(createStatusBadge(detail));
+
+    row.append(
+      sourceCell,
+      groupCell,
+      roiCell,
+      moduleCell,
+      avgCell,
+      maxCell,
+      intervalCell,
+      statusCell,
+    );
+    tbody.appendChild(row);
+  });
+}
+
+function updateRoiAnalytics(metrics = {}, summary = {}) {
+  const totalRoi = metrics?.total_roi ?? summary?.total_roi ?? 0;
+  setElementText('roi-total-count', totalRoi);
+  setElementText('roi-module-count', metrics?.unique_modules ?? 0);
+  setElementText('roi-source-count', metrics?.sources_with_roi ?? 0);
+  setElementText('roi-running-count', summary?.inference_running ?? 0);
+
+  renderModuleCards(metrics?.module_details);
+  updateModulePerformance(metrics?.module_performance);
+  updateRoiSourceTable(metrics?.source_details);
 }
 
 function getAlertAnalytics(alerts = []) {
@@ -786,6 +1034,7 @@ async function loadDashboard() {
 
     updateSummary(data.summary);
     updateCameraInsights(data.cameras);
+    updateRoiAnalytics(data.roi_metrics, data.summary);
     updateInsights(data.summary, data.cameras, data.alerts, alertAnalytics);
     updateCameraTable(data.cameras);
     updateAlerts(data.alerts);

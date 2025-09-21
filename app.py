@@ -601,9 +601,14 @@ def build_dashboard_payload() -> dict[str, Any]:
     online_count = 0
     intervals: list[float] = []
     fps_values: list[float] = []
+    roi_total_count = 0
+    module_usage: dict[str, dict[str, Any]] = {}
+    source_roi_map: dict[str, dict[str, Any]] = {}
     now_epoch = time.time()
     notifications_snapshot = get_recent_notifications()
     alerts_last_hour = 0
+    module_duration_stats: dict[str, dict[str, float | int | None]] = {}
+    source_duration_stats: dict[str, dict[str, float | int | None]] = {}
     for notif in notifications_snapshot:
         try:
             ts = float(notif.get("timestamp_epoch", 0.0))
@@ -611,6 +616,49 @@ def build_dashboard_payload() -> dict[str, Any]:
             ts = 0.0
         if now_epoch - ts <= 3600:
             alerts_last_hour += 1
+        results = notif.get("results") or []
+        total_duration = 0.0
+        for result in results:
+            module_name = str(result.get("module") or "ไม่ระบุ")
+            try:
+                duration_val = float(result.get("duration"))
+            except (TypeError, ValueError):
+                duration_val = None
+            if duration_val is None:
+                continue
+            total_duration += duration_val
+            module_entry = module_duration_stats.setdefault(
+                module_name,
+                {"total": 0.0, "count": 0, "min": None, "max": None},
+            )
+            module_entry["total"] += duration_val
+            module_entry["count"] += 1
+            module_entry["min"] = (
+                duration_val
+                if module_entry["min"] is None
+                else min(float(module_entry["min"]), duration_val)
+            )
+            module_entry["max"] = (
+                duration_val
+                if module_entry["max"] is None
+                else max(float(module_entry["max"]), duration_val)
+            )
+        cam_id = notif.get("cam_id")
+        if cam_id and total_duration > 0:
+            source_entry = source_duration_stats.setdefault(
+                str(cam_id),
+                {"total": 0.0, "count": 0, "min": None, "max": 0.0},
+            )
+            source_entry["total"] += total_duration
+            source_entry["count"] += 1
+            source_entry["min"] = (
+                total_duration
+                if source_entry["min"] is None
+                else min(float(source_entry["min"]), total_duration)
+            )
+            source_entry["max"] = max(
+                float(source_entry.get("max", 0.0) or 0.0), total_duration
+            )
     for cam_id in sorted(known_ids, key=str):
         task = inference_tasks.get(cam_id)
         inference_running = bool(task and not task.done())
@@ -623,6 +671,37 @@ def build_dashboard_payload() -> dict[str, Any]:
             if interval > 0:
                 fps_values.append(round(1.0 / interval, 3))
         active_group = inference_groups.get(cam_id) or persisted_entry.get("inference_group")
+        rois_for_cam = inference_rois.get(cam_id, []) or []
+        roi_count = len(rois_for_cam)
+        roi_total_count += roi_count
+        unique_modules: set[str] = set()
+        for roi_entry in rois_for_cam:
+            if not isinstance(roi_entry, dict):
+                continue
+            module_name = str(roi_entry.get("module") or "ไม่ระบุ")
+            unique_modules.add(module_name)
+            module_entry = module_usage.setdefault(
+                module_name,
+                {"count": 0, "sources": set(), "types": set()},
+            )
+            module_entry["count"] = int(module_entry.get("count", 0)) + 1
+            module_entry.setdefault("sources", set()).add(cam_id)
+            roi_type = roi_entry.get("type")
+            if roi_type:
+                module_entry.setdefault("types", set()).add(str(roi_type))
+        source_roi_map[cam_id] = {
+            "cam_id": cam_id,
+            "display_name": (
+                active_sources.get(cam_id, persisted_entry.get("active_source", ""))
+                or str(cam_id)
+            ),
+            "group": active_group,
+            "roi_count": roi_count,
+            "modules": sorted(unique_modules),
+            "interval": interval,
+            "source": camera_sources.get(cam_id, persisted_entry.get("source", "")),
+            "inference_running": inference_running,
+        }
         last_result = last_inference_outputs.get(cam_id, "")
         last_activity = last_inference_times.get(cam_id)
         if isinstance(last_activity, (int, float)) and last_activity > 0:
@@ -671,7 +750,7 @@ def build_dashboard_payload() -> dict[str, Any]:
             "last_output": last_result,
             "last_activity": last_activity_iso,
             "alerts_count": alerts_count,
-            "roi_count": len(inference_rois.get(cam_id, [])),
+            "roi_count": roi_count,
             "inference_running": inference_running,
             "roi_running": roi_running,
             "resolution": {"width": width, "height": height},
@@ -756,6 +835,98 @@ def build_dashboard_payload() -> dict[str, Any]:
         "page_jobs": len(page_jobs),
         "page_jobs_running": page_jobs_running,
     }
+    summary["total_roi"] = roi_total_count
+
+    module_details: list[dict[str, Any]] = []
+    for module_name, info in module_usage.items():
+        durations = module_duration_stats.get(module_name, {})
+        count = int(info.get("count", 0))
+        duration_count = int(durations.get("count", 0) or 0)
+        average_duration = (
+            (durations.get("total", 0.0) or 0.0) / duration_count
+            if duration_count
+            else None
+        )
+        module_details.append(
+            {
+                "name": module_name,
+                "roi_count": count,
+                "source_count": len(info.get("sources", set())),
+                "sources": sorted(str(src) for src in info.get("sources", set())),
+                "types": sorted(str(t) for t in info.get("types", set()) if t),
+                "average_duration": average_duration,
+                "min_duration": durations.get("min"),
+                "max_duration": durations.get("max"),
+                "sample_count": duration_count,
+            }
+        )
+
+    module_details.sort(key=lambda item: (-item.get("roi_count", 0), item.get("name", "")))
+
+    measured_modules = [
+        item for item in module_details if item.get("average_duration") is not None
+    ]
+    fastest_module = (
+        min(measured_modules, key=lambda item: item.get("average_duration", 0.0))
+        if measured_modules
+        else None
+    )
+    slowest_module = (
+        max(measured_modules, key=lambda item: item.get("average_duration", 0.0))
+        if measured_modules
+        else None
+    )
+
+    source_details: list[dict[str, Any]] = []
+    for cam_id, info in source_roi_map.items():
+        perf = source_duration_stats.get(str(cam_id), {})
+        sample_count = int(perf.get("count", 0) or 0)
+        average_duration = (
+            (perf.get("total", 0.0) or 0.0) / sample_count if sample_count else None
+        )
+        interval_val = info.get("interval")
+        meets_interval: bool | None
+        interval_gap: float | None
+        if (
+            isinstance(interval_val, (int, float))
+            and interval_val is not None
+            and average_duration is not None
+        ):
+            meets_interval = average_duration <= float(interval_val)
+            interval_gap = float(interval_val) - average_duration
+        else:
+            meets_interval = None
+            interval_gap = None
+        source_details.append(
+            {
+                **info,
+                "average_duration": average_duration,
+                "max_duration": perf.get("max"),
+                "min_duration": perf.get("min"),
+                "samples": sample_count,
+                "meets_interval": meets_interval,
+                "interval_gap": interval_gap,
+            }
+        )
+
+    source_details.sort(
+        key=lambda item: (
+            -int(item.get("roi_count", 0) or 0),
+            str(item.get("cam_id", "")),
+        )
+    )
+
+    roi_metrics = {
+        "total_roi": roi_total_count,
+        "unique_modules": len(module_usage),
+        "sources_with_roi": sum(1 for item in source_details if item.get("roi_count", 0)),
+        "module_details": module_details,
+        "module_performance": {
+            "fastest": fastest_module,
+            "slowest": slowest_module,
+        },
+        "source_details": source_details,
+    }
     return {
         "summary": summary,
         "cameras": cameras,
@@ -768,6 +939,7 @@ def build_dashboard_payload() -> dict[str, Any]:
                 job.get("cam_id") or "",
             ),
         ),
+        "roi_metrics": roi_metrics,
         "generated_at": datetime.utcnow().isoformat() + "Z",
     }
 
