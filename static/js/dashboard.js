@@ -54,7 +54,7 @@ function updateSummary(summary = {}) {
   setMetric('metric-running', summary.inference_running ?? 0);
   setMetric('metric-alerts', summary.alerts_last_hour ?? 0);
   setMetric('metric-interval', summary.average_interval ?? 0, 2);
-  setMetric('metric-fps', summary.average_fps ?? 0, 2);
+  setMetric('metric-processing', summary.average_processing_ms ?? 0, 0);
 
   const total = summary.total_cameras ?? 0;
   const online = summary.online_cameras ?? 0;
@@ -88,11 +88,11 @@ function calculateCameraInsights(cameras = []) {
       acc.intervalCount += 1;
     }
 
-    const fps = Number(camera?.fps);
-    if (Number.isFinite(fps)) {
-      acc.maxFps = Math.max(acc.maxFps, fps);
-      acc.fpsTotal += fps;
-      acc.fpsCount += 1;
+    const processing = Number(camera?.processing_time_ms);
+    if (Number.isFinite(processing)) {
+      acc.maxProcessing = Math.max(acc.maxProcessing, processing);
+      acc.processingTotal += processing;
+      acc.processingCount += 1;
     }
 
     return acc;
@@ -100,23 +100,31 @@ function calculateCameraInsights(cameras = []) {
     totalRoi: 0,
     minInterval: Number.POSITIVE_INFINITY,
     intervalCount: 0,
-    maxFps: Number.NEGATIVE_INFINITY,
-    fpsTotal: 0,
-    fpsCount: 0,
+    maxProcessing: Number.NEGATIVE_INFINITY,
+    processingTotal: 0,
+    processingCount: 0,
   });
 }
 
 function updateCameraInsights(cameras = []) {
   const stats = calculateCameraInsights(cameras);
   const minInterval = stats.intervalCount ? stats.minInterval : null;
-  const maxFps = stats.fpsCount ? stats.maxFps : null;
-  const averageFps = stats.fpsCount ? stats.fpsTotal / stats.fpsCount : 0;
+  const maxProcessing = stats.processingCount ? stats.maxProcessing : null;
+  const averageProcessing = stats.processingCount
+    ? stats.processingTotal / stats.processingCount
+    : 0;
 
   setElementText('metric-total-roi', stats.totalRoi);
   setElementText('metric-total-roi-chip', stats.totalRoi);
   setElementText('metric-min-interval', minInterval !== null ? `${minInterval.toFixed(2)}s` : '-');
-  setElementText('metric-max-fps', maxFps !== null ? maxFps.toFixed(2) : '-');
-  setElementText('insight-average-fps', stats.fpsCount ? averageFps.toFixed(2) : '0.0');
+  setElementText(
+    'metric-max-processing',
+    maxProcessing !== null ? `${maxProcessing.toFixed(0)} ms` : '-',
+  );
+  setElementText(
+    'insight-average-processing',
+    stats.processingCount ? averageProcessing.toFixed(0) : '0',
+  );
 }
 
 function getAlertAnalytics(alerts = []) {
@@ -318,8 +326,8 @@ function updateGroupOverview(cameras = []) {
       running: 0,
       online: 0,
       roi: 0,
-      fpsTotal: 0,
-      fpsCount: 0,
+      processingTotal: 0,
+      processingCount: 0,
     };
 
     entry.cameras += 1;
@@ -337,10 +345,10 @@ function updateGroupOverview(cameras = []) {
       entry.roi += roiCount;
     }
 
-    const fps = Number(camera?.fps);
-    if (Number.isFinite(fps)) {
-      entry.fpsTotal += fps;
-      entry.fpsCount += 1;
+    const processing = Number(camera?.processing_time_ms);
+    if (Number.isFinite(processing)) {
+      entry.processingTotal += processing;
+      entry.processingCount += 1;
     }
 
     groups.set(key, entry);
@@ -355,7 +363,9 @@ function updateGroupOverview(cameras = []) {
 
   sorted.forEach((group) => {
     const runningRate = group.cameras ? (group.running / group.cameras) * 100 : 0;
-    const averageFps = group.fpsCount ? group.fpsTotal / group.fpsCount : 0;
+    const averageProcessing = group.processingCount
+      ? group.processingTotal / group.processingCount
+      : 0;
 
     const card = document.createElement('article');
     card.className = 'group-card';
@@ -375,7 +385,7 @@ function updateGroupOverview(cameras = []) {
 
     const meta = document.createElement('p');
     meta.className = 'group-card__meta';
-    meta.textContent = `FPS เฉลี่ย ${averageFps.toFixed(1)} · ROI ${group.roi}`;
+    meta.textContent = `เวลาเฉลี่ย ${averageProcessing.toFixed(0)} ms · ROI ${group.roi}`;
 
     const progressTrack = document.createElement('div');
     progressTrack.className = 'group-card__progress-track';
@@ -441,8 +451,11 @@ function createCameraRow(camera) {
   const intervalCell = document.createElement('td');
   intervalCell.textContent = camera.interval ? `${camera.interval.toFixed(2)}s` : '-';
 
-  const fpsCell = document.createElement('td');
-  fpsCell.textContent = camera.fps ? camera.fps.toFixed(2) : '-';
+  const processingCell = document.createElement('td');
+  const processingValue = Number(camera?.processing_time_ms);
+  processingCell.textContent = Number.isFinite(processingValue)
+    ? `${processingValue.toFixed(0)}`
+    : '-';
 
   const outputCell = document.createElement('td');
   const outputWrapper = document.createElement('div');
@@ -466,7 +479,7 @@ function createCameraRow(camera) {
     statusCell,
     groupCell,
     intervalCell,
-    fpsCell,
+    processingCell,
     outputCell,
     alertCell,
     activityCell,
@@ -578,8 +591,11 @@ function updateStreams(cameras = []) {
 
     const meta = document.createElement('p');
     meta.className = 'stream-grid__meta mb-0';
-    const fpsText = camera.fps ? camera.fps.toFixed(2) : '-';
-    meta.textContent = `${camera.group || 'ไม่มีข้อมูลกลุ่ม'} · FPS ${fpsText}`;
+    const processingValue = Number(camera?.processing_time_ms);
+    const processingText = Number.isFinite(processingValue)
+      ? `${processingValue.toFixed(0)} ms`
+      : '-';
+    meta.textContent = `${camera.group || 'ไม่มีข้อมูลกลุ่ม'} · เวลา ${processingText}`;
 
     caption.append(title, meta);
     link.append(img, caption);

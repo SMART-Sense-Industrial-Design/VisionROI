@@ -598,7 +598,7 @@ def build_dashboard_payload() -> dict[str, Any]:
     running_count = 0
     online_count = 0
     intervals: list[float] = []
-    fps_values: list[float] = []
+    processing_durations_ms: list[float] = []
     now_epoch = time.time()
     notifications_snapshot = get_recent_notifications()
     alerts_last_hour = 0
@@ -616,10 +616,13 @@ def build_dashboard_payload() -> dict[str, Any]:
         roi_running = bool(roi_task and not roi_task.done())
         persisted_entry = persisted.get(cam_id, {})
         interval = _resolve_interval(cam_id, persisted)
-        if interval:
+        roi_count = len(inference_rois.get(cam_id, []))
+        processing_span_ms: float | None = None
+        if interval is not None:
             intervals.append(interval)
             if interval > 0:
-                fps_values.append(round(1.0 / interval, 3))
+                processing_span_ms = interval * max(roi_count, 1) * 1000.0
+                processing_durations_ms.append(processing_span_ms)
         active_group = inference_groups.get(cam_id) or persisted_entry.get("inference_group")
         last_result = last_inference_outputs.get(cam_id, "")
         last_activity = last_inference_times.get(cam_id)
@@ -651,21 +654,25 @@ def build_dashboard_payload() -> dict[str, Any]:
             "backend": camera_backends.get(cam_id, persisted_entry.get("backend", "opencv")),
             "group": active_group,
             "interval": interval,
-            "fps": (round(1.0 / interval, 3) if interval and interval > 0 else None),
             "status": status,
             "last_output": last_result,
             "last_activity": last_activity_iso,
             "alerts_count": alerts_count,
-            "roi_count": len(inference_rois.get(cam_id, [])),
+            "roi_count": roi_count,
             "inference_running": inference_running,
             "roi_running": roi_running,
+            "processing_time_ms": round(processing_span_ms, 2) if processing_span_ms is not None else None,
             "snapshot_url": f"/ws_snapshot/{cam_id}?ts={int(now_epoch)}"
             if inference_running
             else None,
         }
         cameras.append(camera_entry)
     average_interval = sum(intervals) / len(intervals) if intervals else 0.0
-    average_fps = sum(fps_values) / len(fps_values) if fps_values else 0.0
+    average_processing_ms = (
+        sum(processing_durations_ms) / len(processing_durations_ms)
+        if processing_durations_ms
+        else 0.0
+    )
     recent_alerts = notifications_snapshot[-20:]
     summary = {
         "total_cameras": len(known_ids),
@@ -673,7 +680,7 @@ def build_dashboard_payload() -> dict[str, Any]:
         "inference_running": running_count,
         "alerts_last_hour": alerts_last_hour,
         "average_interval": average_interval,
-        "average_fps": average_fps,
+        "average_processing_ms": average_processing_ms,
     }
     return {
         "summary": summary,

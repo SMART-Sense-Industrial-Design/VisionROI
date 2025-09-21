@@ -90,12 +90,12 @@
         <p class="metric-card__meta">เร็วที่สุด <span id="metric-min-interval">-</span></p>
       </div>
     </div>
-    <div class="metric-card" data-metric="fps">
+    <div class="metric-card" data-metric="processing">
       <div class="metric-card__icon bg-dark text-white"><i class="bi bi-graph-up"></i></div>
       <div class="metric-card__body">
-        <p class="metric-card__label">FPS เฉลี่ย</p>
-        <p class="metric-card__value" id="metric-fps">0.0</p>
-        <p class="metric-card__meta">สูงสุด <span id="metric-max-fps">-</span></p>
+        <p class="metric-card__label">เวลาเฉลี่ยต่อเฟรม (มิลลิวินาที)</p>
+        <p class="metric-card__value" id="metric-processing">0</p>
+        <p class="metric-card__meta">ช้าที่สุด <span id="metric-max-processing">-</span></p>
       </div>
     </div>
   </section>
@@ -139,8 +139,8 @@
             <div class="insight-card__progress-fill insight-card__progress-fill--warm" id="progress-utilization"></div>
           </div>
           <div class="insight-card__progress-meta">
-            <span>Average FPS</span>
-            <span id="insight-average-fps">0.0</span>
+            <span>เวลาเฉลี่ย (ms)</span>
+            <span id="insight-average-processing">0</span>
           </div>
         </div>
       </div>
@@ -176,7 +176,7 @@
     <div class="panel-header">
       <div>
         <h2 class="panel-title">สรุปกลุ่ม Inference</h2>
-        <p class="panel-subtitle">ดูความหนาแน่นของงานในแต่ละกลุ่มและค่า FPS โดยเฉลี่ย</p>
+        <p class="panel-subtitle">ดูความหนาแน่นของงานในแต่ละกลุ่มและเวลาเฉลี่ยที่ใช้ประมวลผลต่อเฟรม</p>
       </div>
     </div>
     <div class="group-overview" id="group-overview">
@@ -189,7 +189,7 @@
       <div class="panel-header">
         <div>
           <h2 class="panel-title">สถานะกล้องและงานประมวลผล</h2>
-          <p class="panel-subtitle">ดูรายละเอียดกล้องทั้งหมดพร้อมสถานะ กลุ่มที่รันอยู่ และความถี่การประมวลผล</p>
+          <p class="panel-subtitle">ดูรายละเอียดกล้องทั้งหมดพร้อมสถานะ กลุ่มที่รันอยู่ และเวลาประมวลผล</p>
         </div>
       </div>
       <div class="table-responsive dashboard__table-wrapper">
@@ -201,7 +201,7 @@
               <th>สถานะ</th>
               <th>กลุ่มที่กำลังใช้</th>
               <th>Interval</th>
-              <th>FPS โดยประมาณ</th>
+              <th>เวลาประมวลผล (ms)</th>
               <th>ผลล่าสุด</th>
               <th>แจ้งเตือน</th>
               <th>อัปเดตล่าสุด</th>
