@@ -86,6 +86,8 @@
       let isLogUpdating = false;
       let logSessionId = 0;
       let currentLogSource;
+      let roiGroupIndex = new Map();
+      let activeGroupName = '';
       const baseTitle = typeof providedTitle === 'string' && providedTitle.length > 0
         ? providedTitle
         : 'งาน Inference';
@@ -123,6 +125,50 @@
         return `${(seconds * 1000).toFixed(2)} ms`;
       };
 
+      const normalizeGroupName = value => (typeof value === 'string' ? value.trim() : '');
+      const getRoiGroupName = roi => normalizeGroupName(roi?.group ?? roi?.page ?? '');
+      const ensureArray = value => (Array.isArray(value) ? value : []);
+
+      function rebuildRoiGroupIndex(list) {
+        roiGroupIndex = new Map();
+        ensureArray(list).forEach(entry => {
+          if (!isRoiType(entry)) {
+            return;
+          }
+          const groupName = getRoiGroupName(entry);
+          if (!groupName) {
+            return;
+          }
+          if (!roiGroupIndex.has(groupName)) {
+            roiGroupIndex.set(groupName, []);
+          }
+          roiGroupIndex.get(groupName).push(entry);
+        });
+      }
+
+      function setActiveGroup(groupName) {
+        const normalized = normalizeGroupName(groupName);
+        if (normalized === activeGroupName) {
+          return;
+        }
+        activeGroupName = normalized;
+        roiGrid.innerHTML = '';
+        rois = [];
+        if (!normalized) {
+          updateLogRoiOptions([]);
+          return;
+        }
+        const list = roiGroupIndex.get(normalized) || [];
+        rois = list;
+        list.forEach(r => {
+          if (r && r.id !== undefined && r.id !== null) {
+            ensureRoiItem(r.id);
+            updateRoiModuleLabel(r.id);
+          }
+        });
+        updateLogRoiOptions(list);
+      }
+
       const renderScoreboard = (scores = []) => {
         if (!scoreTableBody) {
           return;
@@ -154,6 +200,7 @@
           pageNameEl.textContent = '-';
         }
         renderScoreboard([]);
+        setActiveGroup('');
       };
       resetScoreboard();
 
@@ -264,9 +311,15 @@
       }
 
       function ensureRoiItem(id) {
+        if (!activeGroupName) {
+          return;
+        }
         if (document.getElementById(`${cellId}-roi-${id}`)) return;
         const r = findRoiDataById(id) || { id };
         if (!isRoiType(r)) {
+          return;
+        }
+        if (getRoiGroupName(r) !== activeGroupName) {
           return;
         }
         const item = document.createElement('div');
@@ -458,22 +511,12 @@
         const res = await fetchWithStatus(`/load_roi_file?path=${encodeURIComponent(roiPath)}`);
         const data = await res.json();
         statusEl.innerText = '';
-        allRois = data.rois || [];
-        const roiList = allRois.filter(r => (r.type ?? 'roi') === 'roi');
-        if (Array.isArray(roisOverride)) {
-          rois = roisOverride;
-        } else {
-          rois = roiList;
-        }
-        updateLogRoiOptions(roiList);
-        roiGrid.innerHTML = '';
+        const roiEntries = Array.isArray(data.rois) ? data.rois : [];
+        allRois = roiEntries;
+        rebuildRoiGroupIndex(roiEntries);
         resetScoreboard();
-        rois.forEach(r => {
-          if (r && r.id !== undefined && r.id !== null) {
-            ensureRoiItem(r.id);
-            updateRoiModuleLabel(r.id);
-          }
-        });
+        const payloadRois = roiEntries;
+        const hasAnyRoiEntry = roiEntries.length > 0;
 
         let startData;
         let startRes;
@@ -484,7 +527,7 @@
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({
               ...camCfg,
-              rois,
+              rois: payloadRois,
               interval,
               draw_page_boxes: false
             })
@@ -510,7 +553,7 @@
         }
         statusEl.innerText = 'สำเร็จ';
         openSocket();
-        if (rois.length > 0) {
+        if (hasAnyRoiEntry) {
           openRoiSocket();
           showAlert('Inference started', 'success');
         } else {
@@ -559,6 +602,8 @@
         allRois = [];
         roiGrid.innerHTML = '';
         resetScoreboard();
+        roiGroupIndex = new Map();
+        activeGroupName = '';
         statusEl.innerText = 'Stopped';
         startButton.innerText = 'Resume';
         startButton.disabled = false;
@@ -601,10 +646,7 @@
             const data = JSON.parse(event.data);
             if ('group' in data || Array.isArray(data.scores)) {
               setTimeout(() => {
-                if (pageNameEl) {
-                  pageNameEl.textContent = data.group || '-';
-                }
-                renderScoreboard(data.scores);
+                handlePageSummaryUpdate(data.group, data.scores);
               }, 0);
             }
             if (Array.isArray(data.results)) {
@@ -638,22 +680,18 @@
           }
           const roiRes = await fetchWithStatus(`/load_roi_file?path=${encodeURIComponent(roiPath)}`);
           const roiData = await roiRes.json();
-          allRois = roiData.rois || [];
-          const roiList = allRois.filter(r => (r.type ?? 'roi') === 'roi');
-          rois = roiList;
-          updateLogRoiOptions(roiList);
-          roiGrid.innerHTML = '';
-          rois.forEach(r => {
-            if (r && r.id !== undefined && r.id !== null) {
-              ensureRoiItem(r.id);
-              updateRoiModuleLabel(r.id);
-            }
-          });
+          const roiEntries = Array.isArray(roiData.rois) ? roiData.rois : [];
+          allRois = roiEntries;
+          rebuildRoiGroupIndex(roiEntries);
+          resetScoreboard();
+          const hasAnyRoiEntry = roiEntries.length > 0;
           if (roiSocket) {
             roiSocket.close();
             roiSocket = null;
           }
-          openRoiSocket();
+          if (hasAnyRoiEntry) {
+            openRoiSocket();
+          }
           stopLogUpdates();
           startLogUpdates(cfg.name);
           setRunningUI();
@@ -674,6 +712,17 @@
         startButton.disabled = true;
         stopButton.disabled = false;
         startButton.innerText = 'Start';
+      }
+
+      function handlePageSummaryUpdate(groupName, scores) {
+        const normalizedGroup = normalizeGroupName(groupName);
+        if (pageNameEl) {
+          pageNameEl.textContent = normalizedGroup || '-';
+        }
+        if (Array.isArray(scores)) {
+          renderScoreboard(scores);
+        }
+        setActiveGroup(normalizedGroup);
       }
 
       (async () => {
