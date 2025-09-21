@@ -1062,6 +1062,10 @@ main.app-main {
   height: 100%;
 }
 
+.dashboard__panel--spaced {
+  margin-top: clamp(1.5rem, 2vw, 2rem);
+}
+
 .dashboard__panel--wide {
   grid-column: 1 / 2;
 }
