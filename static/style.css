@@ -355,12 +355,6 @@ main.app-main {
   backdrop-filter: blur(6px);
 }
 
-.dashboard__metrics {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: clamp(1rem, 2vw, 1.5rem);
-}
-
 .roi-overview {
   display: flex;
   flex-direction: column;
@@ -644,57 +638,6 @@ main.app-main {
   .dashboard__table-wrapper--compact table {
     font-size: 0.88rem;
   }
-}
-
-.metric-card {
-  display: flex;
-  align-items: center;
-  gap: 1rem;
-  padding: 1.25rem 1.5rem;
-  border-radius: var(--radius-lg);
-  background: rgba(255, 255, 255, 0.92);
-  box-shadow: var(--shadow-card);
-  border: 1px solid rgba(15, 23, 42, 0.08);
-  transition: transform 0.2s ease, box-shadow 0.2s ease;
-}
-
-.metric-card:hover {
-  transform: translateY(-3px);
-  box-shadow: 0 20px 45px -25px rgba(15, 23, 42, 0.55);
-}
-
-.metric-card__icon {
-  width: 56px;
-  height: 56px;
-  border-radius: 18px;
-  display: grid;
-  place-items: center;
-  font-size: 1.5rem;
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.2);
-}
-
-.metric-card__label {
-  margin: 0;
-  font-weight: 500;
-  color: rgba(15, 23, 42, 0.65);
-}
-
-.metric-card__value {
-  font-size: clamp(1.6rem, 2.4vw, 2.2rem);
-  font-weight: 700;
-  margin: 0;
-  color: var(--color-text);
-}
-
-.metric-card__meta {
-  margin: 0.25rem 0 0;
-  font-size: 0.9rem;
-  color: rgba(15, 23, 42, 0.55);
-}
-
-.metric-card__meta span {
-  font-weight: 600;
-  color: var(--color-primary);
 }
 
 .dashboard__insights {
@@ -1127,6 +1070,15 @@ main.app-main {
   grid-column: 1 / -1;
 }
 
+.dashboard__panel--scroll {
+  max-height: 420px;
+  overflow: hidden;
+}
+
+.dashboard__panel--scroll .timeline {
+  max-height: 100%;
+}
+
 .panel-header {
   display: flex;
   justify-content: space-between;
@@ -1294,16 +1246,16 @@ main.app-main {
     flex: 1 1 100%;
   }
 
-  .dashboard__metrics {
-    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  }
-
-  .metric-card {
-    padding: 1rem 1.25rem;
-  }
-
   .stream-grid__item img {
     height: 160px;
+  }
+
+  .dashboard__panel--scroll {
+    max-height: none;
+  }
+
+  .dashboard__panel--scroll .timeline {
+    max-height: none;
   }
 }
 
