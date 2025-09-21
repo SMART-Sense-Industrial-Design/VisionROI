@@ -287,7 +287,7 @@ main.app-main {
 .status-chip--page {
   background: rgba(129, 140, 248, 0.16);
   border-color: rgba(129, 140, 248, 0.28);
-  color: #4338ca;
+  color: #645ccd;
 }
 
 .status-chip--processing {
