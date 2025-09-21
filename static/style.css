@@ -655,6 +655,16 @@ main.app-main {
   color: rgba(15, 23, 42, 0.6);
 }
 
+.roi-source-duration__meta--stale {
+  color: #b45309;
+  font-weight: 500;
+}
+
+.roi-source-duration__meta--critical {
+  color: #dc2626;
+  font-weight: 600;
+}
+
 @media (max-width: 1200px) {
   .roi-overview__body {
     grid-template-columns: 1fr;
