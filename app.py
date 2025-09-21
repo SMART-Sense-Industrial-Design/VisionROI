@@ -597,7 +597,6 @@ def build_dashboard_payload() -> dict[str, Any]:
     cameras: list[dict[str, Any]] = []
     group_accumulator: dict[str, dict[str, Any]] = {}
     page_jobs: list[dict[str, Any]] = []
-    ocr_cameras: list[dict[str, Any]] = []
     running_count = 0
     online_count = 0
     intervals: list[float] = []
@@ -709,15 +708,7 @@ def build_dashboard_payload() -> dict[str, Any]:
         group_entry["alerts"] += alerts_count
 
         cam_id_lower = str(cam_id).lower()
-        group_lower = str(active_group or "").lower()
-        name_lower = str(camera_entry["name"] or "").lower()
-        backend_lower = str(camera_entry["backend"] or "").lower()
         is_page_job = cam_id_lower.startswith("page_")
-        looks_like_ocr = any(
-            token in (group_lower + backend_lower + name_lower)
-            for token in ("ocr", "document", "page")
-        ) or (camera_entry["roi_count"] or 0) > 0
-
         if is_page_job:
             page_jobs.append(
                 {
@@ -733,26 +724,6 @@ def build_dashboard_payload() -> dict[str, Any]:
                     "inference_running": inference_running,
                 }
             )
-
-        if looks_like_ocr:
-            camera_entry["is_ocr"] = True
-            ocr_cameras.append(
-                {
-                    "cam_id": cam_id,
-                    "name": camera_entry["name"],
-                    "group": active_group,
-                    "interval": interval,
-                    "fps": camera_entry["fps"],
-                    "roi_count": camera_entry["roi_count"],
-                    "resolution": camera_entry["resolution"],
-                    "last_output": last_result,
-                    "last_activity": last_activity_iso,
-                    "status": status,
-                    "inference_running": inference_running,
-                }
-            )
-        else:
-            camera_entry["is_ocr"] = False
 
     average_interval = sum(intervals) / len(intervals) if intervals else 0.0
     average_fps = sum(fps_values) / len(fps_values) if fps_values else 0.0
@@ -773,7 +744,6 @@ def build_dashboard_payload() -> dict[str, Any]:
         )
 
     page_jobs_running = sum(1 for job in page_jobs if job.get("inference_running"))
-    ocr_running = sum(1 for cam in ocr_cameras if cam.get("inference_running"))
     summary = {
         "total_cameras": len(known_ids),
         "online_cameras": online_count,
@@ -785,8 +755,6 @@ def build_dashboard_payload() -> dict[str, Any]:
         "running_groups": running_groups,
         "page_jobs": len(page_jobs),
         "page_jobs_running": page_jobs_running,
-        "ocr_cameras": len(ocr_cameras),
-        "ocr_running": ocr_running,
     }
     return {
         "summary": summary,
@@ -798,13 +766,6 @@ def build_dashboard_payload() -> dict[str, Any]:
             key=lambda job: (
                 0 if job.get("inference_running") else 1,
                 job.get("cam_id") or "",
-            ),
-        ),
-        "ocr_cameras": sorted(
-            ocr_cameras,
-            key=lambda cam: (
-                0 if cam.get("inference_running") else 1,
-                cam.get("cam_id") or "",
             ),
         ),
         "generated_at": datetime.utcnow().isoformat() + "Z",

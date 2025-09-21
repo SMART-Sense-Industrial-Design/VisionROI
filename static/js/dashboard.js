@@ -85,7 +85,6 @@ function updateSummary(summary = {}) {
   setMetric('metric-fps', summary.average_fps ?? 0, 2);
   setMetric('metric-groups', summary.total_groups ?? 0);
   setMetric('metric-pages', summary.page_jobs ?? 0);
-  setMetric('metric-ocr', summary.ocr_cameras ?? 0);
 
   const total = summary.total_cameras ?? 0;
   const online = summary.online_cameras ?? 0;
@@ -93,7 +92,6 @@ function updateSummary(summary = {}) {
   const alerts = summary.alerts_last_hour ?? 0;
   const runningGroups = summary.running_groups ?? 0;
   const pageJobsRunning = summary.page_jobs_running ?? 0;
-  const ocrRunning = summary.ocr_running ?? 0;
 
   const offline = Math.max(total - online, 0);
   const onlineRate = total ? (online / total) * 100 : 0;
@@ -108,10 +106,8 @@ function updateSummary(summary = {}) {
   setElementText('metric-alert-density', alertDensity.toFixed(2));
   setElementText('metric-groups-running', runningGroups);
   setElementText('metric-pages-running', pageJobsRunning);
-  setElementText('metric-ocr-running', ocrRunning);
   setElementText('chip-group-running', runningGroups);
   setElementText('chip-page-running', pageJobsRunning);
-  setElementText('chip-ocr-ready', summary.ocr_cameras ?? 0);
 }
 
 function calculateCameraInsights(cameras = []) {
@@ -577,100 +573,6 @@ function updatePageOverview(pageJobs = []) {
   });
 }
 
-function renderOcrCard(camera) {
-  const card = document.createElement('article');
-  card.className = 'ocr-card';
-
-  const header = document.createElement('div');
-  header.className = 'ocr-card__header';
-
-  const titleWrap = document.createElement('div');
-  titleWrap.className = 'ocr-card__titles';
-
-  const title = document.createElement('p');
-  title.className = 'ocr-card__title';
-  title.textContent = camera.name || camera.cam_id || 'กล้อง';
-
-  const subtitle = document.createElement('p');
-  subtitle.className = 'ocr-card__subtitle';
-  const groupText = camera.group ? `กลุ่ม ${camera.group}` : 'ไม่มีกลุ่ม';
-  subtitle.textContent = `${camera.cam_id || '-'} · ${groupText}`;
-
-  titleWrap.append(title, subtitle);
-
-  const badge = document.createElement('span');
-  const running = Boolean(camera.inference_running);
-  badge.className = `ocr-card__badge ${running ? 'ocr-card__badge--running' : 'ocr-card__badge--idle'}`;
-  badge.textContent = running ? 'กำลังรัน' : (camera.status || 'พร้อม');
-
-  header.append(titleWrap, badge);
-
-  const metrics = document.createElement('div');
-  metrics.className = 'ocr-card__metrics';
-
-  const interval = Number(camera.interval);
-  const fps = Number(camera.fps);
-
-  const metricItems = [
-    { label: 'ROI', value: camera.roi_count ?? 0 },
-    { label: 'Interval', value: Number.isFinite(interval) ? `${interval.toFixed(2)}s` : '-' },
-    { label: 'FPS', value: Number.isFinite(fps) ? fps.toFixed(2) : '-' },
-    { label: 'ความละเอียด', value: formatResolution(camera.resolution) },
-  ];
-
-  metricItems.forEach((item) => {
-    const metric = document.createElement('div');
-    metric.className = 'ocr-card__metric';
-    const label = document.createElement('span');
-    label.className = 'ocr-card__metric-label';
-    label.textContent = item.label;
-    const value = document.createElement('span');
-    value.className = 'ocr-card__metric-value';
-    value.textContent = item.value ?? '-';
-    metric.append(label, value);
-    metrics.appendChild(metric);
-  });
-
-  const output = document.createElement('div');
-  output.className = 'ocr-card__output';
-  const outputLabel = document.createElement('span');
-  outputLabel.className = 'ocr-card__output-label';
-  outputLabel.textContent = 'ผลล่าสุด';
-  const outputValue = document.createElement('span');
-  outputValue.className = 'ocr-card__output-value';
-  outputValue.textContent = camera.last_output || '-';
-  outputValue.title = camera.last_output || '';
-  output.append(outputLabel, outputValue);
-
-  const footer = document.createElement('div');
-  footer.className = 'ocr-card__footer';
-  footer.innerHTML = `
-    <span><i class="bi bi-clock-history"></i> ${formatDateTime(camera.last_activity)}</span>
-    <span><i class="bi bi-info-circle"></i> ${camera.status || '-'}</span>
-  `;
-
-  card.append(header, metrics, output, footer);
-  return card;
-}
-
-function updateOcrOverview(cameras = []) {
-  const container = document.getElementById('ocr-overview');
-  if (!container) return;
-  container.innerHTML = '';
-
-  if (!Array.isArray(cameras) || !cameras.length) {
-    const empty = document.createElement('div');
-    empty.className = 'ocr-overview__empty';
-    empty.textContent = 'ยังไม่มีกล้องที่ตั้งค่างาน OCR';
-    container.appendChild(empty);
-    return;
-  }
-
-  cameras.forEach((camera) => {
-    container.appendChild(renderOcrCard(camera));
-  });
-}
-
 function createCameraRow(camera) {
   const tr = document.createElement('tr');
 
@@ -678,12 +580,6 @@ function createCameraRow(camera) {
   const camId = document.createElement('div');
   camId.className = 'fw-semibold';
   camId.textContent = camera.cam_id ?? '-';
-  if (camera.is_ocr) {
-    const ocrBadge = document.createElement('span');
-    ocrBadge.className = 'badge bg-primary-subtle text-primary ms-2';
-    ocrBadge.textContent = 'OCR';
-    camId.appendChild(ocrBadge);
-  }
   const camMeta = document.createElement('div');
   camMeta.className = 'text-muted small';
   const backend = camera.backend || '-';
@@ -896,7 +792,6 @@ async function loadDashboard() {
     updateAlertSummary(data.alerts, alertAnalytics);
     updateGroupOverview(data.groups, data.cameras);
     updatePageOverview(data.page_jobs);
-    updateOcrOverview(data.ocr_cameras);
     updateStreams(data.cameras);
     updateGeneratedAt(data.generated_at);
   } catch (error) {

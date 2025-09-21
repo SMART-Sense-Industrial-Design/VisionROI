@@ -7,7 +7,7 @@
     <div class="dashboard__heading">
       <div>
         <h1 class="dashboard__title">แดชบอร์ดภาพรวมงาน</h1>
-        <p class="dashboard__subtitle">ติดตามสถานะกล้อง งาน Inference แบบกลุ่มและแบบหน้า พร้อมข้อมูล OCR ที่จำเป็นในที่เดียว</p>
+        <p class="dashboard__subtitle">ติดตามสถานะกล้อง งาน Inference แบบกลุ่มและแบบหน้าได้ในที่เดียว</p>
       </div>
       <div class="dashboard__chips">
         <span class="status-chip status-chip--live">
@@ -25,10 +25,6 @@
         <span class="status-chip status-chip--roi">
           <i class="bi bi-bounding-box-circles"></i>
           ROI ทั้งหมด <span id="metric-total-roi-chip">0</span>
-        </span>
-        <span class="status-chip status-chip--ocr">
-          <i class="bi bi-type"></i>
-          OCR พร้อมใช้งาน <span id="chip-ocr-ready">0</span>
         </span>
       </div>
     </div>
@@ -120,14 +116,6 @@
         <p class="metric-card__label">งาน Page ทั้งหมด</p>
         <p class="metric-card__value" id="metric-pages">0</p>
         <p class="metric-card__meta">กำลังรัน <span id="metric-pages-running">0</span> งาน</p>
-      </div>
-    </div>
-    <div class="metric-card" data-metric="ocr">
-      <div class="metric-card__icon bg-light text-primary"><i class="bi bi-type"></i></div>
-      <div class="metric-card__body">
-        <p class="metric-card__label">กล้องสำหรับ OCR</p>
-        <p class="metric-card__value" id="metric-ocr">0</p>
-        <p class="metric-card__meta">รันอยู่ <span id="metric-ocr-running">0</span> กล้อง</p>
       </div>
     </div>
   </section>
@@ -228,24 +216,12 @@
     </div>
   </section>
 
-  <section class="dashboard__panel dashboard__panel--wide">
-    <div class="panel-header">
-      <div>
-        <h2 class="panel-title">ข้อมูลสำคัญสำหรับงาน OCR แบบกล้อง</h2>
-        <p class="panel-subtitle">รวมกล้องที่กำหนด ROI ไว้สำหรับ OCR พร้อมรายละเอียดที่จำเป็น</p>
-      </div>
-    </div>
-    <div class="ocr-overview" id="ocr-overview">
-      <div class="ocr-overview__empty">ยังไม่มีกล้องที่ตั้งค่างาน OCR</div>
-    </div>
-  </section>
-
   <div class="dashboard__content">
     <section class="dashboard__panel dashboard__panel--wide">
       <div class="panel-header">
         <div>
           <h2 class="panel-title">สถานะกล้องและงานประมวลผล</h2>
-          <p class="panel-subtitle">ดูรายละเอียดกล้องทั้งหมดพร้อมสถานะ กลุ่มที่รันอยู่ ความละเอียด และข้อมูลล่าสุดเพื่อการทำ OCR</p>
+          <p class="panel-subtitle">ดูรายละเอียดกล้องทั้งหมดพร้อมสถานะ กลุ่มที่รันอยู่ ความละเอียด และข้อมูลล่าสุด</p>
         </div>
       </div>
       <div class="table-responsive dashboard__table-wrapper">
