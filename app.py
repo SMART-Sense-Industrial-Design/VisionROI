@@ -796,13 +796,18 @@ async def inference_group_session(session_id: str) -> str:
 
 
 @app.route("/inference_page")
-async def inference_page() -> str:
-    return await render_template("inference_page.html")
+async def inference_page_legacy() -> str:
+    return await render_template("inference_page.html", session_id=None)
 
 
 @app.route("/inference/page")
-async def inference_page_alias() -> str:
-    return await render_template("inference_page.html")
+async def inference_page_template() -> str:
+    return await render_template("inference_page.html", session_id=None)
+
+
+@app.route("/inference/page/<string:session_id>")
+async def inference_page_session(session_id: str) -> str:
+    return await render_template("inference_page.html", session_id=session_id)
 
 
 # Health & quit endpoints (used by systemd)

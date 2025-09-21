@@ -1,3 +1,8 @@
+{% set current_session_id = session_id or '' %}
+{% set base_cam_id = current_session_id if current_session_id else 'cam1' %}
+{% set session_base = url_for('inference_page_template').rstrip('/') ~ '/' %}
+{% set default_row_label = ('สตรีม ' ~ current_session_id[3:]) if current_session_id and current_session_id.startswith('cam') else 'สตรีม 1' %}
+<div class="inference-session-root" data-session-root data-template-mode="{{ 'true' if not current_session_id else 'false' }}" data-session-id="{{ current_session_id }}" data-default-cell-id="{{ base_cam_id }}" data-session-base="{{ session_base }}">
 <div class="inference-session-toolbar card shadow-sm mb-4">
     <div class="inference-session-toolbar__body">
         <div class="inference-session-toolbar__info">
@@ -7,74 +12,92 @@
         <div class="inference-session-toolbar__actions">
             <span class="badge bg-info-subtle text-info inference-session-toolbar__badge">
                 <i class="bi bi-hash me-1"></i><span>Cam ปัจจุบัน:</span>
-                <strong class="ms-1" data-current-session-id>cam1</strong>
+                <strong class="ms-1" data-current-session-id>{{ current_session_id or '—' }}</strong>
             </span>
             <a href="{{ url_for('inference_hub') }}" class="btn btn-outline-secondary">
                 <i class="bi bi-arrow-left-circle me-1"></i>กลับหน้า Inference Hub
             </a>
-            <button type="button" class="btn btn-info text-white" data-action="create-new-session" data-base-href="{{ url_for('inference_page_alias') }}">
+            <button type="button" class="btn btn-info text-white" data-action="create-new-session" data-base-href="{{ url_for('inference_page_template') }}">
                 <i class="bi bi-plus-circle me-1"></i>สร้างหน้าใหม่
             </button>
         </div>
     </div>
 </div>
 
-<div class="cam-row" data-row-label="สตรีม 1">
+<div class="cam-row" data-row-label="{{ default_row_label }}">
     <div class="video-col">
         <div class="card roi-card video-card">
-            <div id="cam1" class="cam-cell">
+            <div id="{{ base_cam_id }}" class="cam-cell">
             <div class="d-flex align-items-center mb-2 gap-2 menu-select-list">
-                <label for="cam1-sourceSelect" class="form-label mb-0">Source:</label>
-                <select id="cam1-sourceSelect" class="form-select w-auto"></select>
-                <label for="cam1-intervalInput" class="form-label mb-0">Time:</label>
-                <input id="cam1-intervalInput" type="number" class="form-control w-auto" min="0" step="0.1" value="1" />
+                <label for="{{ base_cam_id }}-sourceSelect" class="form-label mb-0">Source:</label>
+                <select id="{{ base_cam_id }}-sourceSelect" class="form-select w-auto"></select>
+                <label for="{{ base_cam_id }}-intervalInput" class="form-label mb-0">Time:</label>
+                <input id="{{ base_cam_id }}-intervalInput" type="number" class="form-control w-auto" min="0" step="0.1" value="1" />
             </div>
-            <button id="cam1-startButton" class="btn btn-primary me-2">Start</button>
-            <button id="cam1-stopButton" class="btn btn-danger" disabled>Stop</button>
-            <p id="cam1-status"></p>
+            <button id="{{ base_cam_id }}-startButton" class="btn btn-primary me-2">Start</button>
+            <button id="{{ base_cam_id }}-stopButton" class="btn btn-danger" disabled>Stop</button>
+            <p id="{{ base_cam_id }}-status"></p>
             <div class="video-wrapper">
-                <canvas id="cam1-video" class="stream-video"></canvas>
-                <p>page: <span id="cam1-pageName"></span></p>
-                <table id="cam1-pageScores" class="table table-striped">
+                <canvas id="{{ base_cam_id }}-video" class="stream-video"></canvas>
+                <p>page: <span id="{{ base_cam_id }}-pageName"></span></p>
+                <table id="{{ base_cam_id }}-pageScores" class="table table-striped">
                     <thead><tr><th>Page</th><th>Score</th></tr></thead>
-                    <tbody id="cam1-pageScoresBody"></tbody>
+                    <tbody id="{{ base_cam_id }}-pageScoresBody"></tbody>
                 </table>
             </div>
             </div>
         </div>
         <div class="card roi-card log-card">
             <div class="d-flex align-items-center mb-2 gap-2">
-                <label for="cam1-logRoiSelect" class="form-label mb-0">ROI:</label>
-                <select id="cam1-logRoiSelect" class="form-select w-auto"></select>
+                <label for="{{ base_cam_id }}-logRoiSelect" class="form-label mb-0">ROI:</label>
+                <select id="{{ base_cam_id }}-logRoiSelect" class="form-select w-auto"></select>
             </div>
             <div class="log-wrapper">
-                <table id="cam1-logTable" class="table table-striped">
+                <table id="{{ base_cam_id }}-logTable" class="table table-striped">
                     <thead><tr><th>Log</th></tr></thead>
-                    <tbody id="cam1-logBody"></tbody>
+                    <tbody id="{{ base_cam_id }}-logBody"></tbody>
                 </table>
             </div>
         </div>
     </div>
     <div class="card roi-card roi-list-card">
-        <div id="cam1-rois" class="roi-grid"></div>
+        <div id="{{ base_cam_id }}-rois" class="roi-grid"></div>
     </div>
+</div>
 </div>
 <script>
 (function(){
-const DEFAULT_CELL_ID='cam1';
 const sessionRegistry=window.InferenceSessions;
+const root=document.querySelector('[data-session-root]');
+const DEFAULT_CELL_ID='{{ base_cam_id }}';
+const placeholderId=root?.dataset.defaultCellId||DEFAULT_CELL_ID;
+const sessionIndicator=root?root.querySelector('[data-current-session-id]'):document.querySelector('[data-current-session-id]');
+
+function ensureTrailingSlash(value){
+    if(!value){
+        return'/inference/page/';
+    }
+    return value.endsWith('/')?value:`${value}/`;
+}
+
+const sessionBase=ensureTrailingSlash(root?.dataset.sessionBase||'/inference/page');
 
 function resolveCellId(defaultId){
     const raw=String(window.location.hash||'').replace(/^#/,'').trim();
-    if(!raw){
-        return defaultId;
+    if(raw){
+        const match=/^cam(\d+)$/i.exec(raw);
+        if(match){
+            const num=parseInt(match[1],10);
+            if(Number.isFinite(num)&&num>0){
+                return`cam${num}`;
+            }
+        }
     }
-    const match=/^cam(\d+)$/i.exec(raw);
-    if(!match){
-        return defaultId;
+    const datasetId=root?.dataset.sessionId||'';
+    if(datasetId){
+        return datasetId;
     }
-    const num=parseInt(match[1],10);
-    return Number.isFinite(num)&&num>0?`cam${num}`:defaultId;
+    return defaultId;
 }
 
 function ensureLocationHash(cellId){
@@ -84,6 +107,16 @@ function ensureLocationHash(cellId){
     }
     const baseUrl=`${window.location.pathname}${window.location.search||''}`;
     window.history.replaceState(null,'',`${baseUrl}${expected}`);
+}
+
+function ensureLocationPath(cellId){
+    const target=`${sessionBase}${cellId}`;
+    const query=window.location.search||'';
+    const hash=window.location.hash||'';
+    if(window.location.pathname===target){
+        return;
+    }
+    window.history.replaceState(null,'',`${target}${query}${hash}`);
 }
 
 function remapDomIds(baseId,targetId){
@@ -119,17 +152,18 @@ function updateRowLabel(cellId){
         return;
     }
     const match=/^cam(\d+)$/i.exec(cellId);
-    if(match){
-        row.dataset.rowLabel=`สตรีม ${match[1]}`;
-    }
+    row.dataset.rowLabel=match?`สตรีม ${match[1]}`:'สตรีม 1';
 }
 
-const requestedCellId=resolveCellId(DEFAULT_CELL_ID);
-const cellId=remapDomIds(DEFAULT_CELL_ID,requestedCellId)||DEFAULT_CELL_ID;
+let cellId=resolveCellId(placeholderId||DEFAULT_CELL_ID);
+cellId=remapDomIds(placeholderId,cellId)||cellId;
 updateRowLabel(cellId);
 ensureLocationHash(cellId);
-
-const sessionIndicator=document.querySelector('[data-current-session-id]');
+ensureLocationPath(cellId);
+if(root){
+    root.dataset.sessionId=cellId;
+    root.dataset.templateMode='false';
+}
 if(sessionIndicator){
     sessionIndicator.textContent=cellId;
 }
@@ -164,19 +198,21 @@ function computeNextCamId(){
 }
 
 function buildTargetHref(baseHref,cam){
-    const href=typeof baseHref==='string'&&baseHref.length>0?baseHref:window.location.pathname;
-    const hashIndex=href.indexOf('#');
-    const cleanBase=hashIndex>-1?href.slice(0,hashIndex):href;
-    return`${cleanBase}#${cam}`;
+    const base=ensureTrailingSlash(typeof baseHref==='string'&&baseHref.length>0?baseHref:sessionBase);
+    return`${base}${cam}`;
+}
+
+function buildSessionHref(cam){
+    return`${sessionBase}${cam}`;
 }
 
 document.querySelectorAll('[data-action="create-new-session"]').forEach(button=>{
     button.addEventListener('click',event=>{
         event.preventDefault();
-        const baseHref=button.getAttribute('data-base-href')||window.location.pathname;
+        const baseHref=button.getAttribute('data-base-href')||sessionBase;
         const nextCam=computeNextCamId();
         const target=buildTargetHref(baseHref,nextCam);
-        window.location.href=target;
+        window.location.href=`${target}#${nextCam}`;
     });
 });
 
@@ -400,7 +436,7 @@ function createController(cellId){
                 sourceId:sourceSelect.value||'',
                 sourceName:sourceOption?sourceOption.textContent:'',
                 page:pageNameEl?pageNameEl.textContent:'',
-                href:`/inference/page#${cellId}`,
+                href:buildSessionHref(cellId),
                 status:'running'
             });
         }

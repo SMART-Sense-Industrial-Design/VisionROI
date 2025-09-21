@@ -13,7 +13,7 @@
       <a class="btn btn-primary btn-lg js-create-inference" href="{{ url_for('inference_group_template') }}" data-inference-type="group">
         <i class="bi bi-cpu me-2"></i>เริ่มสร้าง Group Inference
       </a>
-      <a class="btn btn-outline-light btn-lg js-create-inference" href="{{ url_for('inference_page_alias') }}" data-inference-type="page">
+      <a class="btn btn-outline-light btn-lg js-create-inference" href="{{ url_for('inference_page_template') }}" data-inference-type="page">
         <i class="bi bi-kanban me-2"></i>เริ่มสร้าง Page Inference
       </a>
     </div>
@@ -38,7 +38,7 @@
       </a>
     </div>
     <div class="col-lg-6">
-      <a href="{{ url_for('inference_page_alias') }}" class="inference-option card h-100 js-create-inference" data-inference-type="page">
+      <a href="{{ url_for('inference_page_template') }}" class="inference-option card h-100 js-create-inference" data-inference-type="page">
         <div class="inference-option__icon bg-info-subtle text-info">
           <i class="bi bi-layout-text-sidebar-reverse"></i>
         </div>
