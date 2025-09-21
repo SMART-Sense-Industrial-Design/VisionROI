@@ -672,12 +672,39 @@ def build_dashboard_payload() -> dict[str, Any]:
                 fps_values.append(round(1.0 / interval, 3))
         active_group = inference_groups.get(cam_id) or persisted_entry.get("inference_group")
         rois_for_cam = inference_rois.get(cam_id, []) or []
-        roi_count = len(rois_for_cam)
+        forced_group = inference_groups.get(cam_id)
+        selected_group = forced_group if forced_group and forced_group != "all" else None
+        last_output = last_inference_outputs.get(cam_id, selected_group or "")
+        if selected_group is None:
+            if forced_group and forced_group != "all":
+                selected_group = forced_group
+            else:
+                selected_group = last_output
+
+        def _roi_matches_group(roi_group: Any) -> bool:
+            if forced_group == "all":
+                return True
+            if forced_group and forced_group != "all":
+                return roi_group == forced_group
+            if selected_group:
+                return roi_group == selected_group
+            return False
+
+        active_rois: list[dict[str, Any]] = []
+        if inference_running:
+            for roi_entry in rois_for_cam:
+                if not isinstance(roi_entry, dict):
+                    continue
+                if roi_entry.get("type") != "roi":
+                    continue
+                if not _roi_matches_group(roi_entry.get("group")):
+                    continue
+                active_rois.append(roi_entry)
+
+        roi_count = len(active_rois)
         roi_total_count += roi_count
         unique_modules: set[str] = set()
-        for roi_entry in rois_for_cam:
-            if not isinstance(roi_entry, dict):
-                continue
+        for roi_entry in active_rois:
             module_name = str(roi_entry.get("module") or "ไม่ระบุ")
             unique_modules.add(module_name)
             module_entry = module_usage.setdefault(
