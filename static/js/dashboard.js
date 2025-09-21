@@ -25,6 +25,66 @@ function formatDateTime(value) {
   }
 }
 
+function parseDate(value) {
+  if (!value) {
+    return null;
+  }
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? null : value;
+  }
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return null;
+  }
+  return parsed;
+}
+
+function getElapsedSeconds(value) {
+  const date = parseDate(value);
+  if (!date) {
+    return null;
+  }
+  const diff = Date.now() - date.getTime();
+  if (!Number.isFinite(diff)) {
+    return null;
+  }
+  return diff / 1000;
+}
+
+function formatRelativeTime(value) {
+  const elapsed = getElapsedSeconds(value);
+  if (elapsed === null) {
+    return null;
+  }
+  if (elapsed < 1) {
+    return 'ไม่ถึง 1 วินาทีที่แล้ว';
+  }
+  if (elapsed < 60) {
+    return `${Math.floor(elapsed)} วินาทีที่แล้ว`;
+  }
+  const minutes = Math.floor(elapsed / 60);
+  if (minutes < 60) {
+    return `${minutes} นาทีที่แล้ว`;
+  }
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) {
+    const remainingMinutes = minutes % 60;
+    if (remainingMinutes > 0) {
+      return `${hours} ชม. ${remainingMinutes} นาทีที่แล้ว`;
+    }
+    return `${hours} ชั่วโมงที่แล้ว`;
+  }
+  const days = Math.floor(hours / 24);
+  if (days < 7) {
+    const remainingHours = hours % 24;
+    if (remainingHours > 0) {
+      return `${days} วัน ${remainingHours} ชม. ที่แล้ว`;
+    }
+    return `${days} วันที่แล้ว`;
+  }
+  return formatDateTime(value);
+}
+
 function setMetric(id, value, decimals = 0) {
   const el = document.getElementById(id);
   if (!el) return;
@@ -468,12 +528,53 @@ function updateRoiSourceTable(details = []) {
     durationWrapper.appendChild(durationValue);
 
     const latestCompleted = detail?.latest_completed_at;
+    const intervalSeconds = Number(detail?.interval);
+    const relativeLabel = formatRelativeTime(latestCompleted);
+    const latestTooltip = formatDateTime(latestCompleted);
+    const elapsed = getElapsedSeconds(latestCompleted);
+
     if (latestCompleted) {
       const metaEl = document.createElement('div');
       metaEl.className = 'roi-source-duration__meta';
-      metaEl.textContent = `เฟรมล่าสุด · ${formatDateTime(latestCompleted)}`;
+      const tooltipParts = [];
+      if (latestTooltip && latestTooltip !== '-') {
+        tooltipParts.push(`เฟรมล่าสุดเมื่อ ${latestTooltip}`);
+      }
+      if (relativeLabel && relativeLabel !== latestTooltip) {
+        tooltipParts.push(`(${relativeLabel})`);
+      }
+
+      if (
+        Number.isFinite(intervalSeconds)
+        && intervalSeconds > 0
+        && Number.isFinite(elapsed)
+      ) {
+        const staleThreshold = intervalSeconds * 3;
+        const criticalThreshold = intervalSeconds * 6;
+        if (elapsed > criticalThreshold) {
+          metaEl.classList.add('roi-source-duration__meta--critical');
+        } else if (elapsed > staleThreshold) {
+          metaEl.classList.add('roi-source-duration__meta--stale');
+        }
+      } else if (Number.isFinite(elapsed) && elapsed > 300) {
+        metaEl.classList.add('roi-source-duration__meta--stale');
+      }
+
+      if (relativeLabel) {
+        metaEl.textContent = `เฟรมล่าสุด · ${relativeLabel}`;
+      } else if (latestTooltip && latestTooltip !== '-') {
+        metaEl.textContent = `เฟรมล่าสุด · ${latestTooltip}`;
+      } else {
+        metaEl.textContent = 'เฟรมล่าสุด · ไม่ทราบเวลา';
+      }
+
+      if (tooltipParts.length) {
+        avgCell.title = tooltipParts.join(' ');
+      } else {
+        avgCell.title =
+          'เวลาที่ใช้ในการ inference ครบทุก ROI ในเฟรมล่าสุด (ตั้งแต่ ROI แรกจนถึง ROI สุดท้าย)';
+      }
       durationWrapper.appendChild(metaEl);
-      avgCell.title = `เฟรมล่าสุด · ${formatDateTime(latestCompleted)}`;
     } else {
       avgCell.title =
         'เวลาที่ใช้ในการ inference ครบทุก ROI ในเฟรมล่าสุด (ตั้งแต่ ROI แรกจนถึง ROI สุดท้าย)';
