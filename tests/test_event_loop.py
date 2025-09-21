@@ -4,6 +4,7 @@ import json
 import shutil
 import time
 import uuid
+import threading
 from types import SimpleNamespace
 from queue import Queue
 from pathlib import Path
@@ -434,3 +435,145 @@ def test_aggregated_roi_logs_separate_files_per_source():
             log_dir = log_file.parent
             if log_dir.exists():
                 shutil.rmtree(log_dir, ignore_errors=True)
+
+
+def test_multiple_inference_loops_do_not_block_or_leak():
+    async def main():
+        counts = {"0": 0, "1": 0}
+        counts_lock = threading.Lock()
+        queue_state: dict[str, int] = {}
+
+        def process_roi(_image, roi_id, _save_flag, source, cam_id, interval):
+            with counts_lock:
+                key = str(cam_id)
+                counts[key] = counts.get(key, 0) + 1
+            time.sleep(0.01)
+            return {"text": f"{source}:{roi_id}:{interval}"}
+
+        dummy_module = SimpleNamespace(process=process_roi)
+
+        original_loader = app.load_custom_module
+        original_get_perspective = getattr(app.cv2, "getPerspectiveTransform", None)
+        original_warp = getattr(app.cv2, "warpPerspective", None)
+        original_polylines = getattr(app.cv2, "polylines", None)
+        original_put_text = getattr(app.cv2, "putText", None)
+        original_imencode = getattr(app.cv2, "imencode", None)
+        original_font = getattr(app.cv2, "FONT_HERSHEY_SIMPLEX", None)
+        original_line_aa = getattr(app.cv2, "LINE_AA", None)
+
+        app.load_custom_module = lambda name: dummy_module
+        app.cv2.getPerspectiveTransform = (
+            lambda src, dst: np.eye(3, dtype=np.float32)
+        )
+
+        def warp_perspective(_frame, _matrix, size):
+            width = max(int(size[0]), 1)
+            height = max(int(size[1]), 1)
+            return np.zeros((height, width, 3), dtype=np.uint8)
+
+        app.cv2.warpPerspective = warp_perspective
+        app.cv2.polylines = lambda *a, **k: None
+        app.cv2.putText = lambda *a, **k: None
+        app.cv2.imencode = (
+            lambda *_a, **_k: (True, np.ones((10,), dtype=np.uint8))
+        )
+        app.cv2.FONT_HERSHEY_SIMPLEX = 0
+        app.cv2.LINE_AA = 0
+
+        workers: dict[str, app.CameraWorker] = {}
+        loop_tasks: list[asyncio.Task] = []
+
+        try:
+            loop = asyncio.get_running_loop()
+            for idx, cam_id in enumerate(["0", "1"]):
+                worker = app.CameraWorker(idx, loop)
+                assert worker.start()
+                workers[cam_id] = worker
+                app.camera_workers[cam_id] = worker
+                app.camera_sources[cam_id] = idx
+                app.active_sources[cam_id] = f"source-{cam_id}"
+                app.inference_groups[cam_id] = "all"
+                app.inference_intervals[cam_id] = 0.01
+                app.inference_result_timeouts[cam_id] = 0.2
+                app.inference_rois[cam_id] = [
+                    {
+                        "id": f"roi-{cam_id}",
+                        "type": "roi",
+                        "points": [
+                            {"x": 0, "y": 0},
+                            {"x": 5, "y": 0},
+                            {"x": 5, "y": 5},
+                            {"x": 0, "y": 5},
+                        ],
+                        "module": "dummy_module",
+                    }
+                ]
+
+            loop_tasks = [
+                asyncio.create_task(app.run_inference_loop(cam_id))
+                for cam_id in workers
+            ]
+            tick_task = asyncio.create_task(ticker())
+
+            ticks = await tick_task
+            await asyncio.sleep(0.2)
+            counts_snapshot = dict(counts)
+            return ticks, counts_snapshot, queue_state
+        finally:
+            for task in loop_tasks:
+                task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
+
+            for cam_id, worker in workers.items():
+                await worker.stop()
+                app.camera_workers.pop(cam_id, None)
+                app.camera_sources.pop(cam_id, None)
+                app.inference_rois.pop(cam_id, None)
+                app.inference_groups.pop(cam_id, None)
+                app.inference_intervals.pop(cam_id, None)
+                app.inference_result_timeouts.pop(cam_id, None)
+                app.active_sources.pop(cam_id, None)
+                app.frame_queues.pop(cam_id, None)
+                app.roi_result_queues.pop(cam_id, None)
+
+            app.load_custom_module = original_loader
+            if original_get_perspective is not None:
+                app.cv2.getPerspectiveTransform = original_get_perspective
+            else:
+                delattr(app.cv2, "getPerspectiveTransform")
+            if original_warp is not None:
+                app.cv2.warpPerspective = original_warp
+            else:
+                delattr(app.cv2, "warpPerspective")
+            if original_polylines is not None:
+                app.cv2.polylines = original_polylines
+            else:
+                delattr(app.cv2, "polylines")
+            if original_put_text is not None:
+                app.cv2.putText = original_put_text
+            else:
+                delattr(app.cv2, "putText")
+            if original_imencode is not None:
+                app.cv2.imencode = original_imencode
+            else:
+                delattr(app.cv2, "imencode")
+            if original_font is not None:
+                app.cv2.FONT_HERSHEY_SIMPLEX = original_font
+            else:
+                delattr(app.cv2, "FONT_HERSHEY_SIMPLEX")
+            if original_line_aa is not None:
+                app.cv2.LINE_AA = original_line_aa
+            else:
+                delattr(app.cv2, "LINE_AA")
+
+            await asyncio.sleep(0.05)
+            queue_state["qsize"] = app._INFERENCE_QUEUE.qsize()
+            queue_state["unfinished"] = app._INFERENCE_QUEUE.unfinished_tasks
+
+    ticks, counts_snapshot, queue_state = asyncio.run(main())
+    assert ticks > 20, "ticker ควรทำงานได้ต่อเนื่องไม่ถูกบล็อก"
+    assert counts_snapshot.get("0", 0) > 3
+    assert counts_snapshot.get("1", 0) > 3
+    assert queue_state.get("qsize") == 0
+    assert queue_state.get("unfinished") == 0
