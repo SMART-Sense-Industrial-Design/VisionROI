@@ -807,7 +807,7 @@ main.app-main {
 
 .dashboard__content {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 340px;
+  grid-template-columns: minmax(0, 1fr);
   gap: clamp(1.5rem, 2vw, 2rem);
   align-items: start;
 }
@@ -968,10 +968,6 @@ main.app-main {
 }
 
 @media (max-width: 1200px) {
-  .dashboard__content {
-    grid-template-columns: 1fr;
-  }
-
   .dashboard__panel--wide {
     grid-column: 1 / -1;
   }
