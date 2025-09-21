@@ -4,14 +4,48 @@
 {% block content %}
 <div class="dashboard">
   <div class="dashboard__header">
-    <div>
-      <h1 class="dashboard__title">แดชบอร์ดภาพรวมงาน</h1>
-      <p class="dashboard__subtitle">ติดตามสถานะกล้อง กลุ่ม Inference และแจ้งเตือนล่าสุดแบบเรียลไทม์</p>
+    <div class="dashboard__heading">
+      <div>
+        <h1 class="dashboard__title">แดชบอร์ดภาพรวมงาน</h1>
+        <p class="dashboard__subtitle">ติดตามสถานะกล้อง กลุ่ม Inference และแจ้งเตือนล่าสุดแบบเรียลไทม์</p>
+      </div>
+      <div class="dashboard__chips">
+        <span class="status-chip status-chip--live">
+          <span class="status-chip__dot"></span>
+          รันอยู่ <span id="chip-running">0</span> กลุ่ม
+        </span>
+        <span class="status-chip status-chip--sync">
+          <i class="bi bi-arrow-repeat"></i>
+          รีเฟรชทุก <span id="chip-refresh">6</span> วินาที
+        </span>
+        <span class="status-chip status-chip--roi">
+          <i class="bi bi-bounding-box-circles"></i>
+          ROI ทั้งหมด <span id="metric-total-roi-chip">0</span>
+        </span>
+      </div>
     </div>
     <div class="dashboard__meta">
       <span class="badge bg-primary-subtle text-primary fw-semibold">
         อัปเดตล่าสุด <span id="dashboard-updated">-</span>
       </span>
+    </div>
+  </div>
+
+  <div class="dashboard__stats">
+    <div class="summary-stat">
+      <p class="summary-stat__label">อัตราออนไลน์</p>
+      <p class="summary-stat__value" id="summary-online-rate">0%</p>
+      <p class="summary-stat__meta">จากกล้องทั้งหมด</p>
+    </div>
+    <div class="summary-stat">
+      <p class="summary-stat__label">กล้องออฟไลน์</p>
+      <p class="summary-stat__value" id="summary-offline">0</p>
+      <p class="summary-stat__meta">ต้องติดตาม</p>
+    </div>
+    <div class="summary-stat">
+      <p class="summary-stat__label">ความหนาแน่นแจ้งเตือน</p>
+      <p class="summary-stat__value" id="summary-alert-density">0.00</p>
+      <p class="summary-stat__meta">ต่อกล้อง/ชั่วโมง</p>
     </div>
   </div>
 
@@ -21,6 +55,7 @@
       <div class="metric-card__body">
         <p class="metric-card__label">จำนวนกล้องทั้งหมด</p>
         <p class="metric-card__value" id="metric-total">0</p>
+        <p class="metric-card__meta">ROI เฝ้าระวัง <span id="metric-total-roi">0</span> โซน</p>
       </div>
     </div>
     <div class="metric-card" data-metric="online">
@@ -28,6 +63,7 @@
       <div class="metric-card__body">
         <p class="metric-card__label">กล้องออนไลน์</p>
         <p class="metric-card__value" id="metric-online">0</p>
+        <p class="metric-card__meta">คิดเป็น <span id="metric-online-rate-meta">0%</span></p>
       </div>
     </div>
     <div class="metric-card" data-metric="running">
@@ -35,6 +71,7 @@
       <div class="metric-card__body">
         <p class="metric-card__label">Inference ที่กำลังรัน</p>
         <p class="metric-card__value" id="metric-running">0</p>
+        <p class="metric-card__meta">โหลดระบบ <span id="metric-running-ratio">0%</span></p>
       </div>
     </div>
     <div class="metric-card" data-metric="alerts">
@@ -42,6 +79,7 @@
       <div class="metric-card__body">
         <p class="metric-card__label">แจ้งเตือนชั่วโมงล่าสุด</p>
         <p class="metric-card__value" id="metric-alerts">0</p>
+        <p class="metric-card__meta">เฉลี่ย <span id="metric-alert-density">0.00</span> / กล้อง</p>
       </div>
     </div>
     <div class="metric-card" data-metric="interval">
@@ -49,6 +87,7 @@
       <div class="metric-card__body">
         <p class="metric-card__label">Interval เฉลี่ย (วินาที)</p>
         <p class="metric-card__value" id="metric-interval">0.0</p>
+        <p class="metric-card__meta">เร็วที่สุด <span id="metric-min-interval">-</span></p>
       </div>
     </div>
     <div class="metric-card" data-metric="fps">
@@ -56,7 +95,92 @@
       <div class="metric-card__body">
         <p class="metric-card__label">FPS เฉลี่ย</p>
         <p class="metric-card__value" id="metric-fps">0.0</p>
+        <p class="metric-card__meta">สูงสุด <span id="metric-max-fps">-</span></p>
       </div>
+    </div>
+  </section>
+
+  <section class="dashboard__insights">
+    <article class="insight-card">
+      <div class="insight-card__header">
+        <span class="insight-card__icon bg-success-subtle text-success"><i class="bi bi-activity"></i></span>
+        <div>
+          <h3 class="insight-card__title">ความพร้อมของกล้อง</h3>
+          <p class="insight-card__subtitle">การออนไลน์ของอุปกรณ์ทั้งหมด</p>
+        </div>
+      </div>
+      <div class="insight-card__body">
+        <p class="insight-card__value" id="insight-online-value">0 / 0</p>
+        <p class="insight-card__meta">ออฟไลน์ <span id="insight-offline">0</span> กล้อง</p>
+        <div class="insight-card__progress">
+          <div class="insight-card__progress-track">
+            <div class="insight-card__progress-fill" id="progress-online"></div>
+          </div>
+          <div class="insight-card__progress-meta">
+            <span>ออนไลน์</span>
+            <span id="insight-online-rate">0%</span>
+          </div>
+        </div>
+      </div>
+    </article>
+    <article class="insight-card">
+      <div class="insight-card__header">
+        <span class="insight-card__icon bg-warning-subtle text-warning"><i class="bi bi-gpu-card"></i></span>
+        <div>
+          <h3 class="insight-card__title">โหลดการประมวลผล</h3>
+          <p class="insight-card__subtitle">จำนวนงาน Inference ที่กำลังทำงาน</p>
+        </div>
+      </div>
+      <div class="insight-card__body">
+        <p class="insight-card__value"><span id="insight-running">0</span> งาน</p>
+        <p class="insight-card__meta">คิดเป็น <span id="insight-running-rate">0%</span> ของกล้องทั้งหมด</p>
+        <div class="insight-card__progress">
+          <div class="insight-card__progress-track">
+            <div class="insight-card__progress-fill insight-card__progress-fill--warm" id="progress-utilization"></div>
+          </div>
+          <div class="insight-card__progress-meta">
+            <span>Average FPS</span>
+            <span id="insight-average-fps">0.0</span>
+          </div>
+        </div>
+      </div>
+    </article>
+    <article class="insight-card insight-card--alert">
+      <div class="insight-card__header">
+        <span class="insight-card__icon bg-danger-subtle text-danger"><i class="bi bi-bell"></i></span>
+        <div>
+          <h3 class="insight-card__title">การแจ้งเตือนล่าสุด</h3>
+          <p class="insight-card__subtitle">ความถี่ของเหตุการณ์ในชั่วโมงที่ผ่านมา</p>
+        </div>
+      </div>
+      <div class="insight-card__body">
+        <p class="insight-card__value"><span id="insight-alerts">0</span> ครั้ง/ชม.</p>
+        <p class="insight-card__meta">เกิดจาก <span id="insight-alert-active">0</span> กล้อง</p>
+        <div class="insight-card__progress">
+          <div class="insight-card__progress-track">
+            <div class="insight-card__progress-fill insight-card__progress-fill--alert" id="progress-alerts"></div>
+          </div>
+          <div class="insight-card__progress-meta">
+            <span>Top Camera</span>
+            <span id="insight-top-camera">-</span>
+          </div>
+        </div>
+      </div>
+      <div class="insight-card__footer">
+        <span class="insight-card__footer-meta"><i class="bi bi-clock-history"></i> อัปเดต <span id="insight-alert-latest">-</span></span>
+      </div>
+    </article>
+  </section>
+
+  <section class="dashboard__panel dashboard__panel--wide dashboard__panel--accent">
+    <div class="panel-header">
+      <div>
+        <h2 class="panel-title">สรุปกลุ่ม Inference</h2>
+        <p class="panel-subtitle">ดูความหนาแน่นของงานในแต่ละกลุ่มและค่า FPS โดยเฉลี่ย</p>
+      </div>
+    </div>
+    <div class="group-overview" id="group-overview">
+      <div class="group-overview__empty">ยังไม่มีกลุ่มที่สร้างไว้</div>
     </div>
   </section>
 
@@ -93,6 +217,17 @@
     </section>
 
     <aside class="dashboard__sidebar">
+      <section class="dashboard__panel">
+        <div class="panel-header">
+          <div>
+            <h2 class="panel-title">สรุปแจ้งเตือน</h2>
+            <p class="panel-subtitle">ดูภาพรวมเหตุการณ์ที่เกิดขึ้นบ่อยและเวลาอัปเดตล่าสุด</p>
+          </div>
+        </div>
+        <div class="alert-summary" id="alert-summary">
+          <div class="alert-summary__empty">ยังไม่มีแจ้งเตือน</div>
+        </div>
+      </section>
       <section class="dashboard__panel">
         <div class="panel-header">
           <div>
