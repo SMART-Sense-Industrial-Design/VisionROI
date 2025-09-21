@@ -365,7 +365,9 @@ function updateRoiSourceTable(details = []) {
     }
 
     const avgCell = document.createElement('td');
-    avgCell.textContent = formatSeconds(detail?.average_duration);
+    const latestDuration =
+      detail?.latest_duration != null ? detail.latest_duration : detail?.average_duration;
+    avgCell.textContent = formatSeconds(latestDuration);
 
     const maxCell = document.createElement('td');
     maxCell.textContent = formatSeconds(detail?.max_duration);
