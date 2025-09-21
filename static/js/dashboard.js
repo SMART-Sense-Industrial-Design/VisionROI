@@ -144,6 +144,38 @@ function formatSecondsWithUnit(value) {
   return fixed !== null ? `${fixed} วินาที` : null;
 }
 
+function formatRoiDetail(entry) {
+  if (!entry) {
+    return 'รอข้อมูล ROI';
+  }
+  const roiNameRaw = entry?.latest_roi_name;
+  const roiIdRaw = entry?.latest_roi_id;
+  const sourceRaw = entry?.latest_source;
+  const camRaw = entry?.latest_cam_id;
+
+  const roiName = typeof roiNameRaw === 'string' ? roiNameRaw.trim() : '';
+  const roiId =
+    roiIdRaw !== null && roiIdRaw !== undefined
+      ? String(roiIdRaw).trim()
+      : '';
+  const source = typeof sourceRaw === 'string' ? sourceRaw.trim() : '';
+  const camId =
+    camRaw !== null && camRaw !== undefined ? String(camRaw).trim() : '';
+
+  const roiLabel = roiName || (roiId ? `ROI ${roiId}` : '');
+  const locationLabel = source || (camId ? `กล้อง ${camId}` : '');
+
+  const parts = [];
+  if (roiLabel) {
+    parts.push(roiLabel);
+  }
+  if (locationLabel) {
+    parts.push(locationLabel);
+  }
+
+  return parts.length ? parts.join(' · ') : 'รอข้อมูล ROI';
+}
+
 function calculateCameraInsights(cameras = []) {
   return cameras.reduce((acc, camera) => {
     const roiCount = Number(camera?.roi_count);
@@ -272,6 +304,7 @@ function updateModulePerformance(performance = {}) {
     'module-fastest-duration',
     fastestDuration != null ? formatSecondsWithUnit(fastestDuration) || '-' : '-',
   );
+  setElementText('module-fastest-roi', formatRoiDetail(fastest));
   setElementText('module-fastest-meta', fastestMeta);
 
   setElementText('module-slowest-name', slowest?.name || '-');
@@ -280,6 +313,7 @@ function updateModulePerformance(performance = {}) {
     'module-slowest-duration',
     slowestDuration != null ? formatSecondsWithUnit(slowestDuration) || '-' : '-',
   );
+  setElementText('module-slowest-roi', formatRoiDetail(slowest));
   setElementText('module-slowest-meta', slowestMeta);
 }
 
@@ -389,6 +423,8 @@ function updateRoiSourceTable(details = []) {
     const latestDuration =
       detail?.latest_duration != null ? detail.latest_duration : detail?.average_duration;
     avgCell.textContent = formatSeconds(latestDuration);
+    avgCell.title =
+      'เวลาที่ใช้ในการ inference ครบทุก ROI ในเฟรมล่าสุดของแหล่งนี้';
 
     const maxCell = document.createElement('td');
     maxCell.textContent = formatSeconds(detail?.max_duration);
