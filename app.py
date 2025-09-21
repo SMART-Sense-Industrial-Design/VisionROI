@@ -595,6 +595,9 @@ def build_dashboard_payload() -> dict[str, Any]:
     known_ids |= set(inference_tasks)
     known_ids |= set(roi_tasks)
     cameras: list[dict[str, Any]] = []
+    group_accumulator: dict[str, dict[str, Any]] = {}
+    page_jobs: list[dict[str, Any]] = []
+    ocr_cameras: list[dict[str, Any]] = []
     running_count = 0
     online_count = 0
     intervals: list[float] = []
@@ -644,6 +647,19 @@ def build_dashboard_payload() -> dict[str, Any]:
             if notif.get("cam_id") == cam_id
         ]
         alerts_count = len(recent_alerts_for_cam)
+        resolution_raw = persisted_entry.get("resolution")
+        if isinstance(resolution_raw, (list, tuple)) and len(resolution_raw) == 2:
+            try:
+                width = int(resolution_raw[0]) if resolution_raw[0] else None
+            except (TypeError, ValueError):
+                width = None
+            try:
+                height = int(resolution_raw[1]) if resolution_raw[1] else None
+            except (TypeError, ValueError):
+                height = None
+        else:
+            width = height = None
+
         camera_entry = {
             "cam_id": cam_id,
             "source": camera_sources.get(cam_id, persisted_entry.get("source", "")),
@@ -659,14 +675,105 @@ def build_dashboard_payload() -> dict[str, Any]:
             "roi_count": len(inference_rois.get(cam_id, [])),
             "inference_running": inference_running,
             "roi_running": roi_running,
+            "resolution": {"width": width, "height": height},
             "snapshot_url": f"/ws_snapshot/{cam_id}?ts={int(now_epoch)}"
             if inference_running
             else None,
         }
         cameras.append(camera_entry)
+
+        group_key = active_group or "ไม่ระบุกลุ่ม"
+        group_entry = group_accumulator.setdefault(
+            group_key,
+            {
+                "name": group_key,
+                "cameras": 0,
+                "running": 0,
+                "online": 0,
+                "roi": 0,
+                "fps_total": 0.0,
+                "fps_count": 0,
+                "alerts": 0,
+            },
+        )
+        group_entry["cameras"] += 1
+        if inference_running:
+            group_entry["running"] += 1
+        if inference_running or roi_running:
+            group_entry["online"] += 1
+        roi_total = group_entry.get("roi", 0) or 0
+        group_entry["roi"] = roi_total + (camera_entry["roi_count"] or 0)
+        if camera_entry["fps"] is not None:
+            group_entry["fps_total"] += camera_entry["fps"]
+            group_entry["fps_count"] += 1
+        group_entry["alerts"] += alerts_count
+
+        cam_id_lower = str(cam_id).lower()
+        group_lower = str(active_group or "").lower()
+        name_lower = str(camera_entry["name"] or "").lower()
+        backend_lower = str(camera_entry["backend"] or "").lower()
+        is_page_job = cam_id_lower.startswith("page_")
+        looks_like_ocr = any(
+            token in (group_lower + backend_lower + name_lower)
+            for token in ("ocr", "document", "page")
+        ) or (camera_entry["roi_count"] or 0) > 0
+
+        if is_page_job:
+            page_jobs.append(
+                {
+                    "cam_id": cam_id,
+                    "title": camera_entry["name"] or cam_id.replace("page_", "") or cam_id,
+                    "group": active_group,
+                    "interval": interval,
+                    "fps": camera_entry["fps"],
+                    "status": status,
+                    "last_output": last_result,
+                    "last_activity": last_activity_iso,
+                    "alerts_count": alerts_count,
+                    "inference_running": inference_running,
+                }
+            )
+
+        if looks_like_ocr:
+            camera_entry["is_ocr"] = True
+            ocr_cameras.append(
+                {
+                    "cam_id": cam_id,
+                    "name": camera_entry["name"],
+                    "group": active_group,
+                    "interval": interval,
+                    "fps": camera_entry["fps"],
+                    "roi_count": camera_entry["roi_count"],
+                    "resolution": camera_entry["resolution"],
+                    "last_output": last_result,
+                    "last_activity": last_activity_iso,
+                    "status": status,
+                    "inference_running": inference_running,
+                }
+            )
+        else:
+            camera_entry["is_ocr"] = False
+
     average_interval = sum(intervals) / len(intervals) if intervals else 0.0
     average_fps = sum(fps_values) / len(fps_values) if fps_values else 0.0
     recent_alerts = notifications_snapshot[-20:]
+    group_entries: list[dict[str, Any]] = []
+    running_groups = 0
+    for group_entry in group_accumulator.values():
+        fps_count = group_entry.pop("fps_count", 0)
+        fps_total = group_entry.pop("fps_total", 0.0)
+        average_group_fps = fps_total / fps_count if fps_count else 0.0
+        if group_entry.get("running"):
+            running_groups += 1
+        group_entries.append(
+            {
+                **group_entry,
+                "average_fps": average_group_fps,
+            }
+        )
+
+    page_jobs_running = sum(1 for job in page_jobs if job.get("inference_running"))
+    ocr_running = sum(1 for cam in ocr_cameras if cam.get("inference_running"))
     summary = {
         "total_cameras": len(known_ids),
         "online_cameras": online_count,
@@ -674,11 +781,32 @@ def build_dashboard_payload() -> dict[str, Any]:
         "alerts_last_hour": alerts_last_hour,
         "average_interval": average_interval,
         "average_fps": average_fps,
+        "total_groups": len(group_entries),
+        "running_groups": running_groups,
+        "page_jobs": len(page_jobs),
+        "page_jobs_running": page_jobs_running,
+        "ocr_cameras": len(ocr_cameras),
+        "ocr_running": ocr_running,
     }
     return {
         "summary": summary,
         "cameras": cameras,
         "alerts": recent_alerts,
+        "groups": sorted(group_entries, key=lambda g: (-g.get("running", 0), -g.get("cameras", 0))),
+        "page_jobs": sorted(
+            page_jobs,
+            key=lambda job: (
+                0 if job.get("inference_running") else 1,
+                job.get("cam_id") or "",
+            ),
+        ),
+        "ocr_cameras": sorted(
+            ocr_cameras,
+            key=lambda cam: (
+                0 if cam.get("inference_running") else 1,
+                cam.get("cam_id") or "",
+            ),
+        ),
         "generated_at": datetime.utcnow().isoformat() + "Z",
     }
 
