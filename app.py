@@ -609,12 +609,21 @@ def build_dashboard_payload() -> dict[str, Any]:
     alerts_last_hour = 0
     module_duration_stats: dict[str, dict[str, float | int | None]] = {}
     source_duration_stats: dict[str, dict[str, float | int | None]] = {}
+    latest_frame_snapshot: dict[str, Any] | None = None
 
     def _clean_optional_str(value: object) -> str | None:
         if value is None:
             return None
         text = str(value).strip()
         return text or None
+
+    def _to_iso(timestamp_value: object) -> str | None:
+        if not timestamp_value:
+            return None
+        try:
+            return datetime.fromtimestamp(float(timestamp_value)).isoformat()
+        except (TypeError, ValueError, OSError, OverflowError):
+            return None
 
     for notif in notifications_snapshot:
         try:
@@ -625,6 +634,7 @@ def build_dashboard_payload() -> dict[str, Any]:
             alerts_last_hour += 1
         results = notif.get("results") or []
         total_duration = 0.0
+        frame_measurements: list[dict[str, Any]] = []
         for result in results:
             module_name = str(result.get("module") or "ไม่ระบุ")
             try:
@@ -634,6 +644,17 @@ def build_dashboard_payload() -> dict[str, Any]:
             if duration_val is None:
                 continue
             total_duration += duration_val
+            frame_measurements.append(
+                {
+                    "name": module_name,
+                    "module": module_name,
+                    "duration": float(duration_val),
+                    "roi_id": _clean_optional_str(result.get("id")),
+                    "roi_name": _clean_optional_str(result.get("name")),
+                    "cam_id": _clean_optional_str(notif.get("cam_id")),
+                    "source": _clean_optional_str(notif.get("source")),
+                }
+            )
             module_entry = module_duration_stats.setdefault(
                 module_name,
                 {
@@ -700,6 +721,27 @@ def build_dashboard_payload() -> dict[str, Any]:
                 module_entry["slowest_roi_name"] = _clean_optional_str(result.get("name"))
                 module_entry["slowest_source"] = _clean_optional_str(notif.get("source"))
                 module_entry["slowest_cam_id"] = _clean_optional_str(notif.get("cam_id"))
+        if frame_measurements:
+            frame_timestamp_iso = _to_iso(ts) or (
+                str(notif.get("timestamp")).strip()
+                if isinstance(notif.get("timestamp"), str)
+                and str(notif.get("timestamp")).strip()
+                else None
+            )
+            fastest_frame = min(frame_measurements, key=lambda item: item["duration"])
+            slowest_frame = max(frame_measurements, key=lambda item: item["duration"])
+            fastest_entry = dict(fastest_frame)
+            slowest_entry = dict(slowest_frame)
+            if frame_timestamp_iso:
+                fastest_entry["timestamp"] = frame_timestamp_iso
+                slowest_entry["timestamp"] = frame_timestamp_iso
+            latest_frame_snapshot = {
+                "timestamp": frame_timestamp_iso,
+                "cam_id": _clean_optional_str(notif.get("cam_id")),
+                "source": _clean_optional_str(notif.get("source")),
+                "fastest": fastest_entry,
+                "slowest": slowest_entry,
+            }
         cam_id = notif.get("cam_id")
         if cam_id and total_duration > 0:
             source_entry = source_duration_stats.setdefault(
@@ -935,14 +977,6 @@ def build_dashboard_payload() -> dict[str, Any]:
     fastest_measurement: dict[str, Any] | None = None
     slowest_measurement: dict[str, Any] | None = None
 
-    def _to_iso(timestamp_value: object) -> str | None:
-        if not timestamp_value:
-            return None
-        try:
-            return datetime.fromtimestamp(float(timestamp_value)).isoformat()
-        except (TypeError, ValueError, OSError, OverflowError):
-            return None
-
     for module_name, info in module_usage.items():
         durations = module_duration_stats.get(module_name, {})
         count = int(info.get("count", 0))
@@ -993,6 +1027,7 @@ def build_dashboard_payload() -> dict[str, Any]:
         if fastest_duration is not None:
             candidate_fastest = {
                 "name": module_name,
+                "module": module_name,
                 "duration": float(fastest_duration),
                 "timestamp": fastest_timestamp_iso,
                 "roi_id": durations.get("fastest_roi_id"),
@@ -1010,6 +1045,7 @@ def build_dashboard_payload() -> dict[str, Any]:
         if slowest_duration is not None:
             candidate_slowest = {
                 "name": module_name,
+                "module": module_name,
                 "duration": float(slowest_duration),
                 "timestamp": slowest_timestamp_iso,
                 "roi_id": durations.get("slowest_roi_id"),
@@ -1053,6 +1089,7 @@ def build_dashboard_payload() -> dict[str, Any]:
                 "max_duration": perf.get("max"),
                 "min_duration": perf.get("min"),
                 "latest_duration": perf.get("latest_duration"),
+                "latest_completed_at": _to_iso(perf.get("latest_timestamp")),
                 "samples": sample_count,
                 "meets_interval": meets_interval,
                 "interval_gap": interval_gap,
@@ -1074,6 +1111,7 @@ def build_dashboard_payload() -> dict[str, Any]:
         "module_performance": {
             "fastest": fastest_measurement,
             "slowest": slowest_measurement,
+            "latest_frame": latest_frame_snapshot,
         },
         "source_details": source_details,
     }
