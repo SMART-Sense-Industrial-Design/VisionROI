@@ -545,6 +545,22 @@ main.app-main {
   font-size: 0.85rem;
 }
 
+.performance-card__meta--detail {
+  font-weight: 600;
+}
+
+.performance-card__meta--frame {
+  font-size: 0.78rem;
+  opacity: 0.85;
+}
+
+.performance-card--fast .performance-card__meta--detail,
+.performance-card--fast .performance-card__meta--frame,
+.performance-card--slow .performance-card__meta--detail,
+.performance-card--slow .performance-card__meta--frame {
+  color: inherit;
+}
+
 .module-badge-group {
   display: flex;
   flex-wrap: wrap;
@@ -622,6 +638,21 @@ main.app-main {
   margin: 0;
   font-size: 0.78rem;
   color: rgba(15, 23, 42, 0.55);
+}
+
+.roi-source-duration {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.roi-source-duration__value {
+  font-weight: 600;
+}
+
+.roi-source-duration__meta {
+  font-size: 0.75rem;
+  color: rgba(15, 23, 42, 0.6);
 }
 
 @media (max-width: 1200px) {
