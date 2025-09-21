@@ -609,6 +609,13 @@ def build_dashboard_payload() -> dict[str, Any]:
     alerts_last_hour = 0
     module_duration_stats: dict[str, dict[str, float | int | None]] = {}
     source_duration_stats: dict[str, dict[str, float | int | None]] = {}
+
+    def _clean_optional_str(value: object) -> str | None:
+        if value is None:
+            return None
+        text = str(value).strip()
+        return text or None
+
     for notif in notifications_snapshot:
         try:
             ts = float(notif.get("timestamp_epoch", 0.0))
@@ -636,6 +643,18 @@ def build_dashboard_payload() -> dict[str, Any]:
                     "max": None,
                     "latest_duration": None,
                     "latest_timestamp": 0.0,
+                    "fastest_duration": None,
+                    "fastest_timestamp": 0.0,
+                    "fastest_roi_id": None,
+                    "fastest_roi_name": None,
+                    "fastest_source": None,
+                    "fastest_cam_id": None,
+                    "slowest_duration": None,
+                    "slowest_timestamp": 0.0,
+                    "slowest_roi_id": None,
+                    "slowest_roi_name": None,
+                    "slowest_source": None,
+                    "slowest_cam_id": None,
                 },
             )
             module_entry["total"] += duration_val
@@ -653,30 +672,34 @@ def build_dashboard_payload() -> dict[str, Any]:
             if ts >= float(module_entry.get("latest_timestamp", 0.0) or 0.0):
                 module_entry["latest_duration"] = duration_val
                 module_entry["latest_timestamp"] = ts
-                roi_identifier = result.get("id")
-                roi_name = result.get("name")
-                source_name = notif.get("source")
-                cam_identifier = notif.get("cam_id")
-                module_entry["latest_roi_id"] = (
-                    str(roi_identifier)
-                    if roi_identifier is not None and str(roi_identifier)
-                    else None
-                )
-                module_entry["latest_roi_name"] = (
-                    str(roi_name)
-                    if roi_name is not None and str(roi_name).strip()
-                    else None
-                )
-                module_entry["latest_source"] = (
-                    str(source_name)
-                    if source_name is not None and str(source_name).strip()
-                    else None
-                )
-                module_entry["latest_cam_id"] = (
-                    str(cam_identifier)
-                    if cam_identifier is not None and str(cam_identifier)
-                    else None
-                )
+                module_entry["latest_roi_id"] = _clean_optional_str(result.get("id"))
+                module_entry["latest_roi_name"] = _clean_optional_str(result.get("name"))
+                module_entry["latest_source"] = _clean_optional_str(notif.get("source"))
+                module_entry["latest_cam_id"] = _clean_optional_str(notif.get("cam_id"))
+
+            fastest_duration = module_entry.get("fastest_duration")
+            if (
+                fastest_duration is None
+                or duration_val < float(fastest_duration or 0.0)
+            ):
+                module_entry["fastest_duration"] = duration_val
+                module_entry["fastest_timestamp"] = ts
+                module_entry["fastest_roi_id"] = _clean_optional_str(result.get("id"))
+                module_entry["fastest_roi_name"] = _clean_optional_str(result.get("name"))
+                module_entry["fastest_source"] = _clean_optional_str(notif.get("source"))
+                module_entry["fastest_cam_id"] = _clean_optional_str(notif.get("cam_id"))
+
+            slowest_duration = module_entry.get("slowest_duration")
+            if (
+                slowest_duration is None
+                or duration_val > float(slowest_duration or 0.0)
+            ):
+                module_entry["slowest_duration"] = duration_val
+                module_entry["slowest_timestamp"] = ts
+                module_entry["slowest_roi_id"] = _clean_optional_str(result.get("id"))
+                module_entry["slowest_roi_name"] = _clean_optional_str(result.get("name"))
+                module_entry["slowest_source"] = _clean_optional_str(notif.get("source"))
+                module_entry["slowest_cam_id"] = _clean_optional_str(notif.get("cam_id"))
         cam_id = notif.get("cam_id")
         if cam_id and total_duration > 0:
             source_entry = source_duration_stats.setdefault(
@@ -909,6 +932,17 @@ def build_dashboard_payload() -> dict[str, Any]:
     summary["total_roi"] = roi_total_count
 
     module_details: list[dict[str, Any]] = []
+    fastest_measurement: dict[str, Any] | None = None
+    slowest_measurement: dict[str, Any] | None = None
+
+    def _to_iso(timestamp_value: object) -> str | None:
+        if not timestamp_value:
+            return None
+        try:
+            return datetime.fromtimestamp(float(timestamp_value)).isoformat()
+        except (TypeError, ValueError, OSError, OverflowError):
+            return None
+
     for module_name, info in module_usage.items():
         durations = module_duration_stats.get(module_name, {})
         count = int(info.get("count", 0))
@@ -918,52 +952,79 @@ def build_dashboard_payload() -> dict[str, Any]:
             if duration_count
             else None
         )
-        module_details.append(
-            {
+        latest_timestamp_iso = _to_iso(durations.get("latest_timestamp"))
+        fastest_duration = durations.get("fastest_duration")
+        fastest_timestamp_iso = _to_iso(durations.get("fastest_timestamp"))
+        slowest_duration = durations.get("slowest_duration")
+        slowest_timestamp_iso = _to_iso(durations.get("slowest_timestamp"))
+
+        detail_entry = {
+            "name": module_name,
+            "roi_count": count,
+            "source_count": len(info.get("sources", set())),
+            "sources": sorted(str(src) for src in info.get("sources", set())),
+            "types": sorted(str(t) for t in info.get("types", set()) if t),
+            "average_duration": average_duration,
+            "min_duration": durations.get("min"),
+            "max_duration": durations.get("max"),
+            "sample_count": duration_count,
+            "latest_duration": durations.get("latest_duration"),
+            "latest_timestamp": latest_timestamp_iso,
+            "latest_roi_id": durations.get("latest_roi_id"),
+            "latest_roi_name": durations.get("latest_roi_name"),
+            "latest_cam_id": durations.get("latest_cam_id"),
+            "latest_source": durations.get("latest_source"),
+            "fastest_duration": fastest_duration,
+            "fastest_timestamp": fastest_timestamp_iso,
+            "fastest_roi_id": durations.get("fastest_roi_id"),
+            "fastest_roi_name": durations.get("fastest_roi_name"),
+            "fastest_cam_id": durations.get("fastest_cam_id"),
+            "fastest_source": durations.get("fastest_source"),
+            "slowest_duration": slowest_duration,
+            "slowest_timestamp": slowest_timestamp_iso,
+            "slowest_roi_id": durations.get("slowest_roi_id"),
+            "slowest_roi_name": durations.get("slowest_roi_name"),
+            "slowest_cam_id": durations.get("slowest_cam_id"),
+            "slowest_source": durations.get("slowest_source"),
+        }
+
+        module_details.append(detail_entry)
+
+        if fastest_duration is not None:
+            candidate_fastest = {
                 "name": module_name,
-                "roi_count": count,
-                "source_count": len(info.get("sources", set())),
-                "sources": sorted(str(src) for src in info.get("sources", set())),
-                "types": sorted(str(t) for t in info.get("types", set()) if t),
-                "average_duration": average_duration,
-                "min_duration": durations.get("min"),
-                "max_duration": durations.get("max"),
-                "sample_count": duration_count,
-                "latest_duration": durations.get("latest_duration"),
-                "latest_timestamp": durations.get("latest_timestamp"),
-                "latest_roi_id": durations.get("latest_roi_id"),
-                "latest_roi_name": durations.get("latest_roi_name"),
-                "latest_cam_id": durations.get("latest_cam_id"),
-                "latest_source": durations.get("latest_source"),
+                "duration": float(fastest_duration),
+                "timestamp": fastest_timestamp_iso,
+                "roi_id": durations.get("fastest_roi_id"),
+                "roi_name": durations.get("fastest_roi_name"),
+                "cam_id": durations.get("fastest_cam_id"),
+                "source": durations.get("fastest_source"),
             }
-        )
+            if (
+                fastest_measurement is None
+                or candidate_fastest["duration"]
+                < fastest_measurement.get("duration", float("inf"))
+            ):
+                fastest_measurement = candidate_fastest
+
+        if slowest_duration is not None:
+            candidate_slowest = {
+                "name": module_name,
+                "duration": float(slowest_duration),
+                "timestamp": slowest_timestamp_iso,
+                "roi_id": durations.get("slowest_roi_id"),
+                "roi_name": durations.get("slowest_roi_name"),
+                "cam_id": durations.get("slowest_cam_id"),
+                "source": durations.get("slowest_source"),
+            }
+            if (
+                slowest_measurement is None
+                or candidate_slowest["duration"]
+                > slowest_measurement.get("duration", float("-inf"))
+            ):
+                slowest_measurement = candidate_slowest
 
     module_details.sort(key=lambda item: (-item.get("roi_count", 0), item.get("name", "")))
-
-    latest_measured_modules = [
-        item for item in module_details if item.get("latest_duration") is not None
-    ]
-    if latest_measured_modules:
-        fastest_module = min(
-            latest_measured_modules, key=lambda item: float(item.get("latest_duration", 0.0))
-        )
-        slowest_module = max(
-            latest_measured_modules, key=lambda item: float(item.get("latest_duration", 0.0))
-        )
-    else:
-        measured_modules = [
-            item for item in module_details if item.get("average_duration") is not None
-        ]
-        fastest_module = (
-            min(measured_modules, key=lambda item: item.get("average_duration", 0.0))
-            if measured_modules
-            else None
-        )
-        slowest_module = (
-            max(measured_modules, key=lambda item: item.get("average_duration", 0.0))
-            if measured_modules
-            else None
-        )
 
     source_details: list[dict[str, Any]] = []
     for cam_id, info in source_roi_map.items():
@@ -1011,8 +1072,8 @@ def build_dashboard_payload() -> dict[str, Any]:
         "sources_with_roi": sum(1 for item in source_details if item.get("roi_count", 0)),
         "module_details": module_details,
         "module_performance": {
-            "fastest": fastest_module,
-            "slowest": slowest_module,
+            "fastest": fastest_measurement,
+            "slowest": slowest_measurement,
         },
         "source_details": source_details,
     }

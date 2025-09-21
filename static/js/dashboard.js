@@ -148,10 +148,10 @@ function formatRoiDetail(entry) {
   if (!entry) {
     return 'รอข้อมูล ROI';
   }
-  const roiNameRaw = entry?.latest_roi_name;
-  const roiIdRaw = entry?.latest_roi_id;
-  const sourceRaw = entry?.latest_source;
-  const camRaw = entry?.latest_cam_id;
+  const roiNameRaw = entry?.latest_roi_name ?? entry?.roi_name;
+  const roiIdRaw = entry?.latest_roi_id ?? entry?.roi_id;
+  const sourceRaw = entry?.latest_source ?? entry?.source;
+  const camRaw = entry?.latest_cam_id ?? entry?.cam_id;
 
   const roiName = typeof roiNameRaw === 'string' ? roiNameRaw.trim() : '';
   const roiId =
@@ -280,41 +280,38 @@ function renderModuleCards(modules = []) {
   });
 }
 
+function formatPerformanceMeta(entry) {
+  if (!entry) {
+    return 'รอข้อมูล';
+  }
+  const timestamp = entry?.timestamp;
+  if (!timestamp) {
+    return 'รอข้อมูล';
+  }
+  return `บันทึกเมื่อ ${formatDateTime(timestamp)}`;
+}
+
 function updateModulePerformance(performance = {}) {
   const fastest = performance?.fastest;
   const slowest = performance?.slowest;
 
-  const fastestMeta = fastest
-    ? [
-      Number(fastest?.roi_count ?? 0) ? `ROI ${fastest.roi_count}` : null,
-      Number(fastest?.sample_count ?? 0) ? `${fastest.sample_count} รอบ` : null,
-    ].filter(Boolean).join(' · ') || 'รอข้อมูล'
-    : 'รอข้อมูล';
-
-  const slowestMeta = slowest
-    ? [
-      Number(slowest?.roi_count ?? 0) ? `ROI ${slowest.roi_count}` : null,
-      Number(slowest?.sample_count ?? 0) ? `${slowest.sample_count} รอบ` : null,
-    ].filter(Boolean).join(' · ') || 'รอข้อมูล'
-    : 'รอข้อมูล';
-
   setElementText('module-fastest-name', fastest?.name || '-');
-  const fastestDuration = fastest?.latest_duration ?? fastest?.average_duration;
+  const fastestDuration = fastest?.duration;
   setElementText(
     'module-fastest-duration',
     fastestDuration != null ? formatSecondsWithUnit(fastestDuration) || '-' : '-',
   );
   setElementText('module-fastest-roi', formatRoiDetail(fastest));
-  setElementText('module-fastest-meta', fastestMeta);
+  setElementText('module-fastest-meta', formatPerformanceMeta(fastest));
 
   setElementText('module-slowest-name', slowest?.name || '-');
-  const slowestDuration = slowest?.latest_duration ?? slowest?.average_duration;
+  const slowestDuration = slowest?.duration;
   setElementText(
     'module-slowest-duration',
     slowestDuration != null ? formatSecondsWithUnit(slowestDuration) || '-' : '-',
   );
   setElementText('module-slowest-roi', formatRoiDetail(slowest));
-  setElementText('module-slowest-meta', slowestMeta);
+  setElementText('module-slowest-meta', formatPerformanceMeta(slowest));
 }
 
 function createModuleBadge(name) {
@@ -420,11 +417,13 @@ function updateRoiSourceTable(details = []) {
     }
 
     const avgCell = document.createElement('td');
-    const latestDuration =
-      detail?.latest_duration != null ? detail.latest_duration : detail?.average_duration;
-    avgCell.textContent = formatSeconds(latestDuration);
+    if (detail?.latest_duration != null) {
+      avgCell.textContent = formatSeconds(detail.latest_duration);
+    } else {
+      avgCell.textContent = 'รอข้อมูล';
+    }
     avgCell.title =
-      'เวลาที่ใช้ในการ inference ครบทุก ROI ในเฟรมล่าสุดของแหล่งนี้';
+      'เวลาที่ใช้ในการ inference ครบทุก ROI ในเฟรมล่าสุด (ตั้งแต่ ROI แรกจนถึง ROI สุดท้าย)';
 
     const maxCell = document.createElement('td');
     maxCell.textContent = formatSeconds(detail?.max_duration);
