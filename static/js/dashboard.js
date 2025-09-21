@@ -84,18 +84,21 @@ function updateSummary(summary = {}, analytics = null) {
   const pageJobsRunning = summary.page_jobs_running ?? 0;
   const totalRoi = summary.total_roi ?? 0;
   const moduleTypes = summary.module_types ?? 0;
+  const roiBreakdown = summary.roi_breakdown || {};
+  const roiZones = roiBreakdown.roi ?? 0;
+  const pageTemplates = roiBreakdown.page ?? 0;
 
   if (summary.total_roi !== undefined) {
     setElementText('metric-total-roi-chip', totalRoi);
   }
 
-  const offline = Math.max(total - online, 0);
+  setElementText('summary-roi-zones', roiZones);
+  setElementText('summary-page-templates', pageTemplates);
+
   const onlineRate = total ? (online / total) * 100 : 0;
-  const runningRate = total ? (running / Math.max(total, 1)) * 100 : 0;
   const alertDensity = total ? alerts / Math.max(total, 1) : 0;
 
   setElementText('summary-online-rate', `${onlineRate.toFixed(0)}%`);
-  setElementText('summary-offline', offline);
   setElementText('summary-alert-density', alertDensity.toFixed(2));
   setElementText('chip-group-running', runningGroups);
   setElementText('chip-page-running', pageJobsRunning);
@@ -385,18 +388,25 @@ function getAlertAnalytics(alerts = []) {
 
 function updateInsights(summary = {}, cameras = [], alerts = [], analytics = null) {
   const total = summary.total_cameras ?? 0;
-  const online = summary.online_cameras ?? 0;
   const running = summary.inference_running ?? 0;
   const alertsLastHour = summary.alerts_last_hour ?? 0;
+  const roiBreakdown = summary.roi_breakdown || {};
+  const roiZones = Number(roiBreakdown.roi ?? 0);
+  const pageTemplates = Number(roiBreakdown.page ?? 0);
+  const totalRoi = Number(summary.total_roi ?? roiZones + pageTemplates);
+  const zoneShare = totalRoi ? (roiZones / totalRoi) * 100 : 0;
+  const pageShare = totalRoi ? (pageTemplates / totalRoi) * 100 : 0;
 
-  const offline = Math.max(total - online, 0);
-  const onlineRate = total ? (online / total) * 100 : 0;
+  setElementText('insight-roi-total', totalRoi);
+  setElementText('insight-roi-zones', roiZones);
+  setElementText('insight-roi-zone-share', `${zoneShare.toFixed(0)}%`);
+  setProgress('progress-roi-zone', zoneShare);
+
+  setElementText('insight-roi-pages', pageTemplates);
+  setElementText('insight-roi-page-share', `${pageShare.toFixed(0)}%`);
+  setProgress('progress-roi-page', pageShare);
+
   const runningRate = total ? (running / Math.max(total, 1)) * 100 : 0;
-
-  setElementText('insight-online-value', `${online}/${total}`);
-  setElementText('insight-offline', offline);
-  setElementText('insight-online-rate', `${onlineRate.toFixed(0)}%`);
-  setProgress('progress-online', onlineRate);
 
   setElementText('insight-running', running);
   setElementText('insight-running-rate', `${runningRate.toFixed(0)}%`);

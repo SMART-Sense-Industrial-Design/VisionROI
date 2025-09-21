@@ -603,6 +603,7 @@ def build_dashboard_payload() -> dict[str, Any]:
     intervals: list[float] = []
     fps_values: list[float] = []
     roi_total_count = 0
+    roi_type_counter: Counter[str] = Counter()
     module_counter: Counter[str] = Counter()
     module_cameras: dict[str, set[str]] = defaultdict(set)
     interval_map: dict[str, float | None] = {}
@@ -727,6 +728,10 @@ def build_dashboard_payload() -> dict[str, Any]:
             module_name = str(module_name_raw)
             module_counter[module_name] += 1
             module_cameras[module_name].add(cam_id)
+
+            roi_type_raw = str(roi_def.get("type") or "").strip().lower()
+            roi_type = "page" if roi_type_raw == "page" else "roi"
+            roi_type_counter[roi_type] += 1
 
         if active_group:
             cycle_group_map.setdefault(cam_id, active_group)
@@ -916,10 +921,16 @@ def build_dashboard_payload() -> dict[str, Any]:
         "latest_cycle": cycle_stats["latest"],
     }
 
+    roi_breakdown = {
+        "roi": roi_type_counter.get("roi", 0),
+        "page": roi_type_counter.get("page", 0),
+    }
+
     analytics = {
         "roi": {
             "total": roi_total_count,
             "average_per_camera": (roi_total_count / len(known_ids)) if known_ids else 0.0,
+            "breakdown": roi_breakdown,
         },
         "modules": module_summary,
         "processing": {
@@ -942,6 +953,7 @@ def build_dashboard_payload() -> dict[str, Any]:
         "page_jobs_running": page_jobs_running,
         "total_roi": roi_total_count,
         "module_types": len(module_summary),
+        "roi_breakdown": roi_breakdown,
     }
     return {
         "summary": summary,

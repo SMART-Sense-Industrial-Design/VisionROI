@@ -758,6 +758,33 @@ main.app-main {
   color: rgba(15, 23, 42, 0.6);
 }
 
+.insight-distribution {
+  display: grid;
+  gap: 1rem;
+  margin-top: 1.25rem;
+}
+
+.insight-distribution__item {
+  padding: 0.55rem 0.5rem 0.9rem;
+  border-radius: 14px;
+  background: rgba(226, 232, 240, 0.38);
+  border: 1px solid rgba(148, 163, 184, 0.28);
+}
+
+.insight-distribution__top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-weight: 600;
+  color: rgba(15, 23, 42, 0.85);
+  margin-bottom: 0.45rem;
+}
+
+.insight-distribution__top span:last-child {
+  font-weight: 700;
+  color: var(--color-primary-strong);
+}
+
 .insight-card__footer {
   margin-top: auto;
   display: flex;

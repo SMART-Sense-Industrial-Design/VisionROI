@@ -46,9 +46,14 @@
       <p class="summary-stat__meta">จากกล้องทั้งหมด</p>
     </div>
     <div class="summary-stat">
-      <p class="summary-stat__label">กล้องออฟไลน์</p>
-      <p class="summary-stat__value" id="summary-offline">0</p>
-      <p class="summary-stat__meta">ต้องติดตาม</p>
+      <p class="summary-stat__label">ROI แบบโซน</p>
+      <p class="summary-stat__value" id="summary-roi-zones">0</p>
+      <p class="summary-stat__meta">โซนสำหรับกล้องสด</p>
+    </div>
+    <div class="summary-stat">
+      <p class="summary-stat__label">Page Templates</p>
+      <p class="summary-stat__value" id="summary-page-templates">0</p>
+      <p class="summary-stat__meta">ใช้ OCR แบบเอกสาร</p>
     </div>
     <div class="summary-stat">
       <p class="summary-stat__label">ความหนาแน่นแจ้งเตือน</p>
@@ -123,20 +128,42 @@
       <div class="insight-card__header">
         <span class="insight-card__icon bg-success-subtle text-success"><i class="bi bi-activity"></i></span>
         <div>
-          <h3 class="insight-card__title">ความพร้อมของกล้อง</h3>
-          <p class="insight-card__subtitle">การออนไลน์ของอุปกรณ์ทั้งหมด</p>
+          <h3 class="insight-card__title">ภาพรวม ROI</h3>
+          <p class="insight-card__subtitle">ดูจำนวนโซนกับเทมเพลตเอกสารที่ระบบกำลังใช้</p>
         </div>
       </div>
       <div class="insight-card__body">
-        <p class="insight-card__value" id="insight-online-value">0 / 0</p>
-        <p class="insight-card__meta">ออฟไลน์ <span id="insight-offline">0</span> กล้อง</p>
-        <div class="insight-card__progress">
-          <div class="insight-card__progress-track">
-            <div class="insight-card__progress-fill" id="progress-online"></div>
+        <p class="insight-card__value"><span id="insight-roi-total">0</span> ROI</p>
+        <div class="insight-distribution">
+          <div class="insight-distribution__item">
+            <div class="insight-distribution__top">
+              <span>ROI โซน</span>
+              <span id="insight-roi-zones">0</span>
+            </div>
+            <div class="insight-card__progress">
+              <div class="insight-card__progress-track">
+                <div class="insight-card__progress-fill" id="progress-roi-zone"></div>
+              </div>
+              <div class="insight-card__progress-meta">
+                <span>สัดส่วน</span>
+                <span id="insight-roi-zone-share">0%</span>
+              </div>
+            </div>
           </div>
-          <div class="insight-card__progress-meta">
-            <span>ออนไลน์</span>
-            <span id="insight-online-rate">0%</span>
+          <div class="insight-distribution__item">
+            <div class="insight-distribution__top">
+              <span>Page Templates</span>
+              <span id="insight-roi-pages">0</span>
+            </div>
+            <div class="insight-card__progress">
+              <div class="insight-card__progress-track">
+                <div class="insight-card__progress-fill insight-card__progress-fill--warm" id="progress-roi-page"></div>
+              </div>
+              <div class="insight-card__progress-meta">
+                <span>สัดส่วน</span>
+                <span id="insight-roi-page-share">0%</span>
+              </div>
+            </div>
           </div>
         </div>
       </div>
