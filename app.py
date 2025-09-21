@@ -647,7 +647,14 @@ def build_dashboard_payload() -> dict[str, Any]:
         if cam_id and total_duration > 0:
             source_entry = source_duration_stats.setdefault(
                 str(cam_id),
-                {"total": 0.0, "count": 0, "min": None, "max": 0.0},
+                {
+                    "total": 0.0,
+                    "count": 0,
+                    "min": None,
+                    "max": 0.0,
+                    "latest_duration": None,
+                    "latest_timestamp": 0.0,
+                },
             )
             source_entry["total"] += total_duration
             source_entry["count"] += 1
@@ -659,6 +666,9 @@ def build_dashboard_payload() -> dict[str, Any]:
             source_entry["max"] = max(
                 float(source_entry.get("max", 0.0) or 0.0), total_duration
             )
+            if ts >= float(source_entry.get("latest_timestamp", 0.0) or 0.0):
+                source_entry["latest_duration"] = total_duration
+                source_entry["latest_timestamp"] = ts
     for cam_id in sorted(known_ids, key=str):
         task = inference_tasks.get(cam_id)
         inference_running = bool(task and not task.done())
@@ -930,6 +940,7 @@ def build_dashboard_payload() -> dict[str, Any]:
                 "average_duration": average_duration,
                 "max_duration": perf.get("max"),
                 "min_duration": perf.get("min"),
+                "latest_duration": perf.get("latest_duration"),
                 "samples": sample_count,
                 "meets_interval": meets_interval,
                 "interval_gap": interval_gap,
