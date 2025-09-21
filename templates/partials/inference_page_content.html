@@ -1,601 +1,1001 @@
-
-<div class="cam-row" data-row-label="สตรีม 1">
-    <div class="video-col">
-        <div class="card roi-card video-card">
-            <div id="cam1" class="cam-cell">
-            <div class="d-flex align-items-center mb-2 gap-2 menu-select-list">
-                <label for="cam1-sourceSelect" class="form-label mb-0">Source:</label>
-                <select id="cam1-sourceSelect" class="form-select w-auto"></select>
-                <label for="cam1-intervalInput" class="form-label mb-0">Time:</label>
-                <input id="cam1-intervalInput" type="number" class="form-control w-auto" min="0" step="0.1" value="1" />
-            </div>
-            <button id="cam1-startButton" class="btn btn-primary me-2">Start</button>
-            <button id="cam1-stopButton" class="btn btn-danger" disabled>Stop</button>
-            <p id="cam1-status"></p>
-            <div class="video-wrapper">
-                <canvas id="cam1-video" class="stream-video"></canvas>
-                <p>page: <span id="cam1-pageName"></span></p>
-                <table id="cam1-pageScores" class="table table-striped">
-                    <thead><tr><th>Page</th><th>Score</th></tr></thead>
-                    <tbody id="cam1-pageScoresBody"></tbody>
-                </table>
-            </div>
-            </div>
-        </div>
-        <div class="card roi-card log-card">
-            <div class="d-flex align-items-center mb-2 gap-2">
-                <label for="cam1-logRoiSelect" class="form-label mb-0">ROI:</label>
-                <select id="cam1-logRoiSelect" class="form-select w-auto"></select>
-            </div>
-            <div class="log-wrapper">
-                <table id="cam1-logTable" class="table table-striped">
-                    <thead><tr><th>Log</th></tr></thead>
-                    <tbody id="cam1-logBody"></tbody>
-                </table>
-            </div>
-        </div>
+<div class="d-flex flex-column gap-3">
+  <div class="d-flex align-items-start justify-content-between flex-wrap gap-3">
+    <div>
+      <h4 class="mb-1">จัดการงาน Inference สำหรับหน้าเอกสาร</h4>
+      <p class="mb-0 text-muted">สร้างหลายงานได้พร้อมกันเพื่อทดสอบการตรวจจับหน้าและ ROI ได้อย่างยืดหยุ่น</p>
     </div>
-    <div class="card roi-card roi-list-card">
-        <div id="cam1-rois" class="roi-grid"></div>
+    <div class="d-flex gap-2 flex-wrap">
+      <button type="button" id="addPageInferenceBtn" class="btn btn-success">เพิ่มงาน Inference</button>
     </div>
+  </div>
+  <div class="alert alert-info" role="alert">
+    <ul class="mb-0 ps-3">
+      <li>แต่ละงานสามารถเลือก Source, Group และกำหนด Interval เป็นของตัวเองได้</li>
+      <li>ผลการจับหน้านั้นจะแสดงชื่อหน้าและคะแนนของแต่ละหน้าแยกตามงาน</li>
+      <li>เมื่อลบงาน ระบบจะหยุดการประมวลผลและเคลียร์ข้อมูลให้โดยอัตโนมัติ</li>
+    </ul>
+  </div>
+  <div id="pageInferenceRows" class="d-flex flex-column gap-4"></div>
 </div>
 <script>
-(function(){
-function initRoiLayout(cellId){
-    const videoCell=document.getElementById(cellId);
-    const videoCol=videoCell?videoCell.closest('.video-col'):null;
-    const roiContainer=document.getElementById(`${cellId}-rois`);
-    const roiCard=roiContainer?roiContainer.closest('.roi-list-card'):null;
-    if(!videoCol||!roiCard){
+  (function() {
+    function initRoiLayout(cellId) {
+      const videoCell = document.getElementById(cellId);
+      const videoCol = videoCell ? videoCell.closest('.video-col') : null;
+      const roiContainer = document.getElementById(`${cellId}-rois`);
+      const roiCard = roiContainer ? roiContainer.closest('.roi-list-card') : null;
+      if (!videoCol || !roiCard) {
         return;
-    }
-    const roiGrid=roiCard.querySelector('.roi-grid');
-    if(roiGrid){
-        roiGrid.style.height='100%';
-    }
-    const updateHeight=()=>{
-        const rect=videoCol.getBoundingClientRect();
-        if(rect&&rect.height){
-            roiCard.style.maxHeight=`${rect.height}px`;
+      }
+
+      const roiGrid = roiCard.querySelector('.roi-grid');
+      if (roiGrid) {
+        roiGrid.style.height = '100%';
+      }
+
+      const updateHeight = () => {
+        const rect = videoCol.getBoundingClientRect();
+        if (rect && rect.height) {
+          roiCard.style.maxHeight = `${rect.height}px`;
         }
-    };
-    updateHeight();
-    if('ResizeObserver' in window){
-        const observer=new ResizeObserver(()=>updateHeight());
+      };
+
+      updateHeight();
+
+      if ('ResizeObserver' in window) {
+        const observer = new ResizeObserver(() => updateHeight());
         observer.observe(videoCol);
-    }
-    window.addEventListener('resize',updateHeight);
-}
-function createController(cellId){
-    let socket;
-    let roiSocket;
-    let running=false;
-    const cam=`page_${cellId}`;
-    const getEl=suffix=>document.getElementById(`${cellId}-${suffix}`);
-    const video=getEl('video');
-    const videoCtx=video.getContext('2d');
-    const pageNameEl=getEl('pageName');
-    const scoreTableBody=getEl('pageScoresBody');
-    const roiGrid=getEl('rois');
-    const logBody=getEl('logBody');
-    const logRoiSelect=getEl('logRoiSelect');
-    let rois=[];
-    let logTimer;
-    let isLogUpdating=false;
-    let logSessionId=0;
+      }
 
-    function populateLogRoiSelect(){
-        logRoiSelect.innerHTML='';
-        const optAll=document.createElement('option');
-        optAll.value='';
-        optAll.textContent='All';
-        logRoiSelect.appendChild(optAll);
-        rois.forEach(r=>{
-            const opt=document.createElement('option');
-            opt.value=r.id;
-            opt.textContent=r.id;
-            logRoiSelect.appendChild(opt);
-        });
+      window.addEventListener('resize', updateHeight);
     }
 
-    populateLogRoiSelect();
-
-    const startButton=getEl('startButton');
-    const stopButton=getEl('stopButton');
-    const statusEl=getEl('status');
-    const sourceSelect=getEl('sourceSelect');
-    const intervalInput=getEl('intervalInput');
-    intervalInput.value=localStorage.getItem(`${cellId}-interval`)||'1';
-
-    const formatTs=ts=>{
-        if(!ts) return '';
-        const d=new Date(ts*1000);
-        const ms=String(d.getMilliseconds()).padStart(3,'0');
-        return `${d.toLocaleTimeString('th-TH',{hour12:false})}.${ms}`;
-    };
-
-    const formatDuration=seconds=>{
-        if(!Number.isFinite(seconds)||seconds<0)return '';
-        if(seconds>=1){
-            return `${seconds.toFixed(2)} s`;
+    function createCameraController(cellId, options = {}) {
+      let socket;
+      let roiSocket;
+      let rois = [];
+      let allRois = [];
+      let running = false;
+      const {
+        camId: camIdOverride,
+        title: providedTitle,
+        defaultSource: providedSource,
+        defaultInterval,
+        defaultGroup,
+      } = options || {};
+      const cam = typeof camIdOverride === 'string' && camIdOverride.length > 0
+        ? camIdOverride
+        : `page_${cellId}`;
+      const getEl = suffix => document.getElementById(`${cellId}-${suffix}`);
+      const video = getEl('video');
+      const videoCtx = video.getContext('2d');
+      const startButton = getEl('startButton');
+      const stopButton = getEl('stopButton');
+      const statusEl = getEl('status');
+      const titleEl = getEl('title');
+      const labelEl = getEl('label');
+      const sourceSelect = getEl('sourceSelect');
+      const groupSelect = getEl('groupSelect');
+      const roiGrid = getEl('rois');
+      const logBody = getEl('logBody');
+      const logRoiSelect = getEl('logRoiSelect');
+      const intervalInput = getEl('intervalInput');
+      const pageNameEl = getEl('pageName');
+      const scoreTableBody = getEl('pageScoresBody');
+      let logTimer;
+      let isLogUpdating = false;
+      let logSessionId = 0;
+      let currentLogSource;
+      const baseTitle = typeof providedTitle === 'string' && providedTitle.length > 0
+        ? providedTitle
+        : 'งาน Inference';
+      if (titleEl) {
+        titleEl.textContent = baseTitle;
+      }
+      const baseLabelText = `ID: ${cam}`;
+      if (labelEl) {
+        labelEl.textContent = baseLabelText;
+      }
+      const storedInterval = localStorage.getItem(`${cellId}-interval`);
+      if (storedInterval) {
+        intervalInput.value = storedInterval;
+      } else if (defaultInterval !== undefined && defaultInterval !== null) {
+        intervalInput.value = String(defaultInterval);
+      } else {
+        intervalInput.value = '1';
+      }
+      const normalizedDefaultGroup = typeof defaultGroup === 'string' ? defaultGroup : '';
+      const groupStorageKey = `${cellId}-group`;
+      const getStoredGroup = () => {
+        const stored = localStorage.getItem(groupStorageKey);
+        if (stored !== null) {
+          return stored;
         }
-        if(seconds>=0.001){
-            return `${Math.round(seconds*1000)} ms`;
+        return normalizedDefaultGroup;
+      };
+      const storeGroupSelection = value => {
+        if (value) {
+          localStorage.setItem(groupStorageKey, value);
+        } else {
+          localStorage.removeItem(groupStorageKey);
         }
-        return `${(seconds*1000).toFixed(2)} ms`;
-    };
+      };
+      let lastActiveGroup = getStoredGroup();
 
-    startButton.onclick=startStream;
-    stopButton.onclick=stopStream;
-    sourceSelect.onchange=()=>{
-        localStorage.setItem(`${cellId}-source`,sourceSelect.value);
-    };
-    logRoiSelect.onchange=()=>startLogUpdates(sourceSelect.value);
+      const formatTs = ts => {
+        if (!ts) return '';
+        const d = new Date(ts * 1000);
+        const ms = String(d.getMilliseconds()).padStart(3, '0');
+        return `${d.toLocaleTimeString('th-TH', { hour12: false })}.${ms}`;
+      };
 
-    async function fetchWithStatus(url,options={}){
-        statusEl.innerText='กำลังโหลด...';
-        try{
-            const res=await fetch(url,options);
-            if(!res.ok)throw new Error('network');
-            statusEl.innerText='สำเร็จ';
-            return res;
-        }catch(err){
-            statusEl.innerText='เกิดข้อผิดพลาด';
-            throw err;
+      const formatDuration = seconds => {
+        if (!Number.isFinite(seconds) || seconds < 0) return '';
+        if (seconds >= 1) {
+          return `${seconds.toFixed(2)} s`;
         }
-    }
+        if (seconds >= 0.001) {
+          return `${Math.round(seconds * 1000)} ms`;
+        }
+        return `${(seconds * 1000).toFixed(2)} ms`;
+      };
 
-    async function loadSources(){
-        try{
-            const res=await fetchWithStatus('/source_list');
-            const data=await res.json();
-            sourceSelect.innerHTML='';
-            if(data.length===0){
-                const opt=document.createElement('option');
-                opt.value='';
-                opt.textContent='No sources available';
-                sourceSelect.appendChild(opt);
-                statusEl.innerText='Create a source first';
-                showAlert('No sources available','error');
-            }else{
-                data.forEach(item=>{
-                    const opt=document.createElement('option');
-                    opt.value=item.name;
-                    opt.textContent=item.name;
-                    sourceSelect.appendChild(opt);
-                });
-                const stored=localStorage.getItem(`${cellId}-source`)||'';
-                if(stored)sourceSelect.value=stored;
-                showAlert('Sources loaded','success');
-            }
-        }catch(e){
-            console.error('Failed to load sources',e);
-            sourceSelect.innerHTML='';
-            const opt=document.createElement('option');
-            opt.value='';
-            opt.textContent='Error loading sources';
+      const resetScoreboard = () => {
+        if (pageNameEl) {
+          pageNameEl.textContent = '';
+        }
+        if (scoreTableBody) {
+          scoreTableBody.innerHTML = '';
+        }
+      };
+      resetScoreboard();
+
+      const updateHeaderSourceLabel = () => {
+        if (!labelEl) {
+          return;
+        }
+        const sourceName = sourceSelect.value || '';
+        labelEl.textContent = sourceName
+          ? `${baseLabelText} • Source: ${sourceName}`
+          : baseLabelText;
+      };
+
+      sourceSelect.onchange = () => {
+        localStorage.setItem(`${cellId}-source`, sourceSelect.value);
+        updateHeaderSourceLabel();
+      };
+
+      startButton.onclick = () => { startInference(); };
+      stopButton.onclick = () => { stopInference(); };
+      groupSelect.onchange = () => { switchGroup(); };
+      logRoiSelect.onchange = () => {
+        if (currentLogSource) {
+          startLogUpdates(currentLogSource);
+        }
+      };
+
+      async function fetchWithStatus(url, options = {}) {
+        statusEl.innerText = 'กำลังโหลด...';
+        try {
+          const res = await fetch(url, options);
+          if (!res.ok) throw new Error('network');
+          statusEl.innerText = 'สำเร็จ';
+          return res;
+        } catch (err) {
+          statusEl.innerText = 'เกิดข้อผิดพลาด';
+          throw err;
+        }
+      }
+
+      async function loadSources() {
+        try {
+          const res = await fetchWithStatus('/source_list');
+          if (!res.ok) throw new Error('Bad response');
+          const data = await res.json();
+          sourceSelect.innerHTML = '';
+          if (data.length === 0) {
+            const opt = document.createElement('option');
+            opt.value = '';
+            opt.textContent = 'No sources available';
             sourceSelect.appendChild(opt);
-            statusEl.innerText='Error fetching sources';
-            showAlert('Failed to load sources','error');
-        }
-    }
-
-    async function startStream(){
-        if(running)return;
-        running=true;
-        startButton.disabled=true;
-        const name=sourceSelect.value;
-        if(!name){
-            statusEl.innerText='Select source first';
-            running=false;
-            startButton.disabled=false;
-            showAlert('Select source first','error');
-            return;
-        }
-        localStorage.setItem(`${cellId}-source`,name);
-        const cfgRes=await fetchWithStatus(`/source_config?name=${encodeURIComponent(name)}`);
-        const cfg=await cfgRes.json();
-        const interval=parseFloat(intervalInput.value)||1;
-        localStorage.setItem(`${cellId}-interval`,interval);
-        let roiPath=cfg.rois;
-        if(!roiPath.startsWith('/'))roiPath=`data_sources/${cfg.name}/${roiPath}`;
-        let roiList=[];
-        try{
-            const roiRes=await fetchWithStatus(`/load_roi_file?path=${encodeURIComponent(roiPath)}`);
-            const data=await roiRes.json();
-            roiList=data.rois||[];
-        }catch(e){
-            console.error('Failed to load ROI file',e);
-            showAlert('Failed to load ROI file','error');
-        }
-
-        rois=roiList.filter(r=>r.type==='roi');
-        populateLogRoiSelect();
-        roiGrid.innerHTML='';
-
-        scoreTableBody.innerHTML='';
-
-        let startData;
-        let startRes;
-        statusEl.innerText='กำลังโหลด...';
-        try{
-            startRes=await fetch(`/start_inference/${cam}`,{
-                method:'POST',headers:{'Content-Type':'application/json'},
-                body:JSON.stringify({...cfg,rois:roiList,interval})
+            statusEl.innerText = 'Create a source first';
+            showAlert('No sources available', 'error');
+          } else {
+            data.forEach(item => {
+              const opt = document.createElement('option');
+              opt.value = item.name;
+              opt.textContent = item.name;
+              sourceSelect.appendChild(opt);
             });
-            startData=await startRes.json().catch(()=>({}));
-        }catch(e){
-            running=false;
-            startButton.disabled=false;
-            statusEl.innerText='เกิดข้อผิดพลาด';
-            showAlert('Failed to start inference stream','error');
-            return;
-        }
-        if(!startRes.ok || (startData.status!=='started' && startData.status!=='already_running')){
-            running=false;
-            startButton.disabled=false;
-            statusEl.innerText='เกิดข้อผิดพลาด';
-            if(startData.message==='open_failed'){
-                showAlert('Failed to open video source','error');
-            }else{
-                showAlert('Failed to start inference stream','error');
+            const stored = localStorage.getItem(`${cellId}-source`) || '';
+            const preferredSource = stored
+              || (typeof providedSource === 'string' ? providedSource : '');
+            const availableSources = new Set(data.map(item => item.name));
+            if (preferredSource && availableSources.has(preferredSource)) {
+              sourceSelect.value = preferredSource;
+              localStorage.setItem(`${cellId}-source`, preferredSource);
             }
-            return;
+            updateHeaderSourceLabel();
+            showAlert('Sources loaded', 'success');
+          }
+        } catch (err) {
+          console.error('Failed to load sources', err);
+          sourceSelect.innerHTML = '';
+          const opt = document.createElement('option');
+          opt.value = '';
+          opt.textContent = 'Error loading sources';
+          sourceSelect.appendChild(opt);
+          statusEl.innerText = 'Error fetching sources';
+          showAlert('Failed to load sources', 'error');
+          updateHeaderSourceLabel();
         }
-        statusEl.innerText='สำเร็จ';
-        openSocket();
-        openRoiSocket();
+      }
 
-        setRunningUI();
-        startLogUpdates(cfg.name);
-        showAlert('Stream started','success');
+      const getModuleElementId = id => `${cellId}-module-${id}`;
+
+      function findRoiDataById(id) {
+        const key = String(id);
+        const match = rois.find(r => String(r?.id) === key);
+        if (match) return match;
+        return allRois.find(r => String(r?.id) === key) || null;
+      }
+
+      function normalizeModule(value) {
+        return typeof value === 'string' ? value.trim() : '';
+      }
+
+      function updateRoiModuleLabel(id, override = '') {
+        const moduleEl = document.getElementById(getModuleElementId(id));
+        if (!moduleEl) return;
+        const overrideText = normalizeModule(override);
+        const fallback = normalizeModule(findRoiDataById(id)?.module ?? '');
+        const moduleName = overrideText || fallback;
+        moduleEl.textContent = moduleName ? `โมดูล: ${moduleName}` : 'โมดูล: -';
+      }
+
+      function isRoiType(data) {
+        return (data?.type ?? 'roi') === 'roi';
+      }
+
+      function ensureRoiItem(id) {
+        if (document.getElementById(`${cellId}-roi-${id}`)) return;
+        const r = findRoiDataById(id) || { id };
+        if (!isRoiType(r)) {
+          return;
         }
-
-
-    function openSocket(){
-        const wsScheme=location.protocol==='https:'?'wss':'ws';
-        const wsBase=`${wsScheme}://${location.host}`;
-        socket=new WebSocket(`${wsBase}/ws/${cam}`);
-        socket.binaryType='blob';
-        socket.onmessage=async event=>{
-            const bitmap=await createImageBitmap(event.data);
-            if(video.width!==bitmap.width||video.height!==bitmap.height){
-                video.width=bitmap.width;
-                video.height=bitmap.height;
-            }
-            videoCtx.drawImage(bitmap,0,0);
-            bitmap.close();
-        };
-    }
-
-    function openRoiSocket(){
-        const wsScheme=location.protocol==='https:'?'wss':'ws';
-        const wsBase=`${wsScheme}://${location.host}`;
-        roiSocket=new WebSocket(`${wsBase}/ws_roi_result/${cam}`);
-        roiSocket.onmessage=event=>{
-            try{
-                const data=JSON.parse(event.data);
-                if('group' in data){
-                    setTimeout(()=>{
-                        pageNameEl.innerText=data.group||'';
-                        if(Array.isArray(data.scores)){
-                            scoreTableBody.innerHTML='';
-                            data.scores.forEach(item=>{
-                                const tr=document.createElement('tr');
-                                const tdPage=document.createElement('td');
-                                tdPage.textContent=item.page||'';
-                                const tdScore=document.createElement('td');
-                                tdScore.textContent=item.score.toFixed(2);
-                                tr.appendChild(tdPage);
-                                tr.appendChild(tdScore);
-                                scoreTableBody.appendChild(tr);
-                            });
-                        }
-                    },0);
-                }
-                if(Array.isArray(data.results)){
-                    const fallbackFrameTime=
-                        typeof data.frame_time==='number'?data.frame_time:undefined;
-                    setTimeout(()=>{
-                        data.results.forEach(item=>applyRoiResult(item,fallbackFrameTime));
-                    },0);
-                }
-                if(Object.prototype.hasOwnProperty.call(data,'id')){
-                    setTimeout(()=>{
-                        applyRoiResult(data);
-                    },0);
-                }
-            }catch(e){}
-        };
-    }
-
-    const getRoiContainerId=id=>`${cellId}-roi-item-${id}`;
-    const getRoiTitleId=id=>`${cellId}-title-${id}`;
-    const getRoiElementId=id=>`${cellId}-roi-${id}`;
-    const getRoiTextId=id=>`${cellId}-text-${id}`;
-    const getRoiTimeId=id=>`${cellId}-time-${id}`;
-    const getRoiModuleId=id=>`${cellId}-module-${id}`;
-
-    function findRoiDataById(id){
-        const key=String(id);
-        return rois.find(r=>String(r?.id)===key)||null;
-    }
-
-    function normalizeModule(value){
-        return typeof value==='string'?value.trim():'';
-    }
-
-    function updateRoiModuleLabel(id,override=''){
-        const moduleEl=document.getElementById(getRoiModuleId(id));
-        if(!moduleEl)return;
-        const overrideText=normalizeModule(override);
-        const fallback=normalizeModule(findRoiDataById(id)?.module??'');
-        const moduleName=overrideText||fallback;
-        moduleEl.textContent=moduleName?`โมดูล: ${moduleName}`:'โมดูล: -';
-    }
-
-    function updateRoiTitle(id,nameOverride=''){
-        const titleEl=document.getElementById(getRoiTitleId(id));
-        if(!titleEl)return;
-        const fallback=findRoiDataById(id)?.name;
-        const title=nameOverride||fallback||`ROI ${id}`;
-        titleEl.textContent=title;
-    }
-
-    function ensureRoiItem(id,nameOverride=''){
-        const key=String(id);
-        const existing=document.getElementById(getRoiContainerId(key));
-        if(existing){
-            updateRoiTitle(key,nameOverride);
-            return existing;
-        }
-        const r=findRoiDataById(key)||{id:key};
-        const item=document.createElement('div');
-        item.className='roi-item';
-        item.id=getRoiContainerId(key);
-        const title=document.createElement('h4');
-        title.className='roi-title';
-        title.id=getRoiTitleId(key);
-        title.textContent=nameOverride||r.name||`ROI ${key}`;
-        const img=document.createElement('img');
-        img.id=getRoiElementId(key);
-        img.className='roi-image';
-        img.alt=`ROI ${key}`;
-        img.loading='lazy';
-        const moduleLine=document.createElement('p');
-        moduleLine.id=getRoiModuleId(key);
-        moduleLine.className='roi-module';
-        const t=document.createElement('p');
-        t.id=getRoiTimeId(key);
-        t.className='roi-time';
-        const p=document.createElement('p');
-        p.id=getRoiTextId(key);
-        p.className='roi-text';
+        const item = document.createElement('div');
+        item.className = 'roi-item';
+        const title = document.createElement('h4');
+        title.className = 'roi-title';
+        title.textContent = r.name || `ROI ${id}`;
+        const img = document.createElement('img');
+        img.id = `${cellId}-roi-${id}`;
+        img.className = 'roi-image';
+        const moduleLine = document.createElement('p');
+        moduleLine.id = getModuleElementId(id);
+        moduleLine.className = 'roi-module';
+        const t = document.createElement('p');
+        t.id = `${cellId}-time-${id}`;
+        t.className = 'roi-time';
+        const p = document.createElement('p');
+        p.id = `${cellId}-text-${id}`;
+        p.className = 'roi-text';
         item.appendChild(title);
         item.appendChild(img);
         item.appendChild(moduleLine);
         item.appendChild(t);
         item.appendChild(p);
         roiGrid.appendChild(item);
-        updateRoiModuleLabel(key);
-        return item;
-    }
+        updateRoiModuleLabel(id);
+      }
 
-    function removeRoiItem(id){
-        const item=document.getElementById(getRoiContainerId(id));
-        if(item && item.parentNode){
-            item.parentNode.removeChild(item);
+      function applyRoiResult(result, fallbackFrameTime) {
+        if (!result) return;
+        const roiId = result.id;
+        if (roiId === undefined || roiId === null) return;
+        const roiData = findRoiDataById(roiId);
+        if (roiData && !isRoiType(roiData)) {
+          return;
         }
-    }
+        ensureRoiItem(roiId);
+        updateRoiModuleLabel(roiId, result.module);
+        const imgEl = document.getElementById(`${cellId}-roi-${roiId}`);
+        if (imgEl && Object.prototype.hasOwnProperty.call(result, 'image')) {
+          imgEl.src = result.image ? `data:image/jpeg;base64,${result.image}` : '';
+        }
+        const textEl = document.getElementById(`${cellId}-text-${roiId}`);
+        if (textEl) {
+          const text = result.text ?? '';
+          textEl.textContent = text ? `ข้อความ: ${text}` : 'ข้อความ: -';
+        }
+        const timeEl = document.getElementById(`${cellId}-time-${roiId}`);
+        if (timeEl) {
+          const duration = typeof result.duration === 'number'
+            ? result.duration
+            : Number.NaN;
+          const durationText = formatDuration(duration);
+          if (durationText) {
+            timeEl.textContent = `เวลา: ${durationText}`;
+          } else {
+            const ts = typeof result.frame_time === 'number'
+              ? result.frame_time
+              : fallbackFrameTime;
+            timeEl.textContent = ts ? `เวลา: ${formatTs(ts)}` : '';
+          }
+        }
+      }
 
-    function applyRoiResult(result,fallbackFrameTime){
-        if(!result)return;
-        const roiId=result.id;
-        if(roiId===undefined||roiId===null)return;
-        const key=String(roiId);
-        const imageData=typeof result.image==='string'?result.image.trim():'';
-        const candidates=[result.text,result.result,result.value,result.ocr];
-        const text=candidates.find(v=>typeof v==='string'&&v.trim().length>0)?.trim()||'';
-        const duration=typeof result.duration==='number'?result.duration:Number.NaN;
-        const durationText=formatDuration(duration);
-        const ts=typeof result.frame_time==='number'?result.frame_time:fallbackFrameTime;
-        const hasTimestamp=Number.isFinite(ts);
-        const shouldDisplay=Boolean((imageData&&imageData.length>0)||text||durationText);
-        if(!shouldDisplay){
-            removeRoiItem(key);
-            return;
-        }
-        const displayName=typeof result.name==='string'?result.name.trim():'';
-        ensureRoiItem(key,displayName);
-        updateRoiModuleLabel(key,result.module);
-        updateRoiTitle(key,displayName);
-        const imgEl=document.getElementById(getRoiElementId(key));
-        if(imgEl && Object.prototype.hasOwnProperty.call(result,'image')){
-            if(imageData){
-                const src=imageData.startsWith('data:')?imageData:`data:image/jpeg;base64,${imageData}`;
-                imgEl.src=src;
-                imgEl.classList.remove('d-none');
-            }else{
-                imgEl.src='';
-                imgEl.classList.add('d-none');
-            }
-        }
-        const textEl=document.getElementById(getRoiTextId(key));
-        if(textEl){
-            textEl.textContent=text?`ข้อความ: ${text}`:'ข้อความ: -';
-        }
-        const timeEl=document.getElementById(getRoiTimeId(key));
-        if(timeEl){
-            if(durationText){
-                timeEl.textContent=`เวลา: ${durationText}`;
-            }else if(hasTimestamp){
-                timeEl.textContent=`เวลา: ${formatTs(ts)}`;
-            }else{
-                timeEl.textContent='';
-            }
-        }
-    }
-
-    function startLogUpdates(sourceName){
+      function startLogUpdates(sourceName){
+        currentLogSource = sourceName;
         stopLogUpdates();
-        const sessionId=logSessionId;
-        isLogUpdating=true;
+        const sessionId = logSessionId;
+        isLogUpdating = true;
         async function fetchLog(){
-            if(!isLogUpdating||sessionId!==logSessionId){
-                return;
+          if(!isLogUpdating || sessionId !== logSessionId){
+            return;
+          }
+          try{
+            const res=await fetch(`/read_log?source=${encodeURIComponent(sourceName)}&lines=40&_=${Date.now()}`);
+            const data=await res.json();
+            if(sessionId !== logSessionId){
+              return;
             }
-            try{
-                const res=await fetch(`/read_log?source=${encodeURIComponent(sourceName)}&lines=40&_=${Date.now()}`);
-                const data=await res.json();
-                if(sessionId!==logSessionId){
-                    return;
-                }
-                logBody.innerHTML='';
-                const filter=logRoiSelect.value;
-                const lines=(data.lines||[]).slice().reverse();
-                lines.forEach(line=>{
-                    const marker='AGGREGATED_ROI ';
-                    const idx=line.indexOf(marker);
-                    if(idx!==-1){
-                        const prefix=line.slice(0,idx).trim();
-                        const payload=line.slice(idx+marker.length).trim();
-                        try{
-                            const parsed=JSON.parse(payload);
-                            const results=Array.isArray(parsed.results)?parsed.results:[];
-                            const frameTs=typeof parsed.frame_time==='number'?parsed.frame_time:null;
-                            const resultTs=typeof parsed.result_time==='number'?parsed.result_time:null;
-                            const groupLabel=parsed.group||'';
-                            results.forEach(res=>{
-                                const roiId=res?.id??res?.roi_id??res?.ROI_ID;
-                                if(roiId===undefined||roiId===null)return;
-                                if(filter && String(roiId)!==filter)return;
-                                const tr=document.createElement('tr');
-                                const td=document.createElement('td');
-                                const parts=[];
-                                if(prefix)parts.push(prefix);
-                                if(frameTs)parts.push(`frame=${formatTs(frameTs)}`);
-                                if(resultTs)parts.push(`result=${formatTs(resultTs)}`);
-                                parts.push(`roi_id=${roiId}`);
-                                if(res.name)parts.push(`name=${res.name}`);
-                                const moduleName=typeof res.module==='string'?res.module.trim():'';
-                                if(moduleName)parts.push(`module=${moduleName}`);
-                                if(groupLabel)parts.push(`group=${groupLabel}`);
-                                if(typeof res.duration==='number'){
-                                    const dur=formatDuration(res.duration);
-                                    if(dur)parts.push(`duration=${dur}`);
-                                }
-                                const textValue=typeof res.text==='string'?res.text:'';
-                                parts.push(`text=${textValue}`);
-                                td.textContent=parts.join(' | ');
-                                tr.appendChild(td);
-                                logBody.appendChild(tr);
-                            });
-                            return;
-                        }catch(e){}
-                    }
-                    if(filter && !line.includes(`roi_id=${filter}`))return;
+            const selectedRoi=logRoiSelect.value;
+            logBody.innerHTML='';
+            const lines=(data.lines||[]).slice().reverse();
+            lines.forEach(line=>{
+              const marker='AGGREGATED_ROI ';
+              const idx=line.indexOf(marker);
+              if(idx!==-1){
+                const prefix=line.slice(0,idx).trim();
+                const payload=line.slice(idx+marker.length).trim();
+                try{
+                  const parsed=JSON.parse(payload);
+                  const results=Array.isArray(parsed.results)?parsed.results:[];
+                  const frameTs=typeof parsed.frame_time==='number'?parsed.frame_time:null;
+                  const resultTs=typeof parsed.result_time==='number'?parsed.result_time:null;
+                  const groupLabel=parsed.group||'';
+                  results.forEach(res=>{
+                    const roiId=res?.id??res?.roi_id??res?.ROI_ID;
+                    if(roiId===undefined||roiId===null)return;
+                    if(selectedRoi!=='all'&&String(roiId)!==selectedRoi)return;
                     const tr=document.createElement('tr');
                     const td=document.createElement('td');
-                    td.textContent=line;
+                    const parts=[];
+                    if(prefix)parts.push(prefix);
+                    if(frameTs)parts.push(`frame=${formatTs(frameTs)}`);
+                    if(resultTs)parts.push(`result=${formatTs(resultTs)}`);
+                    parts.push(`roi_id=${roiId}`);
+                    if(res.name)parts.push(`name=${res.name}`);
+                    const moduleName=typeof res.module==='string'?res.module.trim():'';
+                    if(moduleName)parts.push(`module=${moduleName}`);
+                    if(groupLabel)parts.push(`group=${groupLabel}`);
+                    if(typeof res.duration==='number'){
+                      const dur=formatDuration(res.duration);
+                      if(dur)parts.push(`duration=${dur}`);
+                    }
+                    const textValue=typeof res.text==='string'?res.text:'';
+                    parts.push(`text=${textValue}`);
+                    td.textContent=parts.join(' | ');
                     tr.appendChild(td);
                     logBody.appendChild(tr);
-                });
-            }catch(e){}
-            finally{
-                if(isLogUpdating&&sessionId===logSessionId){
-                    logTimer=setTimeout(fetchLog,1000);
-                }
+                  });
+                  return;
+                }catch(e){}
+              }
+              if(selectedRoi==='all'||line.includes(`roi_id=${selectedRoi}`)){
+                const tr=document.createElement('tr');
+                const td=document.createElement('td');
+                td.textContent=line;
+                tr.appendChild(td);
+                logBody.appendChild(tr);
+              }
+            });
+          }catch(e){}
+          finally{
+            if(isLogUpdating && sessionId === logSessionId){
+              logTimer=setTimeout(fetchLog,1000);
             }
+          }
         }
         fetchLog();
-    }
+      }
 
-    function stopLogUpdates(){
+      function stopLogUpdates(){
         isLogUpdating=false;
         logSessionId++;
         if(logTimer){
-            clearTimeout(logTimer);
-            logTimer=null;
+          clearTimeout(logTimer);
+          logTimer=null;
         }
         logBody.innerHTML='';
-    }
+      }
 
-    async function stopStream(){
-        if(!running)return;
-        running=false;
-        await fetchWithStatus(`/stop_inference/${cam}`,{method:'POST'});
-        if(socket){socket.close();socket=null;}
-        if(roiSocket){roiSocket.close();roiSocket=null;}
-        stopLogUpdates();
-        videoCtx.clearRect(0,0,video.width,video.height);
-        rois=[];
-        populateLogRoiSelect();
-        roiGrid.innerHTML='';
-        pageNameEl.innerText='';
-        scoreTableBody.innerHTML='';
-        startButton.disabled=false;
-        stopButton.disabled=true;
-        statusEl.innerText='Stopped';
-        showAlert('Stream stopped','info');
-    }
+      function updateLogRoiOptions(list){
+        logRoiSelect.innerHTML='';
+        const optAll=document.createElement('option');
+        optAll.value='all';
+        optAll.textContent='All';
+        logRoiSelect.appendChild(optAll);
+        list.forEach(r=>{
+          const opt=document.createElement('option');
+          opt.value=r.id;
+          opt.textContent=r.id;
+          logRoiSelect.appendChild(opt);
+        });
+      }
 
-    function setRunningUI(){
-        startButton.disabled=true;
-        stopButton.disabled=false;
-        statusEl.innerText='Running';
-    }
+      function loadGroupOptions(list, selected) {
+        groupSelect.innerHTML = '';
+        const optSelect = document.createElement('option');
+        optSelect.value = '';
+        optSelect.textContent = '-- Select --';
+        groupSelect.appendChild(optSelect);
+        const optAll = document.createElement('option');
+        optAll.value = 'all';
+        optAll.textContent = 'All';
+        groupSelect.appendChild(optAll);
+        const groups = Array.from(
+          new Set(
+            list
+              .filter(r => (r.type ?? 'roi') === 'roi')
+              .map(r => r.group ?? r.page ?? r.name)
+              .filter(p => p)
+          ),
+        );
+        groups.forEach(p => {
+          const opt = document.createElement('option');
+          opt.value = p;
+          opt.textContent = p;
+          groupSelect.appendChild(opt);
+        });
+        const stored = getStoredGroup();
+        const hasSelected = typeof selected === 'string' && selected.length > 0;
+        const requested = hasSelected ? selected : stored;
+        const validGroups = new Set(groups);
+        const currentSelection = (requested === 'all' || validGroups.has(requested)) ? requested : '';
+        groupSelect.value = currentSelection;
+        storeGroupSelection(currentSelection);
+        const roiForLog = currentSelection
+          ? currentSelection === 'all'
+            ? list
+            : list.filter(r => (r.group ?? r.page ?? r.name) === currentSelection)
+          : [];
+        updateLogRoiOptions(roiForLog);
+        return currentSelection;
+      }
 
-    async function checkStatus(){
-        try{
-            const res=await fetchWithStatus(`/inference_status/${cam}`);
-            const data=await res.json();
-            try{
-                const srcRes=await fetch(`/roi_stream_status/${cam}`);
-                if(srcRes.ok){
-                    const srcData=await srcRes.json();
-                    if(srcData.source){
-                        sourceSelect.value=srcData.source;
-                        localStorage.setItem(`${cellId}-source`,srcData.source);
-                    }
-                }
-            }catch(e){}
-            if(data.running){
-                const name=sourceSelect.value;
-                openSocket();
-                openRoiSocket();
-                scoreTableBody.innerHTML='';
-                if(name){
-                    const cfgRes=await fetchWithStatus(`/source_config?name=${encodeURIComponent(name)}`);
-                    const cfg=await cfgRes.json();
-                    let roiPath=cfg.rois;
-                    if(!roiPath.startsWith('/'))roiPath=`data_sources/${cfg.name}/${roiPath}`;
-                    const roiRes=await fetchWithStatus(`/load_roi_file?path=${encodeURIComponent(roiPath)}`);
-                    const roiData=await roiRes.json();
-                    rois=(roiData.rois||[]).filter(r=>r.type==='roi');
-                    populateLogRoiSelect();
-                    roiGrid.innerHTML='';
-                    startLogUpdates(cfg.name);
-                }
-                setRunningUI();
-                running=true;
-                showAlert('Stream resumed','info');
-            }else{
-                statusEl.innerText='Idle';
-            }
-        }catch(e){
-            statusEl.innerText='Error checking status';
+      async function startInference(roisOverride = null, selectedGroup = '') {
+        if (running) return;
+        running = true;
+        startButton.disabled = true;
+        const name = sourceSelect.value;
+        if (!name) {
+          statusEl.innerText = 'Select source first';
+          running = false;
+          startButton.disabled = false;
+          showAlert('Select source first', 'error');
+          return;
         }
-    }
+        localStorage.setItem(`${cellId}-source`, name);
 
-    (async()=>{
+        const cfgRes = await fetchWithStatus(`/source_config?name=${encodeURIComponent(name)}`);
+        const cfg = await cfgRes.json();
+
+        const { module: _unused, rois: roiPathRaw, ...camCfg } = cfg;
+        const interval = parseFloat(intervalInput.value) || 1;
+        localStorage.setItem(`${cellId}-interval`, interval);
+        let roiPath = roiPathRaw;
+        if (!roiPath.startsWith('/')) {
+          roiPath = `data_sources/${cfg.name}/${roiPath}`;
+        }
+        const res = await fetchWithStatus(`/load_roi_file?path=${encodeURIComponent(roiPath)}`);
+        const data = await res.json();
+        statusEl.innerText = '';
+        allRois = data.rois || [];
+        const roiList = allRois.filter(r => (r.type ?? 'roi') === 'roi');
+        const fallbackGroup = lastActiveGroup || '';
+        const selectedGroupName = typeof selectedGroup === 'string' && selectedGroup.length > 0
+          ? selectedGroup
+          : fallbackGroup;
+        if (!selectedGroupName) {
+          storeGroupSelection('');
+        }
+        const activeGroup = loadGroupOptions(roiList, selectedGroupName);
+        const groupToUse = selectedGroupName || activeGroup;
+        const requestGroup = groupToUse || null;
+        if (Array.isArray(roisOverride)) {
+          rois = roisOverride;
+        } else if (groupToUse === 'all') {
+          rois = roiList;
+        } else if (groupToUse) {
+          rois = roiList.filter(r => (r.group ?? r.page ?? r.name) === groupToUse);
+        } else {
+          rois = [];
+        }
+        roiGrid.innerHTML = '';
+        resetScoreboard();
+        rois.forEach(r => {
+          if (r && r.id !== undefined && r.id !== null) {
+            ensureRoiItem(r.id);
+            updateRoiModuleLabel(r.id);
+          }
+        });
+
+        let startData;
+        let startRes;
+        statusEl.innerText = 'กำลังโหลด...';
+        try {
+          startRes = await fetch(`/start_inference/${cam}`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+              ...camCfg,
+              rois,
+              group: requestGroup,
+              interval,
+              draw_page_boxes: false
+            })
+          });
+          startData = await startRes.json().catch(() => ({}));
+        } catch (err) {
+          running = false;
+          startButton.disabled = false;
+          statusEl.innerText = 'เกิดข้อผิดพลาด';
+          showAlert('Failed to start inference stream', 'error');
+          return;
+        }
+        if(!startRes.ok || (startData.status!=='started' && startData.status!=='already_running')) {
+          running = false;
+          startButton.disabled = false;
+          statusEl.innerText = 'เกิดข้อผิดพลาด';
+          if (startData.message === 'open_failed') {
+            showAlert('Failed to open video source', 'error');
+          } else {
+            showAlert('Failed to start inference stream', 'error');
+          }
+          return;
+        }
+        statusEl.innerText = 'สำเร็จ';
+        lastActiveGroup = groupToUse || '';
+        openSocket();
+        if (rois.length > 0) {
+          openRoiSocket();
+          showAlert('Inference started', 'success');
+        } else {
+          showAlert('Camera started', 'success');
+        }
+        startLogUpdates(cfg.name);
+        setRunningUI();
+      }
+
+      async function stopInference(options = {}) {
+        const opts = options && typeof options === 'object' ? options : {};
+        const forceStop = Boolean(opts.force);
+        const silent = Boolean(opts.silent);
+        if (!running && !forceStop) {
+          startButton.disabled = false;
+          stopButton.disabled = true;
+          return;
+        }
+        const wasRunning = running;
+        running = false;
+        try {
+          if (wasRunning || forceStop) {
+            await fetchWithStatus(`/stop_inference/${cam}`, { method: 'POST' });
+          }
+        } catch (err) {
+          if (!silent) {
+            console.error('Failed to stop inference stream', err);
+            showAlert('Failed to stop inference stream', 'error');
+          }
+        }
+        if (socket) {
+          socket.close();
+          socket = null;
+        }
+        if (roiSocket) {
+          roiSocket.close();
+          roiSocket = null;
+        }
+        stopLogUpdates();
+        if (videoCtx) {
+          videoCtx.clearRect(0, 0, video.width || 0, video.height || 0);
+        }
+        video.width = 0;
+        video.height = 0;
+        rois = [];
+        allRois = [];
+        roiGrid.innerHTML = '';
+        resetScoreboard();
+        statusEl.innerText = 'Stopped';
+        startButton.innerText = 'Resume';
+        startButton.disabled = false;
+        stopButton.disabled = true;
+        groupSelect.value = '';
+        storeGroupSelection('');
+        updateLogRoiOptions([]);
+        if (!silent) {
+          showAlert('Inference stopped', 'info');
+        }
+      }
+
+      function openSocket() {
+        const wsScheme = location.protocol === 'https:' ? 'wss' : 'ws';
+        const wsBase = `${wsScheme}://${location.host}`;
+        socket = new WebSocket(`${wsBase}/ws/${cam}`);
+        socket.binaryType = 'blob';
+        socket.onmessage = async function(event) {
+          try {
+            const bitmap = await createImageBitmap(event.data);
+            if (video.width !== bitmap.width || video.height !== bitmap.height) {
+              video.width = bitmap.width;
+              video.height = bitmap.height;
+            }
+            if (videoCtx) {
+              videoCtx.clearRect(0, 0, video.width, video.height);
+              videoCtx.drawImage(bitmap, 0, 0);
+            }
+            bitmap.close();
+          } catch (err) {
+            console.error('Failed to render frame', err);
+          }
+        };
+      }
+
+      function openRoiSocket() {
+        const wsScheme = location.protocol === 'https:' ? 'wss' : 'ws';
+        const wsBase = `${wsScheme}://${location.host}`;
+        roiSocket = new WebSocket(`${wsBase}/ws_roi_result/${cam}`);
+        roiSocket.onmessage = function(event) {
+          try {
+            const data = JSON.parse(event.data);
+            if ('group' in data || Array.isArray(data.scores)) {
+              setTimeout(() => {
+                if (pageNameEl) {
+                  pageNameEl.textContent = data.group || '';
+                }
+                if (scoreTableBody) {
+                  scoreTableBody.innerHTML = '';
+                  const scores = Array.isArray(data.scores) ? data.scores : [];
+                  scores.forEach(item => {
+                    const tr = document.createElement('tr');
+                    const tdPage = document.createElement('td');
+                    tdPage.textContent = item?.page ?? '';
+                    const tdScore = document.createElement('td');
+                    const scoreValue = typeof item?.score === 'number' ? item.score : null;
+                    tdScore.textContent = scoreValue !== null ? scoreValue.toFixed(2) : '';
+                    tr.appendChild(tdPage);
+                    tr.appendChild(tdScore);
+                    scoreTableBody.appendChild(tr);
+                  });
+                }
+              }, 0);
+            }
+            if (Array.isArray(data.results)) {
+              const fallbackFrameTime =
+                typeof data.frame_time === 'number' ? data.frame_time : undefined;
+              setTimeout(() => {
+                data.results.forEach(item => applyRoiResult(item, fallbackFrameTime));
+              }, 0);
+            } else if (Object.prototype.hasOwnProperty.call(data, 'id')) {
+              setTimeout(() => {
+                applyRoiResult(data);
+              }, 0);
+            }
+          } catch (e) {
+            console.error('ROI message error', e);
+          }
+        };
+      }
+
+      async function checkStatus() {
+        const name = sourceSelect.value;
+        const res = await fetchWithStatus(`/inference_status/${cam}`);
+        const data = await res.json();
+        if (data.running && name) {
+          openSocket();
+          const cfgRes = await fetchWithStatus(`/source_config?name=${encodeURIComponent(name)}`);
+          const cfg = await cfgRes.json();
+          let roiPath = cfg.rois;
+          if (!roiPath.startsWith('/')) {
+            roiPath = `data_sources/${cfg.name}/${roiPath}`;
+          }
+          const roiRes = await fetchWithStatus(`/load_roi_file?path=${encodeURIComponent(roiPath)}`);
+          const roiData = await roiRes.json();
+          allRois = roiData.rois || [];
+          const roiList = allRois.filter(r => (r.type ?? 'roi') === 'roi');
+          const activeGroup = loadGroupOptions(roiList);
+          const groupToUse = activeGroup || '';
+          if (groupToUse === 'all') {
+            rois = roiList;
+          } else if (groupToUse) {
+            rois = roiList.filter(r => (r.group ?? r.page ?? r.name) === groupToUse);
+          } else {
+            rois = [];
+          }
+          roiGrid.innerHTML = '';
+          rois.forEach(r => {
+            if (r && r.id !== undefined && r.id !== null) {
+              ensureRoiItem(r.id);
+              updateRoiModuleLabel(r.id);
+            }
+          });
+          if (roiSocket) {
+            roiSocket.close();
+            roiSocket = null;
+          }
+          openRoiSocket();
+          stopLogUpdates();
+          startLogUpdates(cfg.name);
+          setRunningUI();
+          running = true;
+        } else {
+          statusEl.innerText = 'Idle';
+          startButton.innerText = 'Start';
+          startButton.disabled = false;
+          stopButton.disabled = true;
+          running = false;
+          stopLogUpdates();
+          resetScoreboard();
+        }
+      }
+
+      async function switchGroup() {
+        const selected = groupSelect.value;
+        storeGroupSelection(selected);
+        if (!selected) {
+          updateLogRoiOptions([]);
+          return;
+        }
+
+        const roiList = allRois.filter(r => (r.type ?? 'roi') === 'roi');
+        const filtered = selected === 'all'
+          ? roiList
+          : roiList.filter(r => (r.group ?? r.page ?? r.name) === selected);
+
+        updateLogRoiOptions(filtered);
+
+        if (running) {
+          await stopInference();
+        }
+
+        const hasCachedRois = allRois.length > 0;
+        await startInference(hasCachedRois ? filtered : null, selected);
+      }
+
+      function setRunningUI() {
+        statusEl.innerText = 'Running';
+        startButton.disabled = true;
+        stopButton.disabled = false;
+        startButton.innerText = 'Start';
+      }
+
+      (async () => {
         await loadSources();
         await checkStatus();
-    })();
-}
-document.addEventListener('DOMContentLoaded',()=>{
-    initRoiLayout('cam1');
-    createController('cam1');
-});
-})();
-</script>
+      })();
 
+      return { stopInference, camId: cam };
+    }
+
+    const inferenceRows = document.getElementById('pageInferenceRows');
+    const addButton = document.getElementById('addPageInferenceBtn');
+    const controllers = new Map();
+    const camIdToCell = new Map();
+    let nextCamIndex = 1;
+
+    function sanitizeCellId(rawId) {
+      const cleaned = (rawId || '').replace(/[^a-zA-Z0-9_-]/g, '_');
+      return cleaned || `cam${nextCamIndex}`;
+    }
+
+    function ensureUniqueCellId(baseId) {
+      let candidate = baseId;
+      let counter = 1;
+      while (controllers.has(candidate) || document.getElementById(candidate)) {
+        candidate = `${baseId}_${counter++}`;
+      }
+      return candidate;
+    }
+
+    function updateNextIndexFromCellId(cellId) {
+      const match = String(cellId || '').match(/(\d+)$/);
+      if (match) {
+        const value = parseInt(match[1], 10);
+        if (!Number.isNaN(value) && value >= nextCamIndex) {
+          nextCamIndex = value + 1;
+        }
+      }
+    }
+
+    function generateCellId() {
+      let candidate;
+      do {
+        candidate = `cam${nextCamIndex++}`;
+      } while (controllers.has(candidate) || document.getElementById(candidate));
+      return candidate;
+    }
+
+    function createRowElement(cellId, titleText, camId) {
+      const row = document.createElement('div');
+      row.className = 'cam-row';
+      if (inferenceRows.children.length > 0) {
+        row.classList.add('mt-2');
+      }
+      row.dataset.cellId = cellId;
+      row.innerHTML = `
+        <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-3">
+          <div>
+            <h5 class="mb-0" id="${cellId}-title">${titleText}</h5>
+            <div class="text-muted small" id="${cellId}-label">ID: ${camId}</div>
+          </div>
+          <div class="d-flex gap-2 flex-wrap">
+            <button type="button" class="btn btn-outline-danger btn-sm" data-action="remove" data-cell-id="${cellId}">ลบงานนี้</button>
+          </div>
+        </div>
+        <div class="video-col">
+          <div class="card roi-card video-card">
+            <div id="${cellId}" class="cam-cell">
+              <div class="d-flex align-items-center mb-2 gap-2 menu-select-list flex-wrap">
+                <label for="${cellId}-sourceSelect" class="form-label mb-0">Source:</label>
+                <select id="${cellId}-sourceSelect" class="form-select w-auto"></select>
+                <label for="${cellId}-intervalInput" class="form-label mb-0">Time (interval):</label>
+                <input id="${cellId}-intervalInput" type="number" class="form-control w-auto" min="0" step="0.1" value="1" />
+                <label for="${cellId}-groupSelect" class="form-label mb-0">Group:</label>
+                <select id="${cellId}-groupSelect" class="form-select w-auto flex-grow-1" style="min-width:0;"></select>
+              </div>
+              <div class="d-flex align-items-center gap-2 flex-wrap mb-2">
+                <button id="${cellId}-startButton" class="btn btn-primary">Start</button>
+                <button id="${cellId}-stopButton" class="btn btn-danger" disabled>Stop</button>
+                <div class="ms-auto text-muted small" id="${cellId}-status"></div>
+              </div>
+              <div class="video-wrapper">
+                <canvas id="${cellId}-video" class="stream-video"></canvas>
+              </div>
+              <div class="mt-3">
+                <p class="mb-1">Page: <span id="${cellId}-pageName"></span></p>
+                <div class="table-responsive mb-0">
+                  <table id="${cellId}-pageScores" class="table table-striped table-sm mb-0">
+                    <thead><tr><th>Page</th><th>Score</th></tr></thead>
+                    <tbody id="${cellId}-pageScoresBody"></tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="card roi-card log-card">
+            <div class="d-flex align-items-center mb-2 gap-2 menu-select-list">
+              <label for="${cellId}-logRoiSelect" class="form-label mb-0">ROI:</label>
+              <select id="${cellId}-logRoiSelect" class="form-select w-auto"></select>
+            </div>
+            <div class="log-wrapper">
+              <table id="${cellId}-logTable" class="table table-striped">
+                <thead><tr><th>Log</th></tr></thead>
+                <tbody id="${cellId}-logBody"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+        <div class="card roi-card roi-list-card">
+          <div id="${cellId}-rois" class="roi-grid"></div>
+        </div>`;
+      inferenceRows.appendChild(row);
+      return row;
+    }
+
+    function addInferenceRow({ cellId, camId, title, defaultSource, defaultInterval, defaultGroup } = {}) {
+      let desiredCellId = cellId ? sanitizeCellId(cellId) : '';
+      if (desiredCellId) {
+        desiredCellId = ensureUniqueCellId(desiredCellId);
+        updateNextIndexFromCellId(desiredCellId);
+      }
+      const actualCellId = desiredCellId || generateCellId();
+      const actualCamId = typeof camId === 'string' && camId.length > 0
+        ? camId
+        : `page_${actualCellId}`;
+      const displayTitle = title || `งาน Page Inference ${controllers.size + 1}`;
+      createRowElement(actualCellId, displayTitle, actualCamId);
+      initRoiLayout(actualCellId);
+      const controller = createCameraController(actualCellId, {
+        camId: actualCamId,
+        title: displayTitle,
+        defaultSource,
+        defaultInterval,
+        defaultGroup,
+      });
+      controllers.set(actualCellId, controller);
+      camIdToCell.set(actualCamId, actualCellId);
+      return actualCellId;
+    }
+
+    async function removeInferenceRow(cellId) {
+      const controller = controllers.get(cellId);
+      if (controller && typeof controller.stopInference === 'function') {
+        try {
+          await controller.stopInference({ force: true, silent: true });
+        } catch (err) {
+          console.warn('Failed to stop inference before removal', err);
+        }
+      }
+      controllers.delete(cellId);
+      if (controller && controller.camId) {
+        camIdToCell.delete(controller.camId);
+      }
+      const row = inferenceRows.querySelector(`.cam-row[data-cell-id="${cellId}"]`);
+      if (row) {
+        row.remove();
+      }
+      ['source', 'interval', 'group'].forEach(key => localStorage.removeItem(`${cellId}-${key}`));
+      showAlert('ลบงาน Inference แล้ว', 'info');
+      if (controllers.size === 0) {
+        addInferenceRow();
+      }
+    }
+
+    addButton.addEventListener('click', () => {
+      const cellId = addInferenceRow();
+      showAlert('สร้างงาน Inference ใหม่แล้ว', 'success');
+      const sourceSelect = document.getElementById(`${cellId}-sourceSelect`);
+      if (sourceSelect) {
+        sourceSelect.focus();
+      }
+    });
+
+    inferenceRows.addEventListener('click', async event => {
+      const button = event.target.closest('[data-action="remove"]');
+      if (!button) {
+        return;
+      }
+      const cellId = button.getAttribute('data-cell-id');
+      if (!cellId) {
+        return;
+      }
+      const confirmed = window.confirm('ต้องการลบงาน Inference นี้หรือไม่? ระบบจะหยุดการประมวลผลให้ทันที');
+      if (!confirmed) {
+        return;
+      }
+      await removeInferenceRow(cellId);
+    });
+
+    async function bootstrapExisting() {
+      let createdAny = false;
+      try {
+        const res = await fetch('/api/dashboard');
+        if (res.ok) {
+          const payload = await res.json();
+          const cameras = Array.isArray(payload?.cameras) ? payload.cameras : [];
+          cameras
+            .filter(cam => (
+              typeof cam?.cam_id === 'string'
+              && cam.cam_id.startsWith('page_')
+              && cam.inference_running
+            ))
+            .forEach(cam => {
+              const camId = cam.cam_id;
+              if (camIdToCell.has(camId)) {
+                return;
+              }
+              const rawCell = camId.replace(/^page_/, '') || camId;
+              const cellId = addInferenceRow({
+                cellId: rawCell,
+                camId,
+                title: cam.name || camId,
+                defaultSource: cam.name || '',
+                defaultInterval: cam.interval,
+                defaultGroup: cam.group,
+              });
+              createdAny = true;
+            });
+        }
+      } catch (err) {
+        console.warn('ไม่สามารถโหลดงาน Inference ที่มีอยู่ได้', err);
+      }
+      if (!createdAny && controllers.size === 0) {
+        addInferenceRow();
+      }
+    }
+
+    bootstrapExisting();
+  })();
+</script>
