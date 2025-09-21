@@ -1100,6 +1100,57 @@ button.delete {
   align-self: flex-start;
 }
 
+.page-summary-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.page-score-chip {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.15rem;
+}
+
+.page-score-current {
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--color-primary-strong);
+}
+
+.page-score-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.page-score-empty {
+  padding: 0.65rem 0.85rem;
+  border-radius: var(--radius-md);
+  background: rgba(148, 163, 184, 0.16);
+  color: var(--color-muted);
+  text-align: center;
+  font-weight: 500;
+}
+
+.page-score-table {
+  padding: 0.75rem;
+  border-radius: var(--radius-md);
+  background: rgba(248, 250, 252, 0.95);
+  box-shadow: none;
+}
+
+.page-score-table table {
+  width: 100%;
+  margin-bottom: 0;
+}
+
+.page-score-table th,
+.page-score-table td {
+  vertical-align: middle;
+}
+
 .video-card {
   flex: 1 1 auto;
 }
@@ -1124,6 +1175,10 @@ button.delete {
   .roi-list-card {
     flex: 1 1 auto;
     width: 100%;
+  }
+
+  .page-score-chip {
+    align-items: flex-start;
   }
 }
 
