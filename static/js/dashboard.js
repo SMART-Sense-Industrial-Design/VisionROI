@@ -1,5 +1,6 @@
 const DASHBOARD_ENDPOINT = '/api/dashboard';
 const REFRESH_INTERVAL = 6000;
+const ALERT_INTENSITY_REFERENCE = 20;
 
 function formatDateTime(value) {
   if (!value) {
@@ -33,6 +34,20 @@ function setMetric(id, value, decimals = 0) {
   el.textContent = display;
 }
 
+function setElementText(id, value) {
+  const el = document.getElementById(id);
+  if (el !== null && el !== undefined) {
+    el.textContent = value;
+  }
+}
+
+function setProgress(id, value) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  const percent = Math.max(0, Math.min(Number(value) || 0, 100));
+  el.style.width = `${percent}%`;
+}
+
 function updateSummary(summary = {}) {
   setMetric('metric-total', summary.total_cameras ?? 0);
   setMetric('metric-online', summary.online_cameras ?? 0);
@@ -40,6 +55,350 @@ function updateSummary(summary = {}) {
   setMetric('metric-alerts', summary.alerts_last_hour ?? 0);
   setMetric('metric-interval', summary.average_interval ?? 0, 2);
   setMetric('metric-fps', summary.average_fps ?? 0, 2);
+
+  const total = summary.total_cameras ?? 0;
+  const online = summary.online_cameras ?? 0;
+  const running = summary.inference_running ?? 0;
+  const alerts = summary.alerts_last_hour ?? 0;
+
+  const offline = Math.max(total - online, 0);
+  const onlineRate = total ? (online / total) * 100 : 0;
+  const runningRate = total ? (running / Math.max(total, 1)) * 100 : 0;
+  const alertDensity = total ? alerts / Math.max(total, 1) : 0;
+
+  setElementText('summary-online-rate', `${onlineRate.toFixed(0)}%`);
+  setElementText('summary-offline', offline);
+  setElementText('summary-alert-density', alertDensity.toFixed(2));
+  setElementText('metric-online-rate-meta', `${onlineRate.toFixed(0)}%`);
+  setElementText('metric-running-ratio', `${runningRate.toFixed(0)}%`);
+  setElementText('metric-alert-density', alertDensity.toFixed(2));
+  setElementText('chip-running', running);
+}
+
+function calculateCameraInsights(cameras = []) {
+  return cameras.reduce((acc, camera) => {
+    const roiCount = Number(camera?.roi_count);
+    if (Number.isFinite(roiCount)) {
+      acc.totalRoi += roiCount;
+    }
+
+    const interval = Number(camera?.interval);
+    if (Number.isFinite(interval)) {
+      acc.minInterval = Math.min(acc.minInterval, interval);
+      acc.intervalCount += 1;
+    }
+
+    const fps = Number(camera?.fps);
+    if (Number.isFinite(fps)) {
+      acc.maxFps = Math.max(acc.maxFps, fps);
+      acc.fpsTotal += fps;
+      acc.fpsCount += 1;
+    }
+
+    return acc;
+  }, {
+    totalRoi: 0,
+    minInterval: Number.POSITIVE_INFINITY,
+    intervalCount: 0,
+    maxFps: Number.NEGATIVE_INFINITY,
+    fpsTotal: 0,
+    fpsCount: 0,
+  });
+}
+
+function updateCameraInsights(cameras = []) {
+  const stats = calculateCameraInsights(cameras);
+  const minInterval = stats.intervalCount ? stats.minInterval : null;
+  const maxFps = stats.fpsCount ? stats.maxFps : null;
+  const averageFps = stats.fpsCount ? stats.fpsTotal / stats.fpsCount : 0;
+
+  setElementText('metric-total-roi', stats.totalRoi);
+  setElementText('metric-total-roi-chip', stats.totalRoi);
+  setElementText('metric-min-interval', minInterval !== null ? `${minInterval.toFixed(2)}s` : '-');
+  setElementText('metric-max-fps', maxFps !== null ? maxFps.toFixed(2) : '-');
+  setElementText('insight-average-fps', stats.fpsCount ? averageFps.toFixed(2) : '0.0');
+}
+
+function getAlertAnalytics(alerts = []) {
+  const analytics = {
+    topCamera: null,
+    topCameraCount: 0,
+    topCameraGroup: '',
+    topLabel: null,
+    topLabelCount: 0,
+    activeCameraCount: 0,
+    latestTimestamp: null,
+  };
+
+  if (!Array.isArray(alerts) || !alerts.length) {
+    return analytics;
+  }
+
+  const cameraCounts = new Map();
+  const cameraGroups = new Map();
+  const labelCounts = new Map();
+  let latest = null;
+
+  alerts.forEach((alert) => {
+    const camId = alert?.cam_id || 'ไม่ทราบกล้อง';
+    cameraCounts.set(camId, (cameraCounts.get(camId) || 0) + 1);
+    if (!cameraGroups.has(camId) && alert?.group) {
+      cameraGroups.set(camId, alert.group);
+    }
+
+    if (Array.isArray(alert?.results)) {
+      alert.results.forEach((item) => {
+        const label = item?.text || item?.name;
+        if (label) {
+          labelCounts.set(label, (labelCounts.get(label) || 0) + 1);
+        }
+      });
+    }
+
+    if (alert?.timestamp) {
+      const timestamp = new Date(alert.timestamp);
+      if (!Number.isNaN(timestamp.getTime())) {
+        if (!latest || timestamp > latest) {
+          latest = timestamp;
+        }
+      }
+    }
+  });
+
+  analytics.activeCameraCount = cameraCounts.size;
+
+  if (cameraCounts.size) {
+    const [cameraId, count] = [...cameraCounts.entries()].sort((a, b) => b[1] - a[1])[0];
+    analytics.topCamera = cameraId;
+    analytics.topCameraCount = count;
+    analytics.topCameraGroup = cameraGroups.get(cameraId) || '';
+  }
+
+  if (labelCounts.size) {
+    const [label, count] = [...labelCounts.entries()].sort((a, b) => b[1] - a[1])[0];
+    analytics.topLabel = label;
+    analytics.topLabelCount = count;
+  }
+
+  if (latest) {
+    analytics.latestTimestamp = latest.toISOString();
+  }
+
+  return analytics;
+}
+
+function updateInsights(summary = {}, cameras = [], alerts = [], analytics = null) {
+  const total = summary.total_cameras ?? 0;
+  const online = summary.online_cameras ?? 0;
+  const running = summary.inference_running ?? 0;
+  const alertsLastHour = summary.alerts_last_hour ?? 0;
+
+  const offline = Math.max(total - online, 0);
+  const onlineRate = total ? (online / total) * 100 : 0;
+  const runningRate = total ? (running / Math.max(total, 1)) * 100 : 0;
+
+  setElementText('insight-online-value', `${online}/${total}`);
+  setElementText('insight-offline', offline);
+  setElementText('insight-online-rate', `${onlineRate.toFixed(0)}%`);
+  setProgress('progress-online', onlineRate);
+
+  setElementText('insight-running', running);
+  setElementText('insight-running-rate', `${runningRate.toFixed(0)}%`);
+  setProgress('progress-utilization', runningRate);
+
+  setElementText('insight-alerts', alertsLastHour);
+
+  const analyticsData = analytics ?? getAlertAnalytics(alerts);
+  setElementText('insight-alert-active', analyticsData.activeCameraCount ?? 0);
+
+  if (analyticsData.topCamera) {
+    const suffix = analyticsData.topCameraGroup ? ` · ${analyticsData.topCameraGroup}` : '';
+    setElementText(
+      'insight-top-camera',
+      `${analyticsData.topCamera}${suffix} (${analyticsData.topCameraCount} ครั้ง)`,
+    );
+  } else {
+    setElementText('insight-top-camera', 'ยังไม่มีข้อมูล');
+  }
+
+  setElementText(
+    'insight-alert-latest',
+    analyticsData.latestTimestamp ? formatDateTime(analyticsData.latestTimestamp) : '-',
+  );
+
+  const alertIntensity = Math.min(alertsLastHour, ALERT_INTENSITY_REFERENCE)
+    / ALERT_INTENSITY_REFERENCE * 100;
+  setProgress('progress-alerts', alertIntensity);
+}
+
+function createSummaryItem({ title, value, meta }) {
+  const wrapper = document.createElement('div');
+  wrapper.className = 'alert-summary__item';
+
+  const titleEl = document.createElement('p');
+  titleEl.className = 'alert-summary__title';
+  titleEl.textContent = title;
+
+  const valueEl = document.createElement('p');
+  valueEl.className = 'alert-summary__value';
+  valueEl.textContent = value;
+
+  wrapper.append(titleEl, valueEl);
+
+  if (meta) {
+    const metaEl = document.createElement('p');
+    metaEl.className = 'alert-summary__meta';
+    metaEl.textContent = meta;
+    wrapper.appendChild(metaEl);
+  }
+
+  return wrapper;
+}
+
+function updateAlertSummary(alerts = [], analytics = null) {
+  const container = document.getElementById('alert-summary');
+  if (!container) return;
+  container.innerHTML = '';
+
+  if (!alerts.length) {
+    const empty = document.createElement('div');
+    empty.className = 'alert-summary__empty';
+    empty.textContent = 'ยังไม่มีแจ้งเตือน';
+    container.appendChild(empty);
+    return;
+  }
+
+  const data = analytics ?? getAlertAnalytics(alerts);
+
+  const items = [
+    {
+      title: 'กล้องที่แจ้งเตือนบ่อย',
+      value: data.topCamera
+        ? `${data.topCamera}${data.topCameraGroup ? ` · ${data.topCameraGroup}` : ''}`
+        : 'ยังไม่มีข้อมูล',
+      meta: data.topCamera ? `${data.topCameraCount} ครั้ง` : 'รอดูเหตุการณ์แรก',
+    },
+    {
+      title: 'เหตุการณ์ที่พบบ่อย',
+      value: data.topLabel ?? 'ยังไม่มีข้อมูล',
+      meta: data.topLabel ? `${data.topLabelCount} ครั้ง` : 'รอดูเหตุการณ์แรก',
+    },
+    {
+      title: 'อัปเดตล่าสุด',
+      value: data.latestTimestamp ? formatDateTime(data.latestTimestamp) : '-',
+      meta: data.activeCameraCount ? `เกิดจาก ${data.activeCameraCount} กล้อง` : 'รอดูเหตุการณ์แรก',
+    },
+  ];
+
+  items.forEach((item) => {
+    container.appendChild(createSummaryItem(item));
+  });
+}
+
+function updateGroupOverview(cameras = []) {
+  const container = document.getElementById('group-overview');
+  if (!container) return;
+  container.innerHTML = '';
+
+  if (!cameras.length) {
+    const empty = document.createElement('div');
+    empty.className = 'group-overview__empty';
+    empty.textContent = 'ยังไม่มีกลุ่มที่สร้างไว้';
+    container.appendChild(empty);
+    return;
+  }
+
+  const groups = new Map();
+
+  cameras.forEach((camera) => {
+    const key = camera?.group || 'ไม่ระบุกลุ่ม';
+    const entry = groups.get(key) || {
+      name: key,
+      cameras: 0,
+      running: 0,
+      online: 0,
+      roi: 0,
+      fpsTotal: 0,
+      fpsCount: 0,
+    };
+
+    entry.cameras += 1;
+    if (camera?.inference_running) {
+      entry.running += 1;
+    }
+
+    const status = typeof camera?.status === 'string' ? camera.status.toLowerCase() : '';
+    if (camera?.inference_running || camera?.roi_running || status.includes('online')) {
+      entry.online += 1;
+    }
+
+    const roiCount = Number(camera?.roi_count);
+    if (Number.isFinite(roiCount)) {
+      entry.roi += roiCount;
+    }
+
+    const fps = Number(camera?.fps);
+    if (Number.isFinite(fps)) {
+      entry.fpsTotal += fps;
+      entry.fpsCount += 1;
+    }
+
+    groups.set(key, entry);
+  });
+
+  const sorted = [...groups.values()].sort((a, b) => {
+    if (b.running !== a.running) {
+      return b.running - a.running;
+    }
+    return b.cameras - a.cameras;
+  });
+
+  sorted.forEach((group) => {
+    const runningRate = group.cameras ? (group.running / group.cameras) * 100 : 0;
+    const averageFps = group.fpsCount ? group.fpsTotal / group.fpsCount : 0;
+
+    const card = document.createElement('article');
+    card.className = 'group-card';
+
+    const header = document.createElement('div');
+    header.className = 'group-card__header';
+
+    const title = document.createElement('p');
+    title.className = 'group-card__title mb-0';
+    title.textContent = group.name;
+
+    const badge = document.createElement('span');
+    badge.className = 'group-card__badge';
+    badge.textContent = `รันอยู่ ${group.running}/${group.cameras}`;
+
+    header.append(title, badge);
+
+    const meta = document.createElement('p');
+    meta.className = 'group-card__meta';
+    meta.textContent = `FPS เฉลี่ย ${averageFps.toFixed(1)} · ROI ${group.roi}`;
+
+    const progressTrack = document.createElement('div');
+    progressTrack.className = 'group-card__progress-track';
+
+    const progressFill = document.createElement('div');
+    progressFill.className = 'group-card__progress-fill';
+    progressFill.style.width = `${Math.max(0, Math.min(runningRate, 100)).toFixed(0)}%`;
+    progressTrack.appendChild(progressFill);
+
+    const progressMeta = document.createElement('div');
+    progressMeta.className = 'group-card__progress-meta';
+    progressMeta.innerHTML = `<span>โหลด</span><span>${runningRate.toFixed(0)}%</span>`;
+
+    const footer = document.createElement('div');
+    footer.className = 'group-card__footer';
+    footer.innerHTML = `
+      <span><i class="bi bi-wifi"></i>ออนไลน์ ${group.online}</span>
+      <span><i class="bi bi-camera-video"></i> ${group.cameras} กล้อง</span>
+    `;
+
+    card.append(header, meta, progressTrack, progressMeta, footer);
+    container.appendChild(card);
+  });
 }
 
 function createCameraRow(camera) {
@@ -247,9 +606,15 @@ async function loadDashboard() {
       throw new Error(`HTTP ${response.status}`);
     }
     const data = await response.json();
+    const alertAnalytics = getAlertAnalytics(data.alerts);
+
     updateSummary(data.summary);
+    updateCameraInsights(data.cameras);
+    updateInsights(data.summary, data.cameras, data.alerts, alertAnalytics);
     updateCameraTable(data.cameras);
     updateAlerts(data.alerts);
+    updateAlertSummary(data.alerts, alertAnalytics);
+    updateGroupOverview(data.cameras);
     updateStreams(data.cameras);
     updateGeneratedAt(data.generated_at);
   } catch (error) {
@@ -258,6 +623,7 @@ async function loadDashboard() {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
+  setElementText('chip-refresh', Math.round(REFRESH_INTERVAL / 1000));
   loadDashboard();
   setInterval(loadDashboard, REFRESH_INTERVAL);
 });
