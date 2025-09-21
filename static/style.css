@@ -1098,7 +1098,7 @@ main.app-main {
 
 .dashboard__content {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 340px;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
   gap: clamp(1.5rem, 2vw, 2rem);
   align-items: start;
 }
@@ -1113,6 +1113,10 @@ main.app-main {
 
 .dashboard__panel--wide {
   grid-column: 1 / 2;
+}
+
+.dashboard__panel--full {
+  grid-column: 1 / -1;
 }
 
 .panel-header {

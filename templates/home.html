@@ -309,7 +309,7 @@
   </section>
 
   <div class="dashboard__content">
-    <section class="dashboard__panel dashboard__panel--wide">
+    <section class="dashboard__panel dashboard__panel--full">
       <div class="panel-header">
         <div>
           <h2 class="panel-title">สถานะกล้องและงานประมวลผล</h2>
@@ -341,31 +341,28 @@
       </div>
     </section>
 
-    <aside class="dashboard__sidebar">
-      <section class="dashboard__panel">
-        <div class="panel-header">
-          <div>
-            <h2 class="panel-title">สรุปแจ้งเตือน</h2>
-            <p class="panel-subtitle">ดูภาพรวมเหตุการณ์ที่เกิดขึ้นบ่อยและเวลาอัปเดตล่าสุด</p>
-          </div>
+    <section class="dashboard__panel">
+      <div class="panel-header">
+        <div>
+          <h2 class="panel-title">สรุปแจ้งเตือน</h2>
+          <p class="panel-subtitle">ดูภาพรวมเหตุการณ์ที่เกิดขึ้นบ่อยและเวลาอัปเดตล่าสุด</p>
         </div>
-        <div class="alert-summary" id="alert-summary">
-          <div class="alert-summary__empty">ยังไม่มีแจ้งเตือน</div>
+      </div>
+      <div class="alert-summary" id="alert-summary">
+        <div class="alert-summary__empty">ยังไม่มีแจ้งเตือน</div>
+      </div>
+    </section>
+    <section class="dashboard__panel">
+      <div class="panel-header">
+        <div>
+          <h2 class="panel-title">แจ้งเตือนล่าสุด</h2>
+          <p class="panel-subtitle">ผลลัพธ์ที่ระบบบันทึกไว้ล่าสุด (สูงสุด 20 รายการ)</p>
         </div>
-      </section>
-      <section class="dashboard__panel">
-        <div class="panel-header">
-          <div>
-            <h2 class="panel-title">แจ้งเตือนล่าสุด</h2>
-            <p class="panel-subtitle">ผลลัพธ์ที่ระบบบันทึกไว้ล่าสุด (สูงสุด 20 รายการ)</p>
-          </div>
-        </div>
-        <ul class="timeline" id="alert-timeline">
-          <li class="timeline__empty">ยังไม่มีแจ้งเตือน</li>
-        </ul>
-      </section>
-
-    </aside>
+      </div>
+      <ul class="timeline" id="alert-timeline">
+        <li class="timeline__empty">ยังไม่มีแจ้งเตือน</li>
+      </ul>
+    </section>
   </div>
 
   <section class="dashboard__panel">
