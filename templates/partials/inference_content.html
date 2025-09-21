@@ -1,78 +1,22 @@
 
-<div class="cam-row" data-row-label="สตรีม 1">
-    <div class="video-col">
-        <div class="card roi-card video-card">
-            <div id="cam1" class="cam-cell">
-                <div class="d-flex align-items-center mb-2 gap-2 menu-select-list flex-wrap">
-                    <label for="cam1-sourceSelect" class="form-label mb-0">Source:</label>
-                    <select id="cam1-sourceSelect" class="form-select w-auto"></select>
-                    <label for="cam1-intervalInput" class="form-label mb-0">Time (interval):</label>
-                    <input id="cam1-intervalInput" type="number" class="form-control w-auto" min="0" step="0.1" value="1" />
-                    <label for="cam1-groupSelect" class="form-label mb-0">Group:</label>
-                    <select id="cam1-groupSelect" class="form-select w-auto flex-grow-1" style="min-width:0;"></select>
-                </div>
-                <button id="cam1-startButton" class="btn btn-primary me-2">Start</button>
-                <button id="cam1-stopButton" class="btn btn-danger" disabled>Stop</button>
-                <p id="cam1-status"></p>
-                <div class="video-wrapper">
-                    <canvas id="cam1-video" class="stream-video"></canvas>
-                </div>
-            </div>
-        </div>
-        <div class="card roi-card log-card">
-            <div class="d-flex align-items-center mb-2 gap-2 menu-select-list">
-                <label for="cam1-logRoiSelect" class="form-label mb-0">ROI:</label>
-                <select id="cam1-logRoiSelect" class="form-select w-auto"></select>
-            </div>
-            <div class="log-wrapper">
-                <table id="cam1-logTable" class="table table-striped">
-                    <thead><tr><th>Log</th></tr></thead>
-                    <tbody id="cam1-logBody"></tbody>
-                </table>
-            </div>
-        </div>
+<div class="d-flex flex-column gap-3">
+  <div class="d-flex align-items-start justify-content-between flex-wrap gap-3">
+    <div>
+      <h4 class="mb-1">จัดการงาน Inference แบบ Dynamic</h4>
+      <p class="mb-0 text-muted">เพิ่ม ลบ หรือดูสถานะของงาน Inference ได้ตามต้องการ ระบบจะสร้างงานใหม่ให้ใช้งานทันที</p>
     </div>
-    <div class="card roi-card roi-list-card">
-        <div id="cam1-rois" class="roi-grid"></div>
+    <div class="d-flex gap-2 flex-wrap">
+      <button type="button" id="addInferenceBtn" class="btn btn-success">เพิ่มงาน Inference</button>
     </div>
-</div>
-
-<div class="cam-row mt-4" data-row-label="สตรีม 2">
-    <div class="video-col">
-        <div class="card roi-card video-card">
-            <div id="cam2" class="cam-cell">
-                <div class="d-flex align-items-center mb-2 gap-2 menu-select-list flex-wrap">
-                    <label for="cam2-sourceSelect" class="form-label mb-0">Source:</label>
-                    <select id="cam2-sourceSelect" class="form-select w-auto"></select>
-                    <label for="cam2-intervalInput" class="form-label mb-0">Time (interval):</label>
-                    <input id="cam2-intervalInput" type="number" class="form-control w-auto" min="0" step="0.1" value="1" />
-                    <label for="cam2-groupSelect" class="form-label mb-0">Group:</label>
-                    <select id="cam2-groupSelect" class="form-select w-auto flex-grow-1" style="min-width:0;"></select>
-                </div>
-                <button id="cam2-startButton" class="btn btn-primary me-2">Start</button>
-                <button id="cam2-stopButton" class="btn btn-danger" disabled>Stop</button>
-                <p id="cam2-status"></p>
-                <div class="video-wrapper">
-                    <canvas id="cam2-video" class="stream-video"></canvas>
-                </div>
-            </div>
-        </div>
-        <div class="card roi-card log-card">
-            <div class="d-flex align-items-center mb-2 gap-2 menu-select-list">
-                <label for="cam2-logRoiSelect" class="form-label mb-0">ROI:</label>
-                <select id="cam2-logRoiSelect" class="form-select w-auto"></select>
-            </div>
-            <div class="log-wrapper">
-                <table id="cam2-logTable" class="table table-striped">
-                    <thead><tr><th>Log</th></tr></thead>
-                    <tbody id="cam2-logBody"></tbody>
-                </table>
-            </div>
-        </div>
-    </div>
-    <div class="card roi-card roi-list-card">
-        <div id="cam2-rois" class="roi-grid"></div>
-    </div>
+  </div>
+  <div class="alert alert-info" role="alert">
+    <ul class="mb-0 ps-3">
+      <li>หนึ่งงาน Inference สามารถเลือก Source, Group และกำหนด Interval ของตัวเองได้</li>
+      <li>สามารถเปิดหลายงานพร้อมกันเพื่อทดสอบหลายโมดูลหรือหลาย Source ได้ในเวลาเดียวกัน</li>
+      <li>เมื่อต้องการลบงาน ระบบจะหยุดการประมวลผลให้อัตโนมัติ</li>
+    </ul>
+  </div>
+  <div id="inferenceRows" class="d-flex flex-column gap-4"></div>
 </div>
   <script>
       (function() {
@@ -107,19 +51,30 @@
         window.addEventListener('resize', updateHeight);
       }
 
-      function createCameraController(cellId) {
+      function createCameraController(cellId, options = {}) {
         let socket;
         let roiSocket;
         let rois = [];
         let allRois = [];
         let running = false;
-        const cam = `inf_${cellId}`;
+        const {
+          camId: camIdOverride,
+          title: providedTitle,
+          defaultSource: providedSource,
+          defaultInterval,
+          defaultGroup,
+        } = options || {};
+        const cam = typeof camIdOverride === 'string' && camIdOverride.length > 0
+          ? camIdOverride
+          : `inf_${cellId}`;
         const getEl = suffix => document.getElementById(`${cellId}-${suffix}`);
         const video = getEl('video');
         const videoCtx = video.getContext('2d');
         const startButton = getEl('startButton');
         const stopButton = getEl('stopButton');
         const statusEl = getEl('status');
+        const titleEl = getEl('title');
+        const labelEl = getEl('label');
         const sourceSelect = getEl('sourceSelect');
         const groupSelect = getEl('groupSelect');
         const roiGrid = getEl('rois');
@@ -130,11 +85,33 @@
         let isLogUpdating = false;
         let logSessionId = 0;
         let currentLogSource;
-        intervalInput.value = localStorage.getItem(`${cellId}-interval`) || '1';
+        const baseTitle = typeof providedTitle === 'string' && providedTitle.length > 0
+          ? providedTitle
+          : 'งาน Inference';
+        if (titleEl) {
+          titleEl.textContent = baseTitle;
+        }
+        const baseLabelText = `ID: ${cam}`;
+        if (labelEl) {
+          labelEl.textContent = baseLabelText;
+        }
+        const storedInterval = localStorage.getItem(`${cellId}-interval`);
+        if (storedInterval) {
+          intervalInput.value = storedInterval;
+        } else if (defaultInterval !== undefined && defaultInterval !== null) {
+          intervalInput.value = String(defaultInterval);
+        } else {
+          intervalInput.value = '1';
+        }
+        const normalizedDefaultGroup = typeof defaultGroup === 'string' ? defaultGroup : '';
         const groupStorageKey = `${cellId}-group`;
-        let lastActiveGroup = '';
-
-        const getStoredGroup = () => localStorage.getItem(groupStorageKey) || '';
+        const getStoredGroup = () => {
+          const stored = localStorage.getItem(groupStorageKey);
+          if (stored !== null) {
+            return stored;
+          }
+          return normalizedDefaultGroup;
+        };
         const storeGroupSelection = value => {
             if (value) {
                 localStorage.setItem(groupStorageKey, value);
@@ -142,6 +119,7 @@
                 localStorage.removeItem(groupStorageKey);
             }
         };
+        let lastActiveGroup = getStoredGroup();
 
         const formatTs = ts => {
             if (!ts) return '';
@@ -161,13 +139,24 @@
             return `${(seconds * 1000).toFixed(2)} ms`;
         };
 
-        sourceSelect.onchange = () => {
-            localStorage.setItem(`${cellId}-source`, sourceSelect.value);
+        const updateHeaderSourceLabel = () => {
+            if (!labelEl) {
+                return;
+            }
+            const sourceName = sourceSelect.value || '';
+            labelEl.textContent = sourceName
+                ? `${baseLabelText} • Source: ${sourceName}`
+                : baseLabelText;
         };
 
-        startButton.onclick = startInference;
-        stopButton.onclick = stopInference;
-        groupSelect.onchange = switchGroup;
+        sourceSelect.onchange = () => {
+            localStorage.setItem(`${cellId}-source`, sourceSelect.value);
+            updateHeaderSourceLabel();
+        };
+
+        startButton.onclick = () => { startInference(); };
+        stopButton.onclick = () => { stopInference(); };
+        groupSelect.onchange = () => { switchGroup(); };
         logRoiSelect.onchange = () => {
             if (currentLogSource) {
                 startLogUpdates(currentLogSource);
@@ -208,9 +197,14 @@
                         sourceSelect.appendChild(opt);
                     });
                     const stored = localStorage.getItem(`${cellId}-source`) || '';
-                    if (stored) {
-                        sourceSelect.value = stored;
+                    const preferredSource = stored
+                        || (typeof providedSource === 'string' ? providedSource : '');
+                    const availableSources = new Set(data.map(item => item.name));
+                    if (preferredSource && availableSources.has(preferredSource)) {
+                        sourceSelect.value = preferredSource;
+                        localStorage.setItem(`${cellId}-source`, preferredSource);
                     }
+                    updateHeaderSourceLabel();
                     showAlert('Sources loaded', 'success');
                 }
             } catch (err) {
@@ -222,6 +216,7 @@
                 sourceSelect.appendChild(opt);
                 statusEl.innerText = 'Error fetching sources';
                 showAlert('Failed to load sources', 'error');
+                updateHeaderSourceLabel();
             }
         }
 
@@ -563,15 +558,27 @@
             setRunningUI();
         }
 
-        async function stopInference() {
-            if (!running) {
-                // ensure UI stays consistent when switching groups while idle
+        async function stopInference(options = {}) {
+            const opts = options && typeof options === 'object' ? options : {};
+            const forceStop = Boolean(opts.force);
+            const silent = Boolean(opts.silent);
+            if (!running && !forceStop) {
                 startButton.disabled = false;
                 stopButton.disabled = true;
                 return;
             }
+            const wasRunning = running;
             running = false;
-            await fetchWithStatus(`/stop_inference/${cam}`, { method: 'POST' });
+            try {
+                if (wasRunning || forceStop) {
+                    await fetchWithStatus(`/stop_inference/${cam}`, { method: 'POST' });
+                }
+            } catch (err) {
+                if (!silent) {
+                    console.error('Failed to stop inference stream', err);
+                    showAlert('Failed to stop inference stream', 'error');
+                }
+            }
             if (socket) {
                 socket.close();
                 socket = null;
@@ -597,7 +604,9 @@
             groupSelect.value = '';
             storeGroupSelection('');
             updateLogRoiOptions([]);
-            showAlert('Inference stopped', 'info');
+            if (!silent) {
+                showAlert('Inference stopped', 'info');
+            }
         }
 
         function openSocket() {
@@ -733,14 +742,217 @@
             await checkStatus();
         })();
 
-        return { stopInference };
+        return { stopInference, camId: cam };
     }
 
-  // initialize controllers immediately (DOMContentLoaded already fired in fragments)
-  ['cam1', 'cam2'].forEach(initRoiLayout);
-  const controllers = [
-      createCameraController('cam1'),
-      createCameraController('cam2')
-  ];
+  const inferenceRows = document.getElementById('inferenceRows');
+  const addButton = document.getElementById('addInferenceBtn');
+  const controllers = new Map();
+  const camIdToCell = new Map();
+  let nextCamIndex = 1;
+
+  function sanitizeCellId(rawId) {
+      const cleaned = (rawId || '').replace(/[^a-zA-Z0-9_-]/g, '_');
+      return cleaned || `cam${nextCamIndex}`;
+  }
+
+  function ensureUniqueCellId(baseId) {
+      let candidate = baseId;
+      let counter = 1;
+      while (controllers.has(candidate) || document.getElementById(candidate)) {
+          candidate = `${baseId}_${counter++}`;
+      }
+      return candidate;
+  }
+
+  function updateNextIndexFromCellId(cellId) {
+      const match = String(cellId || '').match(/(\d+)$/);
+      if (match) {
+          const value = parseInt(match[1], 10);
+          if (!Number.isNaN(value) && value >= nextCamIndex) {
+              nextCamIndex = value + 1;
+          }
+      }
+  }
+
+  function generateCellId() {
+      let candidate;
+      do {
+          candidate = `cam${nextCamIndex++}`;
+      } while (controllers.has(candidate) || document.getElementById(candidate));
+      return candidate;
+  }
+
+  function createRowElement(cellId, titleText, camId) {
+      const row = document.createElement('div');
+      row.className = 'cam-row';
+      if (inferenceRows.children.length > 0) {
+          row.classList.add('mt-2');
+      }
+      row.dataset.cellId = cellId;
+      row.innerHTML = `
+        <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-3">
+          <div>
+            <h5 class="mb-0" id="${cellId}-title">${titleText}</h5>
+            <div class="text-muted small" id="${cellId}-label">ID: ${camId}</div>
+          </div>
+          <div class="d-flex gap-2 flex-wrap">
+            <button type="button" class="btn btn-outline-danger btn-sm" data-action="remove" data-cell-id="${cellId}">ลบงานนี้</button>
+          </div>
+        </div>
+        <div class="video-col">
+          <div class="card roi-card video-card">
+            <div id="${cellId}" class="cam-cell">
+              <div class="d-flex align-items-center mb-2 gap-2 menu-select-list flex-wrap">
+                <label for="${cellId}-sourceSelect" class="form-label mb-0">Source:</label>
+                <select id="${cellId}-sourceSelect" class="form-select w-auto"></select>
+                <label for="${cellId}-intervalInput" class="form-label mb-0">Time (interval):</label>
+                <input id="${cellId}-intervalInput" type="number" class="form-control w-auto" min="0" step="0.1" value="1" />
+                <label for="${cellId}-groupSelect" class="form-label mb-0">Group:</label>
+                <select id="${cellId}-groupSelect" class="form-select w-auto flex-grow-1" style="min-width:0;"></select>
+              </div>
+              <div class="d-flex align-items-center gap-2 flex-wrap mb-2">
+                <button id="${cellId}-startButton" class="btn btn-primary">Start</button>
+                <button id="${cellId}-stopButton" class="btn btn-danger" disabled>Stop</button>
+                <div class="ms-auto text-muted small" id="${cellId}-status"></div>
+              </div>
+              <div class="video-wrapper">
+                <canvas id="${cellId}-video" class="stream-video"></canvas>
+              </div>
+            </div>
+          </div>
+          <div class="card roi-card log-card">
+            <div class="d-flex align-items-center mb-2 gap-2 menu-select-list">
+              <label for="${cellId}-logRoiSelect" class="form-label mb-0">ROI:</label>
+              <select id="${cellId}-logRoiSelect" class="form-select w-auto"></select>
+            </div>
+            <div class="log-wrapper">
+              <table id="${cellId}-logTable" class="table table-striped">
+                <thead><tr><th>Log</th></tr></thead>
+                <tbody id="${cellId}-logBody"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+        <div class="card roi-card roi-list-card">
+          <div id="${cellId}-rois" class="roi-grid"></div>
+        </div>`;
+      inferenceRows.appendChild(row);
+      return row;
+  }
+
+  function addInferenceRow({ cellId, camId, title, defaultSource, defaultInterval, defaultGroup } = {}) {
+      let desiredCellId = cellId ? sanitizeCellId(cellId) : '';
+      if (desiredCellId) {
+          desiredCellId = ensureUniqueCellId(desiredCellId);
+          updateNextIndexFromCellId(desiredCellId);
+      }
+      const actualCellId = desiredCellId || generateCellId();
+      const actualCamId = typeof camId === 'string' && camId.length > 0
+          ? camId
+          : `inf_${actualCellId}`;
+      const displayTitle = title || `งาน Inference ${controllers.size + 1}`;
+      createRowElement(actualCellId, displayTitle, actualCamId);
+      initRoiLayout(actualCellId);
+      const controller = createCameraController(actualCellId, {
+          camId: actualCamId,
+          title: displayTitle,
+          defaultSource,
+          defaultInterval,
+          defaultGroup,
+      });
+      controllers.set(actualCellId, controller);
+      camIdToCell.set(actualCamId, actualCellId);
+      return actualCellId;
+  }
+
+  async function removeInferenceRow(cellId) {
+      const controller = controllers.get(cellId);
+      if (controller && typeof controller.stopInference === 'function') {
+          try {
+              await controller.stopInference({ force: true, silent: true });
+          } catch (err) {
+              console.warn('Failed to stop inference before removal', err);
+          }
+      }
+      controllers.delete(cellId);
+      if (controller && controller.camId) {
+          camIdToCell.delete(controller.camId);
+      }
+      const row = inferenceRows.querySelector(`.cam-row[data-cell-id="${cellId}"]`);
+      if (row) {
+          row.remove();
+      }
+      ['source', 'interval', 'group'].forEach(key => localStorage.removeItem(`${cellId}-${key}`));
+      showAlert('ลบงาน Inference แล้ว', 'info');
+      if (controllers.size === 0) {
+          addInferenceRow();
+      }
+  }
+
+  addButton.addEventListener('click', () => {
+      const cellId = addInferenceRow();
+      showAlert('สร้างงาน Inference ใหม่แล้ว', 'success');
+      const sourceSelect = document.getElementById(`${cellId}-sourceSelect`);
+      if (sourceSelect) {
+          sourceSelect.focus();
+      }
+  });
+
+  inferenceRows.addEventListener('click', async event => {
+      const button = event.target.closest('[data-action="remove"]');
+      if (!button) {
+          return;
+      }
+      const cellId = button.getAttribute('data-cell-id');
+      if (!cellId) {
+          return;
+      }
+      const confirmed = window.confirm('ต้องการลบงาน Inference นี้หรือไม่? ระบบจะหยุดการประมวลผลให้ทันที');
+      if (!confirmed) {
+          return;
+      }
+      await removeInferenceRow(cellId);
+  });
+
+  async function bootstrapExisting() {
+      let createdAny = false;
+      try {
+          const res = await fetch('/api/dashboard');
+          if (res.ok) {
+              const payload = await res.json();
+              const cameras = Array.isArray(payload?.cameras) ? payload.cameras : [];
+              cameras
+                  .filter(cam => (
+                      typeof cam?.cam_id === 'string'
+                      && cam.cam_id.startsWith('inf_')
+                      && cam.inference_running
+                  ))
+                  .forEach(cam => {
+                      const camId = cam.cam_id;
+                      if (camIdToCell.has(camId)) {
+                          return;
+                      }
+                      const rawCell = camId.replace(/^inf_/, '') || camId;
+                      const cellId = addInferenceRow({
+                          cellId: rawCell,
+                          camId,
+                          title: cam.name || camId,
+                          defaultSource: cam.name || '',
+                          defaultInterval: cam.interval,
+                          defaultGroup: cam.group,
+                      });
+                      createdAny = true;
+                  });
+          }
+      } catch (err) {
+          console.warn('ไม่สามารถโหลดงาน Inference ที่มีอยู่ได้', err);
+      }
+      if (!createdAny && controllers.size === 0) {
+          addInferenceRow();
+      }
+  }
+
+  bootstrapExisting();
   })();
   </script>
