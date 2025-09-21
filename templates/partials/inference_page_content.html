@@ -529,7 +529,7 @@
               ...camCfg,
               rois: payloadRois,
               interval,
-              draw_page_boxes: false
+              draw_page_boxes: true
             })
           });
           startData = await startRes.json().catch(() => ({}));
