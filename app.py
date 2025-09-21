@@ -852,7 +852,7 @@ def build_dashboard_payload() -> dict[str, Any]:
 
     average_interval = sum(intervals) / len(intervals) if intervals else 0.0
     average_fps = sum(fps_values) / len(fps_values) if fps_values else 0.0
-    recent_alerts = notifications_snapshot[-20:]
+    recent_alerts = notifications_snapshot[-10:]
     group_entries: list[dict[str, Any]] = []
     running_groups = 0
     for group_entry in group_accumulator.values():

@@ -892,7 +892,8 @@ function updateAlerts(alerts = []) {
     container.appendChild(empty);
     return;
   }
-  alerts.slice().reverse().forEach((alert) => {
+  const latestAlerts = alerts.slice(-10).reverse();
+  latestAlerts.forEach((alert) => {
     container.appendChild(renderAlertItem(alert));
   });
 }
