@@ -39,23 +39,77 @@
     </div>
   </div>
 
-  <div class="dashboard__stats">
-    <div class="summary-stat">
-      <p class="summary-stat__label">อัตราออนไลน์</p>
-      <p class="summary-stat__value" id="summary-online-rate">0%</p>
-      <p class="summary-stat__meta">จากกล้องทั้งหมด</p>
-    </div>
-    <div class="summary-stat">
-      <p class="summary-stat__label">กล้องออฟไลน์</p>
-      <p class="summary-stat__value" id="summary-offline">0</p>
-      <p class="summary-stat__meta">ต้องติดตาม</p>
-    </div>
-    <div class="summary-stat">
-      <p class="summary-stat__label">ความหนาแน่นแจ้งเตือน</p>
-      <p class="summary-stat__value" id="summary-alert-density">0.00</p>
-      <p class="summary-stat__meta">ต่อกล้อง/ชั่วโมง</p>
-    </div>
-  </div>
+  <section class="dashboard__insights">
+    <article class="insight-card">
+      <div class="insight-card__header">
+        <span class="insight-card__icon bg-success-subtle text-success"><i class="bi bi-activity"></i></span>
+        <div>
+          <h3 class="insight-card__title">ความพร้อมของกล้อง</h3>
+          <p class="insight-card__subtitle">การออนไลน์ของอุปกรณ์ทั้งหมด</p>
+        </div>
+      </div>
+      <div class="insight-card__body">
+        <p class="insight-card__value" id="insight-online-value">0 / 0</p>
+        <p class="insight-card__meta">ออฟไลน์ <span id="insight-offline">0</span> กล้อง</p>
+        <div class="insight-card__progress">
+          <div class="insight-card__progress-track">
+            <div class="insight-card__progress-fill" id="progress-online"></div>
+          </div>
+          <div class="insight-card__progress-meta">
+            <span>ออนไลน์</span>
+            <span id="insight-online-rate">0%</span>
+          </div>
+        </div>
+      </div>
+    </article>
+    <article class="insight-card">
+      <div class="insight-card__header">
+        <span class="insight-card__icon bg-warning-subtle text-warning"><i class="bi bi-gpu-card"></i></span>
+        <div>
+          <h3 class="insight-card__title">โหลดการประมวลผล</h3>
+          <p class="insight-card__subtitle">จำนวนงาน Inference ที่กำลังทำงาน</p>
+        </div>
+      </div>
+      <div class="insight-card__body">
+        <p class="insight-card__value"><span id="insight-running">0</span> งาน</p>
+        <p class="insight-card__meta">คิดเป็น <span id="insight-running-rate">0%</span> ของกล้องทั้งหมด</p>
+        <div class="insight-card__progress">
+          <div class="insight-card__progress-track">
+            <div class="insight-card__progress-fill insight-card__progress-fill--warm" id="progress-utilization"></div>
+          </div>
+          <div class="insight-card__progress-meta">
+            <span>Average FPS</span>
+            <span id="insight-average-fps">0.0</span>
+          </div>
+        </div>
+      </div>
+    </article>
+    <article class="insight-card insight-card--alert">
+      <div class="insight-card__header">
+        <span class="insight-card__icon bg-danger-subtle text-danger"><i class="bi bi-bell"></i></span>
+        <div>
+          <h3 class="insight-card__title">การแจ้งเตือนล่าสุด</h3>
+          <p class="insight-card__subtitle">ความถี่ของเหตุการณ์ในชั่วโมงที่ผ่านมา</p>
+        </div>
+      </div>
+      <div class="insight-card__body">
+        <p class="insight-card__value"><span id="insight-alerts">0</span> ครั้ง/ชม.</p>
+        <p class="insight-card__meta">เกิดจาก <span id="insight-alert-active">0</span> กล้อง</p>
+        <div class="insight-card__progress">
+          <div class="insight-card__progress-track">
+            <div class="insight-card__progress-fill insight-card__progress-fill--alert" id="progress-alerts"></div>
+          </div>
+          <div class="insight-card__progress-meta">
+            <span>Top Camera</span>
+            <span id="insight-top-camera">-</span>
+          </div>
+        </div>
+      </div>
+      <div class="insight-card__footer">
+        <span class="insight-card__footer-meta"><i class="bi bi-clock-history"></i> อัปเดต <span id="insight-alert-latest">-</span></span>
+      </div>
+    </article>
+  </section>
 
   <section class="dashboard__panel dashboard__panel--wide">
     <div class="panel-header">
@@ -145,77 +199,6 @@
     </div>
   </section>
 
-  <section class="dashboard__insights">
-    <article class="insight-card">
-      <div class="insight-card__header">
-        <span class="insight-card__icon bg-success-subtle text-success"><i class="bi bi-activity"></i></span>
-        <div>
-          <h3 class="insight-card__title">ความพร้อมของกล้อง</h3>
-          <p class="insight-card__subtitle">การออนไลน์ของอุปกรณ์ทั้งหมด</p>
-        </div>
-      </div>
-      <div class="insight-card__body">
-        <p class="insight-card__value" id="insight-online-value">0 / 0</p>
-        <p class="insight-card__meta">ออฟไลน์ <span id="insight-offline">0</span> กล้อง</p>
-        <div class="insight-card__progress">
-          <div class="insight-card__progress-track">
-            <div class="insight-card__progress-fill" id="progress-online"></div>
-          </div>
-          <div class="insight-card__progress-meta">
-            <span>ออนไลน์</span>
-            <span id="insight-online-rate">0%</span>
-          </div>
-        </div>
-      </div>
-    </article>
-    <article class="insight-card">
-      <div class="insight-card__header">
-        <span class="insight-card__icon bg-warning-subtle text-warning"><i class="bi bi-gpu-card"></i></span>
-        <div>
-          <h3 class="insight-card__title">โหลดการประมวลผล</h3>
-          <p class="insight-card__subtitle">จำนวนงาน Inference ที่กำลังทำงาน</p>
-        </div>
-      </div>
-      <div class="insight-card__body">
-        <p class="insight-card__value"><span id="insight-running">0</span> งาน</p>
-        <p class="insight-card__meta">คิดเป็น <span id="insight-running-rate">0%</span> ของกล้องทั้งหมด</p>
-        <div class="insight-card__progress">
-          <div class="insight-card__progress-track">
-            <div class="insight-card__progress-fill insight-card__progress-fill--warm" id="progress-utilization"></div>
-          </div>
-          <div class="insight-card__progress-meta">
-            <span>Average FPS</span>
-            <span id="insight-average-fps">0.0</span>
-          </div>
-        </div>
-      </div>
-    </article>
-    <article class="insight-card insight-card--alert">
-      <div class="insight-card__header">
-        <span class="insight-card__icon bg-danger-subtle text-danger"><i class="bi bi-bell"></i></span>
-        <div>
-          <h3 class="insight-card__title">การแจ้งเตือนล่าสุด</h3>
-          <p class="insight-card__subtitle">ความถี่ของเหตุการณ์ในชั่วโมงที่ผ่านมา</p>
-        </div>
-      </div>
-      <div class="insight-card__body">
-        <p class="insight-card__value"><span id="insight-alerts">0</span> ครั้ง/ชม.</p>
-        <p class="insight-card__meta">เกิดจาก <span id="insight-alert-active">0</span> กล้อง</p>
-        <div class="insight-card__progress">
-          <div class="insight-card__progress-track">
-            <div class="insight-card__progress-fill insight-card__progress-fill--alert" id="progress-alerts"></div>
-          </div>
-          <div class="insight-card__progress-meta">
-            <span>Top Camera</span>
-            <span id="insight-top-camera">-</span>
-          </div>
-        </div>
-      </div>
-      <div class="insight-card__footer">
-        <span class="insight-card__footer-meta"><i class="bi bi-clock-history"></i> อัปเดต <span id="insight-alert-latest">-</span></span>
-      </div>
-    </article>
-  </section>
 
   <section class="dashboard__panel dashboard__panel--wide dashboard__panel--accent">
     <div class="panel-header">
