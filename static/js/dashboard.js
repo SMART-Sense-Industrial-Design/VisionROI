@@ -128,6 +128,22 @@ function formatSeconds(value) {
   return `${num.toFixed(2)}s`;
 }
 
+function formatSecondsFixed(value) {
+  if (value === null || value === undefined) {
+    return null;
+  }
+  const num = Number(value);
+  if (!Number.isFinite(num)) {
+    return null;
+  }
+  return num.toFixed(2);
+}
+
+function formatSecondsWithUnit(value) {
+  const fixed = formatSecondsFixed(value);
+  return fixed !== null ? `${fixed} วินาที` : null;
+}
+
 function calculateCameraInsights(cameras = []) {
   return cameras.reduce((acc, camera) => {
     const roiCount = Number(camera?.roi_count);
@@ -201,9 +217,12 @@ function renderModuleCards(modules = []) {
 
     const value = document.createElement('p');
     value.className = 'roi-module-card__value';
-    value.textContent = module?.average_duration != null
-      ? formatSeconds(module.average_duration)
-      : '-';
+    if (module?.average_duration != null) {
+      const formatted = formatSecondsWithUnit(module.average_duration);
+      value.textContent = formatted ? `เวลาเฉลี่ย ${formatted}` : 'รอข้อมูล';
+    } else {
+      value.textContent = 'รอข้อมูล';
+    }
 
     const footer = document.createElement('p');
     footer.className = 'roi-module-card__footer';
@@ -248,16 +267,18 @@ function updateModulePerformance(performance = {}) {
     : 'รอข้อมูล';
 
   setElementText('module-fastest-name', fastest?.name || '-');
+  const fastestDuration = fastest?.latest_duration ?? fastest?.average_duration;
   setElementText(
     'module-fastest-duration',
-    fastest?.average_duration != null ? formatSeconds(fastest.average_duration) : '-',
+    fastestDuration != null ? formatSecondsWithUnit(fastestDuration) || '-' : '-',
   );
   setElementText('module-fastest-meta', fastestMeta);
 
   setElementText('module-slowest-name', slowest?.name || '-');
+  const slowestDuration = slowest?.latest_duration ?? slowest?.average_duration;
   setElementText(
     'module-slowest-duration',
-    slowest?.average_duration != null ? formatSeconds(slowest.average_duration) : '-',
+    slowestDuration != null ? formatSecondsWithUnit(slowestDuration) || '-' : '-',
   );
   setElementText('module-slowest-meta', slowestMeta);
 }

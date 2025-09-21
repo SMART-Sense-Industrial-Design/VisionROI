@@ -629,7 +629,14 @@ def build_dashboard_payload() -> dict[str, Any]:
             total_duration += duration_val
             module_entry = module_duration_stats.setdefault(
                 module_name,
-                {"total": 0.0, "count": 0, "min": None, "max": None},
+                {
+                    "total": 0.0,
+                    "count": 0,
+                    "min": None,
+                    "max": None,
+                    "latest_duration": None,
+                    "latest_timestamp": 0.0,
+                },
             )
             module_entry["total"] += duration_val
             module_entry["count"] += 1
@@ -643,6 +650,9 @@ def build_dashboard_payload() -> dict[str, Any]:
                 if module_entry["max"] is None
                 else max(float(module_entry["max"]), duration_val)
             )
+            if ts >= float(module_entry.get("latest_timestamp", 0.0) or 0.0):
+                module_entry["latest_duration"] = duration_val
+                module_entry["latest_timestamp"] = ts
         cam_id = notif.get("cam_id")
         if cam_id and total_duration > 0:
             source_entry = source_duration_stats.setdefault(
@@ -895,24 +905,37 @@ def build_dashboard_payload() -> dict[str, Any]:
                 "min_duration": durations.get("min"),
                 "max_duration": durations.get("max"),
                 "sample_count": duration_count,
+                "latest_duration": durations.get("latest_duration"),
+                "latest_timestamp": durations.get("latest_timestamp"),
             }
         )
 
     module_details.sort(key=lambda item: (-item.get("roi_count", 0), item.get("name", "")))
 
-    measured_modules = [
-        item for item in module_details if item.get("average_duration") is not None
+    latest_measured_modules = [
+        item for item in module_details if item.get("latest_duration") is not None
     ]
-    fastest_module = (
-        min(measured_modules, key=lambda item: item.get("average_duration", 0.0))
-        if measured_modules
-        else None
-    )
-    slowest_module = (
-        max(measured_modules, key=lambda item: item.get("average_duration", 0.0))
-        if measured_modules
-        else None
-    )
+    if latest_measured_modules:
+        fastest_module = min(
+            latest_measured_modules, key=lambda item: float(item.get("latest_duration", 0.0))
+        )
+        slowest_module = max(
+            latest_measured_modules, key=lambda item: float(item.get("latest_duration", 0.0))
+        )
+    else:
+        measured_modules = [
+            item for item in module_details if item.get("average_duration") is not None
+        ]
+        fastest_module = (
+            min(measured_modules, key=lambda item: item.get("average_duration", 0.0))
+            if measured_modules
+            else None
+        )
+        slowest_module = (
+            max(measured_modules, key=lambda item: item.get("average_duration", 0.0))
+            if measured_modules
+            else None
+        )
 
     source_details: list[dict[str, Any]] = []
     for cam_id, info in source_roi_map.items():
