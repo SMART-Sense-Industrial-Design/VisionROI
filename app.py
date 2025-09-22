@@ -1738,62 +1738,70 @@ async def run_inference_loop(cam_id: str):
                             except Exception:
                                 result = None
 
-                            result_text: str
-                            if isinstance(result, str):
-                                result_text = result
-                            elif isinstance(result, dict):
-                                if 'text' in result:
-                                    result_text = str(result['text'])
-                                elif 'result' in result:
-                                    result_text = str(result['result'])
-                                else:
+                            if loop is None:
+                                return
+
+                            async def process_result() -> None:
+                                result_text: str
+                                if isinstance(result, str):
+                                    result_text = result
+                                elif isinstance(result, dict):
+                                    if 'text' in result:
+                                        result_text = str(result['text'])
+                                    elif 'result' in result:
+                                        result_text = str(result['result'])
+                                    else:
+                                        result_text = ''
+                                elif result is None:
                                     result_text = ''
-                            elif result is None:
-                                result_text = ''
-                            else:
-                                result_text = str(result)
+                                else:
+                                    result_text = str(result)
 
-                            start_map = pending_roi_start.get(key)
-                            start_ts = None
-                            if start_map is not None:
-                                start_ts = start_map.pop(roi_id, None)
-                                if not start_map:
-                                    pending_roi_start.pop(key, None)
+                                start_map = pending_roi_start.get(key)
+                                start_ts = None
+                                if start_map is not None:
+                                    start_ts = start_map.pop(roi_id, None)
+                                    if not start_map:
+                                        pending_roi_start.pop(key, None)
 
-                            result_timestamp = time.time()
-                            duration = None
-                            if isinstance(start_ts, (int, float)):
-                                duration = max(0.0, result_timestamp - start_ts)
+                                result_timestamp = time.time()
+                                duration = None
+                                if isinstance(start_ts, (int, float)):
+                                    duration = max(0.0, result_timestamp - start_ts)
 
-                            entry = {
-                                'id': roi_id,
-                                'image': '',
-                                'text': result_text,
-                                'frame_time': frame_time,
-                                'result_time': result_timestamp,
-                                'name': roi_name,
-                                'group': roi_group,
-                                'module': module_name,
-                            }
-                            entry['cam_id'] = cam_id
-                            entry['source'] = source_name
-                            if duration is not None:
-                                entry['duration'] = duration
-                            try:
-                                if roi_img is not None:
-                                    encoded, roi_buf = cv2.imencode(
-                                        '.jpg',
-                                        roi_img,
-                                        [int(cv2.IMWRITE_JPEG_QUALITY), 80],
-                                    )
-                                    if encoded and roi_buf is not None:
-                                        entry['image'] = base64.b64encode(roi_buf).decode('ascii')
-                            except Exception:
-                                pass
+                                entry = {
+                                    'id': roi_id,
+                                    'image': '',
+                                    'text': result_text,
+                                    'frame_time': frame_time,
+                                    'result_time': result_timestamp,
+                                    'name': roi_name,
+                                    'group': roi_group,
+                                    'module': module_name,
+                                }
+                                entry['cam_id'] = cam_id
+                                entry['source'] = source_name
+                                if duration is not None:
+                                    entry['duration'] = duration
+                                try:
+                                    if roi_img is not None:
+                                        encoded, roi_buf = await asyncio.to_thread(
+                                            cv2.imencode,
+                                            '.jpg',
+                                            roi_img,
+                                            [int(cv2.IMWRITE_JPEG_QUALITY), 80],
+                                        )
+                                        if encoded and roi_buf is not None:
+                                            image_bytes = await asyncio.to_thread(
+                                                base64.b64encode,
+                                                roi_buf,
+                                            )
+                                            entry['image'] = image_bytes.decode('ascii')
+                                except Exception:
+                                    pass
 
-                            if mqtt_name:
-                                entry['mqtt_config'] = mqtt_name
-                                if loop is not None:
+                                if mqtt_name:
+                                    entry['mqtt_config'] = mqtt_name
                                     group_value = (
                                         str(roi_group)
                                         if roi_group is not None
@@ -1831,17 +1839,27 @@ async def run_inference_loop(cam_id: str):
                                                 mqtt_name,
                                             )
 
-                            pending_results[key][roi_id] = entry
-                            pending_deadlines[key] = (
-                                time.time() + get_pending_timeout()
-                            )
-                            total_rois = pending_expected.get(key, 0)
-                            if (
-                                key in pending_ready
-                                and total_rois
-                                and len(pending_results[key]) >= total_rois
-                            ):
-                                flush_pending_result(key)
+                                pending_results[key][roi_id] = entry
+                                pending_deadlines[key] = (
+                                    time.time() + get_pending_timeout()
+                                )
+                                total_rois = pending_expected.get(key, 0)
+                                if (
+                                    key in pending_ready
+                                    and total_rois
+                                    and len(pending_results[key]) >= total_rois
+                                ):
+                                    flush_pending_result(key)
+
+                            try:
+                                loop.create_task(process_result())
+                            except RuntimeError:
+                                logger = get_logger('inference_queue')
+                                if logger is not None:
+                                    logger.exception(
+                                        "failed to schedule inference result processing for ROI %s",
+                                        roi_id,
+                                    )
 
                         fut.add_done_callback(_on_done)
             elif should_infer and not r.get('module'):
