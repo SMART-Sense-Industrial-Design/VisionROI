@@ -109,9 +109,21 @@ class CameraWorker:
                 "-an",
             ]
 
-            if self.width and self.height:
-                cmd += ["-vf", f"scale={int(self.width)}:{int(self.height)}:flags=lanczos"]
+            # สร้างกรองภาพให้ชัดเจนเรื่องขนาด/คัลเลอร์เรนจ์ เพื่อลด warning ของ ffmpeg
+            scale_w = str(int(self.width)) if self.width else "iw"
+            scale_h = str(int(self.height)) if self.height else "ih"
+            filters: list[str] = [
+                (
+                    "scale="
+                    f"{scale_w}:{scale_h}:"
+                    "flags=lanczos+full_chroma_int+accurate_rnd:"
+                    "in_range=pc:out_range=pc"
+                ),
+                "setsar=1",
+                "format=bgr24",
+            ]
 
+            cmd += ["-vf", ",".join(filters)]
             cmd += ["-pix_fmt", "bgr24", "-f", "rawvideo", "pipe:1"]
 
             self._ffmpeg_cmd = cmd
