@@ -61,7 +61,7 @@
         const cam = typeof camIdOverride === 'string' && camIdOverride.length > 0
           ? camIdOverride
           : `inf_${cellId}`;
-        const makeStorageKey = suffix => `inference-group:${cellId}:${suffix}`;
+        const makeStorageKey = suffix => `inference-group:${cam}:${suffix}`;
         const getEl = suffix => document.getElementById(`${cellId}-${suffix}`);
         const video = getEl('video');
         const videoCtx = video.getContext('2d');

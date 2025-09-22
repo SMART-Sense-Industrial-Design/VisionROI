@@ -59,7 +59,7 @@
       const cam = typeof camIdOverride === 'string' && camIdOverride.length > 0
         ? camIdOverride
         : `page_${cellId}`;
-      const makeStorageKey = suffix => `inference-page:${cellId}:${suffix}`;
+      const makeStorageKey = suffix => `inference-page:${cam}:${suffix}`;
       const getEl = suffix => document.getElementById(`${cellId}-${suffix}`);
       const video = getEl('video');
       const videoCtx = video.getContext('2d');
