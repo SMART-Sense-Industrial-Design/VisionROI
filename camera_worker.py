@@ -213,6 +213,34 @@ class CameraWorker:
         except Exception:
             pass
 
+    def _flush_partial_ffmpeg_frame(self, fd: int, remaining: int) -> bool:
+        """พยายามอ่านและทิ้ง byte ที่เหลือของเฟรมที่ไม่ครบเพื่อรักษาการจัดแนว"""
+        if remaining <= 0:
+            return True
+        deadline = time.monotonic() + max(0.2, min(self._read_timeout, 1.5))
+        while remaining > 0 and not self._stop_evt.is_set():
+            timeout = min(0.2, max(0.05, self._read_timeout / 2))
+            try:
+                ready, _, _ = select.select([fd], [], [], timeout)
+            except Exception:
+                return False
+            if not ready:
+                if time.monotonic() > deadline:
+                    return False
+                continue
+            try:
+                chunk = os.read(fd, min(remaining, 65536))
+            except BlockingIOError:
+                if time.monotonic() > deadline:
+                    return False
+                continue
+            except Exception:
+                return False
+            if not chunk:
+                return False
+            remaining -= len(chunk)
+        return remaining <= 0
+
     def _restart_backend(self) -> None:
         """พยายามเชื่อมต่อสตรีมใหม่เมื่ออ่านไม่ได้"""
         self._logger.warning("%s restarting backend after failures", self._log_prefix)
@@ -366,6 +394,17 @@ class CameraWorker:
                     start_wait = time.monotonic()
 
                 if len(buffer) != frame_size:
+                    if 0 < len(buffer) < frame_size:
+                        leftover = frame_size - len(buffer)
+                        if not self._flush_partial_ffmpeg_frame(fd, leftover):
+                            self._logger.warning(
+                                "%s unable to flush %d bytes of partial frame; restarting backend",
+                                self._log_prefix,
+                                leftover,
+                            )
+                            self._restart_backend()
+                            time.sleep(0.1)
+                            continue
                     self._fail_count += 1
                     if self._fail_count in (1, 10) or self._fail_count % 25 == 0:
                         self._logger.warning(
