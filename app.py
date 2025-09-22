@@ -62,6 +62,15 @@ last_inference_outputs: dict[str, str] = {}
 inference_result_timeouts: dict[str, float] = {}
 inference_draw_page_boxes: dict[str, bool] = {}
 
+frame_last_success_times: dict[str, float] = {}
+frame_failure_counts: dict[str, int] = {}
+frame_last_failure_log_times: dict[str, float] = {}
+frame_last_failure_reasons: dict[str, str] = {}
+frame_first_failure_times: dict[str, float] = {}
+_FRAME_FAILURE_LOG_INTERVAL = 30.0
+_FRAME_FAILURE_MIN_COUNT = 5
+_FRAME_FAILURE_MIN_GAP = 2.0
+
 recent_notifications: list[dict[str, Any]] = []
 MAX_RECENT_NOTIFICATIONS = 200
 
@@ -158,6 +167,108 @@ def _malloc_trim():
         pass
 
 
+def _get_camera_logger(cam_id: str):
+    source_name = active_sources.get(cam_id)
+    if source_name:
+        with contextlib.suppress(Exception):
+            return get_logger("camera_stream", source_name)
+    return get_logger("camera_stream", cam_id)
+
+
+def _record_camera_failure(cam_id: str, reason: str) -> None:
+    now = time.time()
+    failure_count = frame_failure_counts.get(cam_id, 0) + 1
+    frame_failure_counts[cam_id] = failure_count
+
+    last_reason = frame_last_failure_reasons.get(cam_id)
+    last_log = frame_last_failure_log_times.get(cam_id, 0.0)
+    last_success = frame_last_success_times.get(cam_id)
+    first_failure_time = frame_first_failure_times.get(cam_id)
+    if first_failure_time is None:
+        frame_first_failure_times[cam_id] = now
+        first_failure_time = now
+    time_since_first = max(0.0, now - first_failure_time)
+    gap = None if last_success is None else max(0.0, now - last_success)
+    if last_success is None:
+        if (
+            failure_count < _FRAME_FAILURE_MIN_COUNT
+            or time_since_first < _FRAME_FAILURE_MIN_GAP
+        ):
+            return
+    elif failure_count < _FRAME_FAILURE_MIN_COUNT and gap < _FRAME_FAILURE_MIN_GAP:
+        return
+    should_log = failure_count == 1 or reason != last_reason
+    if not should_log and now - last_log >= _FRAME_FAILURE_LOG_INTERVAL:
+        should_log = True
+
+    if should_log:
+        logger = _get_camera_logger(cam_id)
+        backend = camera_backends.get(cam_id, "unknown")
+        log_method = getattr(logger, "warning", None)
+        if log_method is None:
+            frame_last_failure_log_times[cam_id] = now
+            frame_last_failure_reasons[cam_id] = reason
+            return
+        if gap is not None:
+            log_method(
+                "cam %s (backend=%s) frame read failure: %s (consecutive=%d, last_success=%.1fs ago)",
+                cam_id,
+                backend,
+                reason,
+                failure_count,
+                gap,
+            )
+        else:
+            log_method(
+                "cam %s (backend=%s) frame read failure: %s (consecutive=%d, first_failure=%.1fs ago)",
+                cam_id,
+                backend,
+                reason,
+                failure_count,
+                time_since_first,
+            )
+        frame_last_failure_log_times[cam_id] = now
+        frame_last_failure_reasons[cam_id] = reason
+
+
+def _record_camera_success(cam_id: str) -> None:
+    now = time.time()
+    last_success = frame_last_success_times.get(cam_id)
+    frame_last_success_times[cam_id] = now
+    failure_count = frame_failure_counts.get(cam_id, 0)
+    downtime = None if last_success is None else max(0.0, now - last_success)
+    if failure_count >= _FRAME_FAILURE_MIN_COUNT or (
+        downtime is not None and downtime >= _FRAME_FAILURE_MIN_GAP
+    ):
+        logger = _get_camera_logger(cam_id)
+        if not hasattr(logger, "warning"):
+            frame_failure_counts[cam_id] = 0
+            frame_last_failure_reasons.pop(cam_id, None)
+            frame_last_failure_log_times.pop(cam_id, None)
+            frame_first_failure_times.pop(cam_id, None)
+            return
+        log_method = getattr(logger, "info", None) or getattr(logger, "warning", None)
+        if log_method is not None:
+            log_method(
+                "cam %s stream recovered after %d consecutive failures (downtime %.1fs)",
+                cam_id,
+                failure_count,
+                0.0 if downtime is None else downtime,
+            )
+    frame_failure_counts[cam_id] = 0
+    frame_last_failure_reasons.pop(cam_id, None)
+    frame_last_failure_log_times.pop(cam_id, None)
+    frame_first_failure_times.pop(cam_id, None)
+
+
+def _reset_camera_health(cam_id: str) -> None:
+    frame_last_success_times.pop(cam_id, None)
+    frame_failure_counts.pop(cam_id, None)
+    frame_last_failure_log_times.pop(cam_id, None)
+    frame_last_failure_reasons.pop(cam_id, None)
+    frame_first_failure_times.pop(cam_id, None)
+
+
 def _free_cam_state(cam_id: str):
     """Drop all references for this camera to allow GC to reclaim big buffers."""
     # Drop conf/state that may hold refs
@@ -183,6 +294,8 @@ def _free_cam_state(cam_id: str):
     # GC & trim
     gc.collect()
     _malloc_trim()
+
+    _reset_camera_health(cam_id)
 
 
 # =========================
@@ -1306,30 +1419,37 @@ async def read_and_queue_frame(
 ) -> None:
     worker = camera_workers.get(cam_id)
     if worker is None:
+        _record_camera_failure(cam_id, "worker_missing")
         await asyncio.sleep(0.01)
         return
     frame = await worker.read()
     if frame is None:
+        _record_camera_failure(cam_id, "no_frame")
         await asyncio.sleep(0.01)
         return
     if np is not None and hasattr(frame, "size") and frame.size == 0:
+        _record_camera_failure(cam_id, "empty_frame")
         await asyncio.sleep(0.01)
         return
     if frame_processor:
         frame = await frame_processor(frame)
         if frame is None:
+            _record_camera_failure(cam_id, "processor_returned_none")
             return
     try:
         encoded, buffer = await asyncio.to_thread(
             cv2.imencode, '.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 80]
         )
-    except Exception:
+    except Exception as exc:
+        _record_camera_failure(cam_id, f"encode_error:{exc.__class__.__name__}")
         await asyncio.sleep(0.01)
         return
     if not encoded or buffer is None:
+        _record_camera_failure(cam_id, "encode_failed")
         await asyncio.sleep(0.01)
         return
     frame_bytes = buffer.tobytes() if hasattr(buffer, "tobytes") else buffer
+    _record_camera_success(cam_id)
     if queue.full():
         try:
             queue.get_nowait()
