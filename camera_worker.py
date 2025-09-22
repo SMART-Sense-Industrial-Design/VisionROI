@@ -110,15 +110,6 @@ class CameraWorker:
                 "-an",
             ]
 
-            chosen_pix_fmt = "yuv420p"
-            if (
-                self.width
-                and self.height
-                and (int(self.width) % 2 != 0 or int(self.height) % 2 != 0)
-            ):
-                # I420 ต้องการ resolution คู่ ถ้าไม่ใช่ให้กลับไปใช้ BGR เพื่อความปลอดภัย
-                chosen_pix_fmt = "bgr24"
-
             filters: list[str] = []
             if self.width and self.height:
                 filters.append(
@@ -127,13 +118,13 @@ class CameraWorker:
                     "flags=lanczos"
                 )
             filters.append("setsar=1")
-            filters.append(f"format={chosen_pix_fmt}")
+            filters.append("format=bgr24")
 
             if filters:
                 cmd += ["-vf", ",".join(filters)]
-            cmd += ["-pix_fmt", chosen_pix_fmt, "-f", "rawvideo", "pipe:1"]
+            cmd += ["-pix_fmt", "bgr24", "-f", "rawvideo", "pipe:1"]
 
-            self._ffmpeg_pix_fmt = chosen_pix_fmt
+            self._ffmpeg_pix_fmt = "bgr24"
 
             self._ffmpeg_cmd = cmd
             with silent():
@@ -585,8 +576,6 @@ class CameraWorker:
     def _expected_frame_size(self) -> Optional[int]:
         if not (self.width and self.height):
             return None
-        if self._ffmpeg_pix_fmt == "yuv420p":
-            return int(self.width) * int(self.height) * 3 // 2
         if self._ffmpeg_pix_fmt == "bgr24":
             return int(self.width) * int(self.height) * 3
         return None
@@ -594,13 +583,6 @@ class CameraWorker:
     def _reshape_ffmpeg_frame(self, buffer: bytearray):
         if not (self.width and self.height and np is not None):
             raise RuntimeError("width/height or numpy missing")
-        if self._ffmpeg_pix_fmt == "yuv420p":
-            if cv2 is None:
-                raise RuntimeError("cv2 is required to convert yuv420p to bgr")
-            yuv = np.frombuffer(memoryview(buffer), np.uint8).reshape(
-                (int(self.height) * 3 // 2, int(self.width))
-            )
-            return cv2.cvtColor(yuv, cv2.COLOR_YUV2BGR_I420)
         if self._ffmpeg_pix_fmt == "bgr24":
             return np.frombuffer(memoryview(buffer), np.uint8).reshape(
                 (int(self.height), int(self.width), 3)
