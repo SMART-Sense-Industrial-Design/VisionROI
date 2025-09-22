@@ -61,7 +61,27 @@
         const cam = typeof camIdOverride === 'string' && camIdOverride.length > 0
           ? camIdOverride
           : `inf_${cellId}`;
-        const makeStorageKey = suffix => `inference-group:${cam}:${suffix}`;
+        const storageNamespace = `inference-group:${cam}`;
+        const makeStorageKey = suffix => `${storageNamespace}:${suffix}`;
+        const readStoredValue = suffix => localStorage.getItem(makeStorageKey(suffix));
+        const storeValue = (suffix, value) => {
+          if (value === undefined || value === null || value === '') {
+            localStorage.removeItem(makeStorageKey(suffix));
+          } else {
+            localStorage.setItem(makeStorageKey(suffix), value);
+          }
+        };
+        const migrateLegacyKey = (legacySuffix, newSuffix = legacySuffix) => {
+          const legacyKey = `${cellId}-${legacySuffix}`;
+          const legacyValue = localStorage.getItem(legacyKey);
+          if (legacyValue !== null && readStoredValue(newSuffix) === null) {
+            storeValue(newSuffix, legacyValue);
+          }
+          if (legacyValue !== null) {
+            localStorage.removeItem(legacyKey);
+          }
+        };
+        ['source', 'interval', 'group'].forEach(key => migrateLegacyKey(key));
         const getEl = suffix => document.getElementById(`${cellId}-${suffix}`);
         const video = getEl('video');
         const videoCtx = video.getContext('2d');
@@ -90,7 +110,7 @@
         if (labelEl) {
           labelEl.textContent = baseLabelText;
         }
-        const storedInterval = localStorage.getItem(makeStorageKey('interval'));
+        const storedInterval = readStoredValue('interval');
         if (storedInterval) {
           intervalInput.value = storedInterval;
         } else if (defaultInterval !== undefined && defaultInterval !== null) {
@@ -99,9 +119,8 @@
           intervalInput.value = '1';
         }
         const normalizedDefaultGroup = typeof defaultGroup === 'string' ? defaultGroup : '';
-        const groupStorageKey = makeStorageKey('group');
         const getStoredGroup = () => {
-          const stored = localStorage.getItem(groupStorageKey);
+          const stored = readStoredValue('group');
           if (stored !== null) {
             return stored;
           }
@@ -109,9 +128,9 @@
         };
         const storeGroupSelection = value => {
             if (value) {
-                localStorage.setItem(groupStorageKey, value);
+                storeValue('group', value);
             } else {
-                localStorage.removeItem(groupStorageKey);
+                storeValue('group', null);
             }
         };
         let lastActiveGroup = getStoredGroup();
@@ -145,7 +164,7 @@
         };
 
         sourceSelect.onchange = () => {
-            localStorage.setItem(makeStorageKey('source'), sourceSelect.value);
+            storeValue('source', sourceSelect.value);
             updateHeaderSourceLabel();
         };
 
@@ -191,13 +210,13 @@
                         opt.textContent = item.name;
                         sourceSelect.appendChild(opt);
                     });
-                    const stored = localStorage.getItem(makeStorageKey('source')) || '';
+                    const stored = readStoredValue('source') || '';
                     const preferredSource = stored
                         || (typeof providedSource === 'string' ? providedSource : '');
                     const availableSources = new Set(data.map(item => item.name));
                     if (preferredSource && availableSources.has(preferredSource)) {
                         sourceSelect.value = preferredSource;
-                        localStorage.setItem(makeStorageKey('source'), preferredSource);
+                        storeValue('source', preferredSource);
                     }
                     updateHeaderSourceLabel();
                     showAlert('Sources loaded', 'success');
@@ -462,14 +481,14 @@
                 showAlert('Select source first', 'error');
                 return;
             }
-        localStorage.setItem(makeStorageKey('source'), name);
+        storeValue('source', name);
 
-            const cfgRes = await fetchWithStatus(`/source_config?name=${encodeURIComponent(name)}`);
-            const cfg = await cfgRes.json();
+        const cfgRes = await fetchWithStatus(`/source_config?name=${encodeURIComponent(name)}`);
+        const cfg = await cfgRes.json();
 
             const { module: _unused, rois: roiPathRaw, ...camCfg } = cfg;
-            const interval = parseFloat(intervalInput.value) || 1;
-        localStorage.setItem(makeStorageKey('interval'), interval);
+        const interval = parseFloat(intervalInput.value) || 1;
+        storeValue('interval', interval);
             let roiPath = roiPathRaw;
             if (!roiPath.startsWith('/')) {
                 roiPath = `data_sources/${cfg.name}/${roiPath}`;
@@ -737,7 +756,15 @@
             await checkStatus();
         })();
 
-        return { stopInference, camId: cam };
+        return {
+            stopInference,
+            camId: cam,
+            clearStoredValues() {
+                ['source', 'interval', 'group'].forEach(key => {
+                    localStorage.removeItem(makeStorageKey(key));
+                });
+            },
+        };
     }
 
   const inferenceRows = document.getElementById('inferenceRows');
@@ -874,11 +901,13 @@
       if (controller && controller.camId) {
           camIdToCell.delete(controller.camId);
       }
+      if (controller && typeof controller.clearStoredValues === 'function') {
+          controller.clearStoredValues();
+      }
       const row = inferenceRows.querySelector(`.cam-row[data-cell-id="${cellId}"]`);
       if (row) {
           row.remove();
       }
-      ['source', 'interval', 'group'].forEach(key => localStorage.removeItem(makeStorageKey(key)));
       showAlert('ลบงาน Inference แล้ว', 'info');
       if (controllers.size === 0) {
           addInferenceRow();
