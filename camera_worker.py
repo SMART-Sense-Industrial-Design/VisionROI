@@ -72,6 +72,7 @@ class CameraWorker:
         self._last_frame = None
         self._fail_count = 0
         self._ffmpeg_cmd = None
+        self._ffmpeg_pix_fmt: str | None = None
         self._stdout_fd: int | None = None
         self._last_returncode_logged: int | None = None
         self._read_timeout = 3.0
@@ -109,22 +110,30 @@ class CameraWorker:
                 "-an",
             ]
 
-            # สร้างกรองภาพให้ชัดเจนเรื่องขนาด/คัลเลอร์เรนจ์ เพื่อลด warning ของ ffmpeg
-            scale_w = str(int(self.width)) if self.width else "iw"
-            scale_h = str(int(self.height)) if self.height else "ih"
-            filters: list[str] = [
-                (
-                    "scale="
-                    f"{scale_w}:{scale_h}:"
-                    "flags=lanczos+full_chroma_int+accurate_rnd:"
-                    "in_range=pc:out_range=pc"
-                ),
-                "setsar=1",
-                "format=bgr24",
-            ]
+            chosen_pix_fmt = "yuv420p"
+            if (
+                self.width
+                and self.height
+                and (int(self.width) % 2 != 0 or int(self.height) % 2 != 0)
+            ):
+                # I420 ต้องการ resolution คู่ ถ้าไม่ใช่ให้กลับไปใช้ BGR เพื่อความปลอดภัย
+                chosen_pix_fmt = "bgr24"
 
-            cmd += ["-vf", ",".join(filters)]
-            cmd += ["-pix_fmt", "bgr24", "-f", "rawvideo", "pipe:1"]
+            filters: list[str] = []
+            if self.width and self.height:
+                filters.append(
+                    "scale="
+                    f"{int(self.width)}:{int(self.height)}:"
+                    "flags=lanczos"
+                )
+            filters.append("setsar=1")
+            filters.append(f"format={chosen_pix_fmt}")
+
+            if filters:
+                cmd += ["-vf", ",".join(filters)]
+            cmd += ["-pix_fmt", chosen_pix_fmt, "-f", "rawvideo", "pipe:1"]
+
+            self._ffmpeg_pix_fmt = chosen_pix_fmt
 
             self._ffmpeg_cmd = cmd
             with silent():
@@ -351,7 +360,18 @@ class CameraWorker:
                 if not (self.width and self.height and np is not None):
                     time.sleep(0.03)
                     continue
-                frame_size = int(self.width) * int(self.height) * 3
+                frame_size = self._expected_frame_size()
+                if frame_size is None:
+                    self._fail_count += 1
+                    if self._fail_count > 10 and self._fail_count % 10 == 0:
+                        self._logger.warning(
+                            "%s unable to determine frame size for pix_fmt=%s; consecutive failures=%d",
+                            self._log_prefix,
+                            self._ffmpeg_pix_fmt,
+                            self._fail_count,
+                        )
+                    time.sleep(0.05)
+                    continue
 
                 stdout = self._proc.stdout
                 if stdout is None:
@@ -431,10 +451,9 @@ class CameraWorker:
                     time.sleep(0.01)
                     continue
 
+                frame = None
                 try:
-                    frame = np.frombuffer(memoryview(buffer), np.uint8).reshape(
-                        (int(self.height), int(self.width), 3)
-                    )
+                    frame = self._reshape_ffmpeg_frame(buffer)
                 except Exception:
                     self._fail_count += 1
                     if self._fail_count in (1, 10) or self._fail_count % 25 == 0:
@@ -562,3 +581,28 @@ class CameraWorker:
     def last_ffmpeg_stderr(self) -> str:
         """คืนบรรทัด stderr ล่าสุดของ ffmpeg เพื่อช่วยดีบัก"""
         return "\n".join(self._last_stderr)
+
+    def _expected_frame_size(self) -> Optional[int]:
+        if not (self.width and self.height):
+            return None
+        if self._ffmpeg_pix_fmt == "yuv420p":
+            return int(self.width) * int(self.height) * 3 // 2
+        if self._ffmpeg_pix_fmt == "bgr24":
+            return int(self.width) * int(self.height) * 3
+        return None
+
+    def _reshape_ffmpeg_frame(self, buffer: bytearray):
+        if not (self.width and self.height and np is not None):
+            raise RuntimeError("width/height or numpy missing")
+        if self._ffmpeg_pix_fmt == "yuv420p":
+            if cv2 is None:
+                raise RuntimeError("cv2 is required to convert yuv420p to bgr")
+            yuv = np.frombuffer(memoryview(buffer), np.uint8).reshape(
+                (int(self.height) * 3 // 2, int(self.width))
+            )
+            return cv2.cvtColor(yuv, cv2.COLOR_YUV2BGR_I420)
+        if self._ffmpeg_pix_fmt == "bgr24":
+            return np.frombuffer(memoryview(buffer), np.uint8).reshape(
+                (int(self.height), int(self.width), 3)
+            )
+        raise RuntimeError(f"unsupported pix_fmt {self._ffmpeg_pix_fmt}")
