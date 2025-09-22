@@ -1154,6 +1154,8 @@ async def _safe_stop(cam_id: str,
 
 # ========== Graceful shutdown (fast & robust) ==========
 _SHUTTING_DOWN = False  # prevent reentry
+# เก็บอ้างอิงเซิร์ฟเวอร์ uvicorn (ถ้ามี) เพื่อสั่งหยุดรับงานเมื่อกำลังจะปิด
+_UVICORN_SERVER = None
 
 async def _shutdown_cleanup_concurrent():
     # run after_serving cleanup but cap time
@@ -1167,6 +1169,11 @@ async def _graceful_exit():
     if _SHUTTING_DOWN:
         return
     _SHUTTING_DOWN = True
+    server = globals().get("_UVICORN_SERVER")
+    if server is not None:
+        with contextlib.suppress(Exception):
+            server.should_exit = True
+            server.force_exit = True
     with contextlib.suppress(Exception):
         await _shutdown_cleanup_concurrent()
     # allow 202 response to flush
@@ -2754,7 +2761,8 @@ if __name__ == "__main__":
 
     if args.use_uvicorn:
         import uvicorn
-        uvicorn.run(
+
+        config = uvicorn.Config(
             "app:app",
             host="0.0.0.0",
             port=args.port,
@@ -2764,5 +2772,15 @@ if __name__ == "__main__":
             timeout_graceful_shutdown=2,
             workers=1,
         )
+        server = uvicorn.Server(config)
+
+        # ปิดการติดตั้ง signal handler ของ uvicorn เพื่อให้ handler ภายในไฟล์นี้ทำงานแทน
+        server.install_signal_handlers = lambda: None  # type: ignore[assignment]
+
+        try:
+            globals()["_UVICORN_SERVER"] = server
+            server.run()
+        finally:
+            globals()["_UVICORN_SERVER"] = None
     else:
         app.run(port=args.port)
