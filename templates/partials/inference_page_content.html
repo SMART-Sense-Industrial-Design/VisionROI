@@ -59,6 +59,7 @@
       const cam = typeof camIdOverride === 'string' && camIdOverride.length > 0
         ? camIdOverride
         : `page_${cellId}`;
+      const makeStorageKey = suffix => `inference-page:${cellId}:${suffix}`;
       const getEl = suffix => document.getElementById(`${cellId}-${suffix}`);
       const video = getEl('video');
       const videoCtx = video.getContext('2d');
@@ -92,7 +93,7 @@
       if (labelEl) {
         labelEl.textContent = baseLabelText;
       }
-      const storedInterval = localStorage.getItem(`${cellId}-interval`);
+      const storedInterval = localStorage.getItem(makeStorageKey('interval'));
       if (storedInterval) {
         intervalInput.value = storedInterval;
       } else if (defaultInterval !== undefined && defaultInterval !== null) {
@@ -209,7 +210,7 @@
       };
 
       sourceSelect.onchange = () => {
-        localStorage.setItem(`${cellId}-source`, sourceSelect.value);
+        localStorage.setItem(makeStorageKey('source'), sourceSelect.value);
         updateHeaderSourceLabel();
       };
 
@@ -254,13 +255,13 @@
               opt.textContent = item.name;
               sourceSelect.appendChild(opt);
             });
-            const stored = localStorage.getItem(`${cellId}-source`) || '';
+            const stored = localStorage.getItem(makeStorageKey('source')) || '';
             const preferredSource = stored
               || (typeof providedSource === 'string' ? providedSource : '');
             const availableSources = new Set(data.map(item => item.name));
             if (preferredSource && availableSources.has(preferredSource)) {
               sourceSelect.value = preferredSource;
-              localStorage.setItem(`${cellId}-source`, preferredSource);
+              localStorage.setItem(makeStorageKey('source'), preferredSource);
             }
             updateHeaderSourceLabel();
             showAlert('Sources loaded', 'success');
@@ -490,14 +491,14 @@
           showAlert('Select source first', 'error');
           return;
         }
-        localStorage.setItem(`${cellId}-source`, name);
+        localStorage.setItem(makeStorageKey('source'), name);
 
         const cfgRes = await fetchWithStatus(`/source_config?name=${encodeURIComponent(name)}`);
         const cfg = await cfgRes.json();
 
         const { module: _unused, rois: roiPathRaw, ...camCfg } = cfg;
         const interval = parseFloat(intervalInput.value) || 1;
-        localStorage.setItem(`${cellId}-interval`, interval);
+        localStorage.setItem(makeStorageKey('interval'), interval);
         let roiPath = roiPathRaw;
         if (!roiPath.startsWith('/')) {
           roiPath = `data_sources/${cfg.name}/${roiPath}`;
@@ -883,7 +884,7 @@
       if (row) {
         row.remove();
       }
-      ['source', 'interval'].forEach(key => localStorage.removeItem(`${cellId}-${key}`));
+      ['source', 'interval'].forEach(key => localStorage.removeItem(makeStorageKey(key)));
       showAlert('ลบงาน Inference แล้ว', 'info');
       if (controllers.size === 0) {
         addInferenceRow();
