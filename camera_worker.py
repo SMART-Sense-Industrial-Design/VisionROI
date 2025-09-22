@@ -72,6 +72,7 @@ class CameraWorker:
         self._last_frame = None
         self._fail_count = 0
         self._ffmpeg_cmd = None
+        self._ffmpeg_pix_fmt: str | None = None
         self._stdout_fd: int | None = None
         self._last_returncode_logged: int | None = None
         self._read_timeout = 3.0
@@ -109,10 +110,21 @@ class CameraWorker:
                 "-an",
             ]
 
+            filters: list[str] = []
             if self.width and self.height:
-                cmd += ["-vf", f"scale={int(self.width)}:{int(self.height)}:flags=lanczos"]
+                filters.append(
+                    "scale="
+                    f"{int(self.width)}:{int(self.height)}:"
+                    "flags=lanczos"
+                )
+            filters.append("setsar=1")
+            filters.append("format=bgr24")
 
+            if filters:
+                cmd += ["-vf", ",".join(filters)]
             cmd += ["-pix_fmt", "bgr24", "-f", "rawvideo", "pipe:1"]
+
+            self._ffmpeg_pix_fmt = "bgr24"
 
             self._ffmpeg_cmd = cmd
             with silent():
@@ -339,7 +351,18 @@ class CameraWorker:
                 if not (self.width and self.height and np is not None):
                     time.sleep(0.03)
                     continue
-                frame_size = int(self.width) * int(self.height) * 3
+                frame_size = self._expected_frame_size()
+                if frame_size is None:
+                    self._fail_count += 1
+                    if self._fail_count > 10 and self._fail_count % 10 == 0:
+                        self._logger.warning(
+                            "%s unable to determine frame size for pix_fmt=%s; consecutive failures=%d",
+                            self._log_prefix,
+                            self._ffmpeg_pix_fmt,
+                            self._fail_count,
+                        )
+                    time.sleep(0.05)
+                    continue
 
                 stdout = self._proc.stdout
                 if stdout is None:
@@ -419,10 +442,9 @@ class CameraWorker:
                     time.sleep(0.01)
                     continue
 
+                frame = None
                 try:
-                    frame = np.frombuffer(memoryview(buffer), np.uint8).reshape(
-                        (int(self.height), int(self.width), 3)
-                    )
+                    frame = self._reshape_ffmpeg_frame(buffer)
                 except Exception:
                     self._fail_count += 1
                     if self._fail_count in (1, 10) or self._fail_count % 25 == 0:
@@ -550,3 +572,19 @@ class CameraWorker:
     def last_ffmpeg_stderr(self) -> str:
         """คืนบรรทัด stderr ล่าสุดของ ffmpeg เพื่อช่วยดีบัก"""
         return "\n".join(self._last_stderr)
+
+    def _expected_frame_size(self) -> Optional[int]:
+        if not (self.width and self.height):
+            return None
+        if self._ffmpeg_pix_fmt == "bgr24":
+            return int(self.width) * int(self.height) * 3
+        return None
+
+    def _reshape_ffmpeg_frame(self, buffer: bytearray):
+        if not (self.width and self.height and np is not None):
+            raise RuntimeError("width/height or numpy missing")
+        if self._ffmpeg_pix_fmt == "bgr24":
+            return np.frombuffer(memoryview(buffer), np.uint8).reshape(
+                (int(self.height), int(self.width), 3)
+            )
+        raise RuntimeError(f"unsupported pix_fmt {self._ffmpeg_pix_fmt}")
