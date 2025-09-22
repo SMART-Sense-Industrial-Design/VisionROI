@@ -6,6 +6,8 @@ import asyncio
 import gc
 import subprocess
 import os
+import logging
+import select
 from typing import Optional, Tuple
 from queue import Queue, Empty
 from contextlib import contextmanager
@@ -61,6 +63,8 @@ class CameraWorker:
         self._proc: subprocess.Popen | None = None
         self._stderr_thread: Optional[threading.Thread] = None
         self._last_stderr = deque(maxlen=200)  # เก็บบรรทัด stderr ล่าสุดไว้ดู error
+        self._logger = logging.getLogger("camera_worker")
+        self._log_prefix = f"[{backend}:{src}]"
 
         self._stop_evt = threading.Event()
         self._thread: Optional[threading.Thread] = None
@@ -68,6 +72,11 @@ class CameraWorker:
         self._last_frame = None
         self._fail_count = 0
         self._ffmpeg_cmd = None
+        self._stdout_fd: int | None = None
+        self._last_returncode_logged: int | None = None
+        self._read_timeout = 3.0
+
+        self._logger.info("%s initializing camera worker", self._log_prefix)
 
         if backend == "ffmpeg":
             # ถ้ายังไม่รู้ขนาด ลอง probe; ถ้าไม่ได้จะ fallback ไป OpenCV 1 เฟรม
@@ -119,6 +128,13 @@ class CameraWorker:
                         target=self._drain_stderr, daemon=True
                     )
                     self._stderr_thread.start()
+                if self._proc and self._proc.stdout:
+                    try:
+                        self._stdout_fd = self._proc.stdout.fileno()
+                    except Exception as exc:
+                        self._logger.warning(
+                            "%s failed to obtain stdout fd: %s", self._log_prefix, exc
+                        )
 
         elif backend == "opencv":
             cap = cv2.VideoCapture(src)
@@ -199,6 +215,7 @@ class CameraWorker:
 
     def _restart_backend(self) -> None:
         """พยายามเชื่อมต่อสตรีมใหม่เมื่ออ่านไม่ได้"""
+        self._logger.warning("%s restarting backend after failures", self._log_prefix)
         with silent():
             if self.backend == "ffmpeg":
                 if self._proc is not None:
@@ -227,6 +244,15 @@ class CameraWorker:
                             target=self._drain_stderr, daemon=True
                         )
                         self._stderr_thread.start()
+                    if self._proc and self._proc.stdout:
+                        try:
+                            self._stdout_fd = self._proc.stdout.fileno()
+                        except Exception as exc:
+                            self._logger.warning(
+                                "%s failed to obtain stdout fd on restart: %s",
+                                self._log_prefix,
+                                exc,
+                            )
             elif self.backend == "opencv":
                 if self._cap is not None and self._cap.isOpened():
                     try:
@@ -264,6 +290,19 @@ class CameraWorker:
             if self.backend == "ffmpeg":
                 if self._proc is None or self._proc.poll() is not None:
                     self._fail_count += 1
+                    if self._proc is not None:
+                        returncode = self._proc.poll()
+                        if (
+                            returncode is not None
+                            and returncode != self._last_returncode_logged
+                        ):
+                            self._last_returncode_logged = returncode
+                            self._logger.error(
+                                "%s ffmpeg exited with code %s; last stderr: %s",
+                                self._log_prefix,
+                                returncode,
+                                self.last_ffmpeg_stderr(),
+                            )
                     if self._fail_count > 100:
                         self._restart_backend()
                     time.sleep(0.05)
@@ -274,15 +313,68 @@ class CameraWorker:
                     continue
                 frame_size = int(self.width) * int(self.height) * 3
 
+                stdout = self._proc.stdout
+                if stdout is None:
+                    self._fail_count += 1
+                    if self._fail_count > 100:
+                        self._restart_backend()
+                    time.sleep(0.05)
+                    continue
+
                 buffer = bytearray()
+                start_wait = time.monotonic()
+                fd = self._stdout_fd or stdout.fileno()
                 while len(buffer) < frame_size and not self._stop_evt.is_set():
-                    chunk = self._proc.stdout.read(frame_size - len(buffer))
+                    remaining = frame_size - len(buffer)
+                    wait_time = max(0.1, min(0.5, self._read_timeout))
+                    try:
+                        ready, _, _ = select.select([fd], [], [], wait_time)
+                    except Exception as exc:
+                        self._logger.warning(
+                            "%s select on ffmpeg stdout failed: %s",
+                            self._log_prefix,
+                            exc,
+                        )
+                        break
+                    if not ready:
+                        if time.monotonic() - start_wait > self._read_timeout:
+                            self._logger.warning(
+                                "%s no video data for %.1fs (collected %d/%d bytes); last stderr: %s",
+                                self._log_prefix,
+                                self._read_timeout,
+                                len(buffer),
+                                frame_size,
+                                self.last_ffmpeg_stderr(),
+                            )
+                            break
+                        continue
+                    try:
+                        chunk = os.read(fd, remaining)
+                    except BlockingIOError:
+                        if time.monotonic() - start_wait > self._read_timeout:
+                            self._logger.warning(
+                                "%s stdout temporarily unavailable for %.1fs; last stderr: %s",
+                                self._log_prefix,
+                                self._read_timeout,
+                                self.last_ffmpeg_stderr(),
+                            )
+                            break
+                        continue
                     if not chunk:
                         break
                     buffer.extend(chunk)
+                    start_wait = time.monotonic()
 
                 if len(buffer) != frame_size:
                     self._fail_count += 1
+                    if self._fail_count in (1, 10) or self._fail_count % 25 == 0:
+                        self._logger.warning(
+                            "%s received incomplete frame (%d/%d bytes); consecutive failures=%d",
+                            self._log_prefix,
+                            len(buffer),
+                            frame_size,
+                            self._fail_count,
+                        )
                     if self._fail_count > 100:
                         self._restart_backend()
                     time.sleep(0.01)
@@ -294,6 +386,12 @@ class CameraWorker:
                     )
                 except Exception:
                     self._fail_count += 1
+                    if self._fail_count in (1, 10) or self._fail_count % 25 == 0:
+                        self._logger.warning(
+                            "%s failed to reshape frame; consecutive failures=%d",
+                            self._log_prefix,
+                            self._fail_count,
+                        )
                     if self._fail_count > 100:
                         self._restart_backend()
                     time.sleep(0.01)
@@ -302,6 +400,12 @@ class CameraWorker:
             elif self.backend == "opencv":
                 if self._cap is None or not self._cap.isOpened():
                     self._fail_count += 1
+                    if self._fail_count in (1, 10) or self._fail_count % 25 == 0:
+                        self._logger.warning(
+                            "%s OpenCV capture not opened; consecutive failures=%d",
+                            self._log_prefix,
+                            self._fail_count,
+                        )
                     if self._fail_count > 100:
                         self._restart_backend()
                     time.sleep(0.05)
@@ -309,6 +413,12 @@ class CameraWorker:
                 ok, frame = self._cap.read()
                 if not ok or frame is None:
                     self._fail_count += 1
+                    if self._fail_count in (1, 10) or self._fail_count % 25 == 0:
+                        self._logger.warning(
+                            "%s OpenCV read returned empty frame; consecutive failures=%d",
+                            self._log_prefix,
+                            self._fail_count,
+                        )
                     if self._fail_count > 100:
                         self._restart_backend()
                     time.sleep(0.01)
@@ -317,6 +427,7 @@ class CameraWorker:
                 raise ValueError(f"Unknown backend: {self.backend}")
 
             self._fail_count = 0
+            self._last_returncode_logged = None
             self._last_frame = frame
             frame_copy = frame
             if self._q.full():
@@ -375,6 +486,7 @@ class CameraWorker:
                 if self._stderr_thread and self._stderr_thread.is_alive():
                     self._stderr_thread.join(timeout=0.2)
             self._stderr_thread = None
+            self._stdout_fd = None
 
         elif self.backend == "opencv":
             with silent():
