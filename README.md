@@ -78,6 +78,7 @@ uvicorn app:app --host 127.0.0.1 --port 8000
 - หน้า Inference Page (`/inference_page`) ใช้ตรวจจับหน้ากระดาษและ ROI ที่สังกัดเพจ พร้อมแสดงกรอบเพจบนวิดีโอแบบเรียลไทม์
 - หน้า Home (`/home`) เป็นแดชบอร์ดเรียลไทม์ แสดงจำนวนงานที่กำลังรัน, อัตราออนไลน์, โมดูลที่ใช้, ค่าประสิทธิภาพ และการแจ้งเตือนล่าสุด โดยดึงข้อมูลจาก API `GET /api/dashboard`
 - รองรับการแจ้งเตือนผ่าน Telegram และบันทึกผลสรุปของแต่ละเฟรมลง `recent_notifications` เพื่อใช้กับแดชบอร์ดและระบบแจ้งเตือนอื่น
+- รวมผลลัพธ์ ROI ที่ประมวลผลในเฟรมเดียวกันให้เป็น payload เดียว ส่งออกทั้งผ่าน WebSocket (`/ws_roi_result/<cam_id>`) และบันทึกลง `custom.log` ด้วย prefix `AGGREGATED_ROI`
 - จัดการการเชื่อมต่อ MQTT ได้ผ่านหน้า `/create_mqtt` และ API `/mqtt_configs` โดยรองรับค่าพิเศษเช่น TLS, QoS, retain, `publish_timeout`
 - มาพร้อมโมดูลตัวอย่าง `typhoon_ocr`, `yolo`, `easy_ocr`, `rapid_ocr`, `trocr` และ `tesseract_ocr` เพื่อเริ่มต้นทดลองใช้งาน
 - มี `CameraWorker` สำหรับดึงเฟรมจากสตรีมวิดีโอทั้งผ่าน OpenCV และ `ffmpeg`
@@ -335,7 +336,7 @@ tg.start_send_text("สวัสดี")
 
   แต่ละส่วนจะถูกแปลงให้เป็นตัวอักษร, ตัวเลข, `_` หรือ `-` เท่านั้น และตัดช่องว่างออก เช่น `My Camera` จะกลายเป็น `My_Camera`
 - ตัวอย่าง: หากตั้งค่า `base_topic` เป็น `vision`, source ชื่อ `cam_north`, กลุ่ม `group_a`, ROI ลำดับ `3` จะได้ topic `vision/cam_north/group_a/3`
-- Payload ที่ส่งเป็น JSON ประกอบด้วยข้อมูล ROI เช่น ชื่อ ROI, ค่า inference, ค่าความเชื่อมั่น, timestamp และอาจมี `duration` หากโมดูลส่งมา พร้อมบันทึกลง log `data_sources/<source>/custom.log` และเก็บสรุปไว้ใน `recent_notifications`
+- Payload ที่ส่งเป็น JSON ประกอบด้วย `cam_id`, `source`, `group`, `roi_id`, `roi_name`, `module`, `text`, `frame_time`, `result_time` และอาจมี `duration` หากโมดูลส่งค่ามา พร้อมบันทึกลง log `data_sources/<source>/custom.log` (ภายใต้ prefix `AGGREGATED_ROI`) และเก็บสรุปไว้ใน `recent_notifications`
 
 ## หน้าต่างต่าง ๆ
 ### Home (`/home`)
@@ -418,6 +419,7 @@ tg.start_send_text("สวัสดี")
     ]
   }
   ```
+  นอกจากส่งชื่อ source แล้ว ยังสามารถระบุ query string `?path=<ไฟล์ปลายทางภายใต้ data_sources>` เพื่อบันทึก ROI ไปยังไฟล์อื่น (เช่น `POST /save_roi?path=cam1/backup/rois_backup.json`). ฟังก์ชันจะสร้างโฟลเดอร์ให้โดยอัตโนมัติและตรวจสอบว่าอยู่ในไดเรกทอรีที่อนุญาตก่อนเสมอ
 
 - **GET `/load_roi/<name>`** – โหลด ROI ล่าสุดของ source นั้น
   ```bash
@@ -429,7 +431,7 @@ tg.start_send_text("สวัสดี")
   GET /load_roi_file?path=data_sources/cam1/rois.json
   ```
 
-- **GET `/read_log`** – อ่านบรรทัดล่าสุดจากไฟล์ `custom.log` ของ source ที่ระบุผ่านพารามิเตอร์ `source` (สามารถกำหนดจำนวนบรรทัดด้วย `lines`, ค่าเริ่มต้น 40)
+- **GET `/read_log`** – อ่านบรรทัดล่าสุดจากไฟล์ `custom.log` ของ source ที่ระบุผ่านพารามิเตอร์ `source` (สามารถกำหนดจำนวนบรรทัดด้วย `lines`, ค่าเริ่มต้น 40). เมื่อระบบบันทึกผลลัพธ์แบบรวมจะขึ้นต้นด้วย `AGGREGATED_ROI ` แล้วตามด้วย JSON ที่มีโครงสร้างเดียวกับข้อความจาก WebSocket ทำให้สามารถ parse เพื่อวิเคราะห์ย้อนหลังได้ง่าย
 
 - **GET `/ws_snapshot/<cam_id>`** – คืนรูป JPEG หนึ่งเฟรมจากกล้อง (ต้องมี worker ของกล้องนั้นทำงานอยู่ มิฉะนั้นจะตอบกลับข้อผิดพลาด)
 
@@ -458,7 +460,37 @@ tg.start_send_text("สวัสดี")
 
 - **WebSocket `/ws_roi`** – ส่งภาพ JPEG แบบไบนารีต่อเนื่องสำหรับหน้า `/roi`
 
-- **WebSocket `/ws_roi_result/<cam_id>`** – ส่งผลลัพธ์ ROI ขณะรัน inference โดยมี 2 รูปแบบข้อความ: (1) ข้อมูลการจับหน้ากระดาษ `{"group": "<ชื่อเพจ>", "scores": [{"page": "...", "score": 0.87}, ...]}` และ (2) ผลลัพธ์ ROI รายตัว `{"id": "1", "image": "<base64>", "text": "...", "frame_time": 1700000000.123, "result_time": 1700000000.456}`
+- **WebSocket `/ws_roi_result/<cam_id>`** – ส่งข้อมูลผลลัพธ์ของงาน inference ตามสถานะปัจจุบัน โดยมีสองรูปแบบข้อความหลัก
+  - ข้อความคะแนนการจับหน้ากระดาษ `{"group": "<ชื่อเพจ>", "scores": [{"page": "...", "score": 0.87}, ...]}` ใช้สำหรับเลือกกลุ่ม ROI ตามเทมเพลตเพจ
+  - ข้อความสรุปผลลัพธ์ ROI ในเฟรมนั้น มีรูปแบบตัวอย่างดังนี้
+
+    ```json
+    {
+      "frame_time": 1700000000.123,
+      "result_time": 1700000000.456,
+      "cam_id": "inf_cam1",
+      "source": "demo_image",
+      "group": "p1",
+      "results": [
+        {
+          "id": "1",
+          "name": "เลขที่เอกสาร",
+          "text": "INV-001",
+          "module": "typhoon_ocr",
+          "duration": 0.42,
+          "image": "<base64 JPEG>",
+          "frame_time": 1700000000.123,
+          "result_time": 1700000000.456,
+          "group": "p1",
+          "source": "demo_image",
+          "cam_id": "inf_cam1",
+          "mqtt_config": "prod"
+        }
+      ]
+    }
+    ```
+
+  แต่ละข้อความอาจมี `image` เป็น Base64 JPEG (หากตั้งให้บันทึก ROI), ระยะเวลา `duration` ที่โมดูลใช้ประมวลผล และชื่อคอนฟิก MQTT หากมีการเผยแพร่ผลลัพธ์ไปยัง broker เดียวกัน โครงสร้างนี้ตรงกับ JSON ที่บันทึกลง `custom.log` ภายใต้ prefix `AGGREGATED_ROI`
 
 
 ## การพัฒนาและการทดสอบ
@@ -582,7 +614,7 @@ text = ocr.process(frame, roi_id="1", save=True, source="demo")
 - `config.json` เก็บข้อมูล source และไฟล์ ROI
 - `service_state.json` จะถูกสร้างอัตโนมัติเมื่อมีการเริ่มงาน ROI หรือ inference เพื่อเก็บสถานะล่าสุดของกล้องแต่ละตัว รวมถึงค่า `interval`, `result_timeout` และ `draw_page_boxes`
 - `mqtt_configs.json` เก็บรายการคอนฟิก MQTT ที่สร้างผ่านหน้า `/create_mqtt` หรือ API `/mqtt_configs`
-- `custom.log` ภายใต้ `data_sources/<name>/` ใช้สำหรับบันทึกผลลัพธ์หรือข้อความจากโมดูล `custom.py` รวมถึง log ที่ส่งต่อจาก MQTT
+- `custom.log` ภายใต้ `data_sources/<name>/` ใช้สำหรับบันทึกผลลัพธ์หรือข้อความจากโมดูล `custom.py` รวมถึง log ที่ส่งต่อจาก MQTT ข้อมูลผลลัพธ์ที่ระบบรวมให้จะขึ้นต้นด้วย `AGGREGATED_ROI ` แล้วตามด้วย JSON ที่มีคีย์ `results`
 - `inference_modules/<module>/custom.log` จะเก็บ log ของโมดูลแต่ละตัว (เหมาะสำหรับ debug pipeline)
 - ระบบจะเก็บผลสรุปการ inference ล่าสุดไว้ในหน่วยความจำสูงสุด 200 รายการ (`recent_notifications`) เพื่อนำไปแสดงบนแดชบอร์ดและใช้กับระบบแจ้งเตือนภายนอก
 
