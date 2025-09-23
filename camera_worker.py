@@ -40,7 +40,7 @@ def _malloc_trim() -> None:
 class CameraWorker:
     """
     backend='opencv' : ใช้ cv2.VideoCapture
-    backend='ffmpeg' : ใช้ ffmpeg ถ่ม bgr24/rawvideo ผ่าน stdout (robust กับ RTSP)
+    backend='ffmpeg' : ใช้ ffmpeg ถ่ม bgr24/rawvideo ผ่าน stdout (ปรับให้ robust กับ RTSP)
     """
 
     def __init__(
@@ -52,10 +52,9 @@ class CameraWorker:
         read_interval: float = 0.0,
         backend: str = "opencv",
         # === ตัวเลือก robust ===
-        robust: bool = True,            # เปิด adaptive fallback (transport/decoder) + watchdog
-        low_latency: bool = False,      # โหมดหน่วงต่ำ (ยอม jitter/เฟรมเสียได้มากขึ้น)
-        use_hw_decode: bool = True,     # พยายามใช้ h264_v4l2m2m ก่อน (ถ้ามีใน ffmpeg build)
-        loglevel: str = "error",        # ลดสแปมจาก swscale/คำเตือนที่ไม่ critical
+        robust: bool = True,        # เปิด watchdog + fallback transport
+        low_latency: bool = False,  # โหมดหน่วงต่ำ (ยอม jitter/เฟรมเสียได้มากขึ้น)
+        loglevel: str = "error",    # ลดสแปม log จาก ffmpeg
     ) -> None:
         self.src = src
         self.loop = loop
@@ -66,13 +65,12 @@ class CameraWorker:
 
         self.robust = robust
         self.low_latency = low_latency
-        self.use_hw_decode = use_hw_decode
         self._loglevel = loglevel
 
         self._cap = None
         self._proc: subprocess.Popen | None = None
         self._stderr_thread: Optional[threading.Thread] = None
-        self._last_stderr = deque(maxlen=200)  # เก็บบรรทัด stderr ล่าสุดไว้ดู error
+        self._last_stderr = deque(maxlen=200)  # เก็บบรรทัด stderr ล่าสุดไว้ดีบัก
         self._logger = logging.getLogger("camera_worker")
         self._log_prefix = f"[{backend}:{src}]"
 
@@ -85,7 +83,7 @@ class CameraWorker:
         self._ffmpeg_pix_fmt: str | None = None
         self._stdout_fd: int | None = None
         self._last_returncode_logged: int | None = None
-        self._read_timeout = 4.0  # ขยับขึ้นให้ทน jitter/collection ช้าบ้าง
+        self._read_timeout = 4.0  # ทน jitter/collection ช้าบ้าง
 
         # robust state
         self._err_window = deque(maxlen=300)
@@ -94,16 +92,13 @@ class CameraWorker:
         self._last_err_prune = 0.0
         self._restart_backoff = 0.0  # exponential backoff ก่อน restart ffmpeg
 
-        # วน fallback: transport (tcp->udp) และ decoder (h264_v4l2m2m->h264)
+        # วน fallback: transport (tcp <-> udp) ถ้า build รองรับ
         self._rtsp_transport_cycle = ["tcp", "udp"] if robust else ["tcp"]
         self._rtsp_transport_idx = 0
-        self._decoder_cycle = ["h264_v4l2m2m", "h264"] if use_hw_decode else ["h264"]
-        self._decoder_idx = 0
 
         # cache capability probes (ตรวจครั้งเดียว)
         self._ff_caps_checked = False
         self._ff_rtsp_opts: set[str] = set()
-        self._ff_decoders: set[str] = set()
 
         self._logger.info("%s initializing camera worker", self._log_prefix)
 
@@ -162,12 +157,11 @@ class CameraWorker:
     # ---------- ffmpeg capabilities probe ----------
 
     def _probe_ffmpeg_caps(self) -> None:
-        """เช็คว่า ffmpeg build นี้รองรับ RTSP options/decoders อะไรบ้าง (ครั้งเดียว)"""
+        """เช็คว่า ffmpeg build นี้รองรับ RTSP options อะไรบ้าง (ครั้งเดียว)"""
         if self._ff_caps_checked:
             return
         self._ff_caps_checked = True
 
-        # 1) rtsp protocol options
         try:
             out = subprocess.run(
                 ["ffmpeg", "-hide_banner", "-h", "protocol=rtsp"],
@@ -180,22 +174,9 @@ class CameraWorker:
         except Exception:
             pass
 
-        # 2) decoders
-        try:
-            out = subprocess.run(
-                ["ffmpeg", "-hide_banner", "-decoders"],
-                capture_output=True, text=True, check=False
-            )
-            text = (out.stdout or "") + (out.stderr or "")
-            for dec in ("h264_v4l2m2m", "h264"):
-                if dec in text:
-                    self._ff_decoders.add(dec)
-        except Exception:
-            pass
-
         self._logger.info(
-            "%s ffmpeg caps: rtsp_opts=%s decoders=%s",
-            self._log_prefix, sorted(self._ff_rtsp_opts), sorted(self._ff_decoders)
+            "%s ffmpeg caps: rtsp_opts=%s",
+            self._log_prefix, sorted(self._ff_rtsp_opts)
         )
 
     # ---------- ffmpeg command builder ----------
@@ -204,9 +185,9 @@ class CameraWorker:
         """
         สร้างคำสั่ง ffmpeg แบบ robust สำหรับ RTSP (ทุกกล้อง):
         - บังคับ TCP ก่อน ถ้าแตกเยอะจะ fallback ไป UDP อัตโนมัติ (ถ้า build รองรับ)
-        - genpts/reorder_queue_size/max_delay เพื่อทน jitter
-        - read timeout (เฉพาะที่รองรับจริง) ป้องกันแฮงก์
-        - ลอง HW decode แล้วถอยเป็น SW เอง
+        - genpts/max_delay เพื่อทน jitter
+        - timeout (เฉพาะที่รองรับจริง) ป้องกันแฮงก์
+        - ไม่ตั้ง -c:v ใด ๆ (กันไปชนเอาต์พุต)
         """
         cmd = ["ffmpeg", "-hide_banner", "-loglevel", self._loglevel, "-nostdin"]
 
@@ -217,10 +198,7 @@ class CameraWorker:
                 cmd += ["-rtsp_transport", transport]
             # flags
             if "rtsp_flags" in self._ff_rtsp_opts:
-                if transport == "tcp":
-                    cmd += ["-rtsp_flags", "prefer_tcp"]
-                else:
-                    cmd += ["-rtsp_flags", "none"]
+                cmd += ["-rtsp_flags", "prefer_tcp" if transport == "tcp" else "none"]
             # timeouts (เฉพาะที่มีจริงใน build นี้)
             if "rw_timeout" in self._ff_rtsp_opts:
                 cmd += ["-rw_timeout", "5000000"]  # 5s
@@ -236,23 +214,15 @@ class CameraWorker:
         if self.low_latency:
             cmd += ["-fflags", "+discardcorrupt", "-flags", "low_delay", "-fflags", "nobuffer"]
         else:
-            cmd += ["-fflags", "+discardcorrupt+genpts", "-flags2", "+showall", "-reorder_queue_size", "0"]
+            cmd += ["-fflags", "+discardcorrupt+genpts"]
             cmd += ["-max_delay", "500000"]  # 500ms
             cmd += ["-use_wallclock_as_timestamps", "1"]
 
-        # !!! สำคัญ: ใส่ input option ก่อน -i !!!
-        # ลดคิวแพ็กเก็ตของอินพุต (ต้องมาก่อน -i เพื่อผูกกับอินพุต ไม่ใช่เอาต์พุต)
+        # *** สำคัญ: input option ต้องมาก่อน -i ***
         cmd += ["-thread_queue_size", "512"]
 
         # เปิด input
         cmd += ["-i", src, "-map", "0:v:0", "-an"]
-
-        # ดีโค้ดเดอร์ (เฉพาะที่มีจริง)
-        decoder = self._decoder_cycle[self._decoder_idx]
-        if self.use_hw_decode and decoder == "h264_v4l2m2m" and ("h264_v4l2m2m" in self._ff_decoders):
-            cmd += ["-c:v", "h264_v4l2m2m"]
-        elif decoder == "h264" and ("h264" in self._ff_decoders):
-            cmd += ["-c:v", "h264"]
 
         # สเกล/สี (ให้ ffmpeg แปลงเป็น bgr24 ออกมา)
         filters: list[str] = []
@@ -262,12 +232,13 @@ class CameraWorker:
         filters.append("format=bgr24")
         if filters:
             cmd += ["-vf", ",".join(filters)]
+
+        # เอาต์พุตเป็น rawvideo/bgr24 ผ่าน stdout
         cmd += ["-pix_fmt", "bgr24", "-f", "rawvideo", "pipe:1"]
 
         self._ffmpeg_pix_fmt = "bgr24"
         self._logger.info("%s ffmpeg cmd: %s", self._log_prefix, " ".join(cmd))
         return cmd
-
 
     # ---------- helpers ----------
 
@@ -277,7 +248,7 @@ class CameraWorker:
         return s.startswith("rtsp://") or s.startswith("rtsps://")
 
     def _probe_resolution(self, src: str) -> Tuple[Optional[int], Optional[int]]:
-        """ใช้ ffprobe หา width/height พร้อม RTSP (ไม่ใช้ rw_timeout/stimeout)"""
+        """ใช้ ffprobe หา width/height พร้อม RTSP (ไม่ใช้ timeout option)"""
         cmd = ["ffprobe", "-hide_banner", "-loglevel", "error", "-nostdin"]
         if self._is_rtsp(src):
             cmd += ["-rtsp_transport", "tcp", "-rtsp_flags", "prefer_tcp"]
@@ -383,7 +354,7 @@ class CameraWorker:
                     if self._restart_backoff > 0:
                         time.sleep(min(self._restart_backoff, 2.0))
                     self._restart_backoff = min(self._restart_backoff * 2 + 0.1, 2.0) if self._restart_backoff else 0.2
-                    # สร้างคำสั่งใหม่ (เผื่อมีการสลับ transport/decoder)
+                    # สร้างคำสั่งใหม่ (เผื่อมีการสลับ transport)
                     self._ffmpeg_cmd = self._build_ffmpeg_cmd(str(self.src))
                     self._proc = subprocess.Popen(
                         self._ffmpeg_cmd,
@@ -709,10 +680,7 @@ class CameraWorker:
         """
         จับแพตเทิร์น error จาก ffmpeg; ถ้ามี burst ภายในหน้าต่างสั้น ๆ:
             - รีสตาร์ท
-            - และถ้า robust เปิดอยู่ ให้ 'สลับตัวเลือก' ทีละขั้น:
-                1) transport: tcp -> udp
-                2) decoder: h264_v4l2m2m -> h264
-        เพื่อให้ครอบคลุมกล้อง/RTSP server หลายยี่ห้อ
+            - และถ้า robust เปิดอยู่ ให้ 'สลับ transport' (tcp<->udp) ถ้าบิลด์รองรับ
         """
         now = time.monotonic()
         bad = (
@@ -735,24 +703,13 @@ class CameraWorker:
                     "%s burst errors=%d within %.1fs; last stderr: %s",
                     self._log_prefix, len(self._err_window), self._err_window_secs, self.last_ffmpeg_stderr()
                 )
-                if self.robust:
-                    # ลองสลับ transport ก่อน (tcp <-> udp) ถ้า build รองรับ
-                    if "rtsp_transport" in self._ff_rtsp_opts and len(self._rtsp_transport_cycle) > 1:
-                        next_transport_idx = (self._rtsp_transport_idx + 1) % len(self._rtsp_transport_cycle)
-                        if next_transport_idx != self._rtsp_transport_idx:
-                            self._rtsp_transport_idx = next_transport_idx
-                            self._logger.warning(
-                                "%s switching RTSP transport -> %s",
-                                self._log_prefix, self._rtsp_transport_cycle[self._rtsp_transport_idx]
-                            )
-                    else:
-                        # ถ้าสลับ transport ไม่ได้/ครบแล้ว ลอง decoder
-                        next_dec_idx = (self._decoder_idx + 1) % len(self._decoder_cycle)
-                        if next_dec_idx != self._decoder_idx:
-                            self._decoder_idx = next_dec_idx
-                            self._logger.warning(
-                                "%s switching decoder -> %s",
-                                self._log_prefix, self._decoder_cycle[self._decoder_idx]
-                            )
+                if self.robust and "rtsp_transport" in self._ff_rtsp_opts and len(self._rtsp_transport_cycle) > 1:
+                    next_idx = (self._rtsp_transport_idx + 1) % len(self._rtsp_transport_cycle)
+                    if next_idx != self._rtsp_transport_idx:
+                        self._rtsp_transport_idx = next_idx
+                        self._logger.warning(
+                            "%s switching RTSP transport -> %s",
+                            self._log_prefix, self._rtsp_transport_cycle[self._rtsp_transport_idx]
+                        )
                 self._restart_backend()
                 self._err_window.clear()
