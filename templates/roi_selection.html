@@ -462,6 +462,55 @@
             }
         }
 
+        function resolveImageSource(imageData) {
+            if (imageData == null) {
+                return { src: '', revoke: null };
+            }
+            if (typeof imageData === 'string') {
+                const trimmed = imageData.trim();
+                if (!trimmed) {
+                    return { src: '', revoke: null };
+                }
+                return { src: `data:image/jpeg;base64,${trimmed}`, revoke: null };
+            }
+            let bytes = null;
+            if (imageData instanceof ArrayBuffer) {
+                bytes = new Uint8Array(imageData);
+            } else if (Array.isArray(imageData)) {
+                bytes = new Uint8Array(imageData);
+            } else if (ArrayBuffer.isView(imageData)) {
+                bytes = new Uint8Array(
+                    imageData.buffer,
+                    imageData.byteOffset,
+                    imageData.byteLength
+                );
+            }
+            if (!bytes || !bytes.length) {
+                return { src: '', revoke: null };
+            }
+            const blob = new Blob([bytes], { type: 'image/jpeg' });
+            const url = URL.createObjectURL(blob);
+            return { src: url, revoke: url };
+        }
+
+        function setImageFromData(imgEl, imageData) {
+            if (!imgEl) return;
+            const prev = imgEl.dataset.objectUrl;
+            if (prev) {
+                URL.revokeObjectURL(prev);
+                delete imgEl.dataset.objectUrl;
+            }
+            const { src, revoke } = resolveImageSource(imageData);
+            if (src) {
+                imgEl.src = src;
+            } else {
+                imgEl.removeAttribute('src');
+            }
+            if (revoke) {
+                imgEl.dataset.objectUrl = revoke;
+            }
+        }
+
         function renderRoiList() {
             const container = document.getElementById('roiList');
             if (!container) return;
@@ -638,7 +687,7 @@
                     const imgTd = document.createElement('td');
                     if (r.image) {
                         const img = document.createElement('img');
-                        img.src = `data:image/jpeg;base64,${r.image}`;
+                        setImageFromData(img, r.image);
                         img.style.maxWidth = '100px';
                         imgTd.appendChild(img);
                     }
@@ -845,6 +894,20 @@
             });
         }
 
+        async function canvasToByteArray(canvas, mime = 'image/jpeg', quality = 0.85) {
+            return new Promise((resolve, reject) => {
+                canvas.toBlob(blob => {
+                    if (!blob) {
+                        reject(new Error('ไม่สามารถสร้างภาพได้'));
+                        return;
+                    }
+                    blob.arrayBuffer()
+                        .then(buffer => resolve(Array.from(new Uint8Array(buffer))))
+                        .catch(reject);
+                }, mime, quality);
+            });
+        }
+
         async function cropPageRoi(i) {
             const nameInput = document.getElementById(`page_${i}`);
             const pageName = nameInput.value.trim();
@@ -871,11 +934,18 @@
             crop.height = h;
             const cctx = crop.getContext('2d');
             cctx.drawImage(tmp, x, y, w, h, 0, 0, w, h);
-            const base64 = crop.toDataURL('image/jpeg').split(',')[1];
+            let bytes;
+            try {
+                bytes = await canvasToByteArray(crop);
+            } catch (err) {
+                console.error('Failed to convert ROI image to bytes', err);
+                if (typeof showAlert === 'function') showAlert('บันทึกรูปภาพไม่สำเร็จ', 'error');
+                return;
+            }
 
             r.page = pageName;
             r.name = pageName;
-            r.image = base64;
+            r.image = bytes;
 
             await fetch('/save_roi', {
                 method: 'POST',
