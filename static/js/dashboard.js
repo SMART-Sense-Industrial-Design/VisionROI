@@ -520,8 +520,11 @@ function updateRoiSourceTable(details = []) {
 
     const durationValue = document.createElement('div');
     durationValue.className = 'roi-source-duration__value';
-    if (detail?.latest_duration != null) {
-      durationValue.textContent = formatSeconds(detail.latest_duration);
+
+    const latestDurationSeconds = Number(detail?.latest_duration);
+    const hasLatestDuration = Number.isFinite(latestDurationSeconds);
+    if (hasLatestDuration) {
+      durationValue.textContent = formatSeconds(latestDurationSeconds);
     } else {
       durationValue.textContent = 'รอข้อมูล';
     }
@@ -529,9 +532,46 @@ function updateRoiSourceTable(details = []) {
 
     const latestCompleted = detail?.latest_completed_at;
     const intervalSeconds = Number(detail?.interval);
+    const hasInterval = Number.isFinite(intervalSeconds) && intervalSeconds > 0;
     const relativeLabel = formatRelativeTime(latestCompleted);
     const latestTooltip = formatDateTime(latestCompleted);
     const elapsed = getElapsedSeconds(latestCompleted);
+
+    if (hasLatestDuration && hasInterval) {
+      const ratio = latestDurationSeconds / intervalSeconds;
+      const percent = Number.isFinite(ratio) ? Math.max(ratio * 100, 0) : null;
+
+      const barTrack = document.createElement('div');
+      barTrack.className = 'roi-source-duration__bar';
+
+      if (percent !== null) {
+        const barFill = document.createElement('div');
+        barFill.className = 'roi-source-duration__bar-fill';
+        if (ratio > 1) {
+          barFill.classList.add('roi-source-duration__bar-fill--over');
+        }
+        barFill.style.width = `${Math.min(percent, 100)}%`;
+        barTrack.appendChild(barFill);
+      }
+
+      const ratioEl = document.createElement('div');
+      ratioEl.className = 'roi-source-duration__ratio';
+      if (percent !== null) {
+        ratioEl.textContent = `ใช้เวลา ${percent.toFixed(0)}% ของ Interval ${formatSeconds(intervalSeconds)}`;
+        if (ratio > 1) {
+          ratioEl.classList.add('roi-source-duration__ratio--over');
+        }
+      } else {
+        ratioEl.textContent = `Interval ${formatSeconds(intervalSeconds)}`;
+      }
+
+      durationWrapper.append(barTrack, ratioEl);
+    } else if (hasInterval) {
+      const ratioEl = document.createElement('div');
+      ratioEl.className = 'roi-source-duration__ratio';
+      ratioEl.textContent = `Interval ${formatSeconds(intervalSeconds)}`;
+      durationWrapper.appendChild(ratioEl);
+    }
 
     if (latestCompleted) {
       const metaEl = document.createElement('div');
@@ -544,11 +584,7 @@ function updateRoiSourceTable(details = []) {
         tooltipParts.push(`(${relativeLabel})`);
       }
 
-      if (
-        Number.isFinite(intervalSeconds)
-        && intervalSeconds > 0
-        && Number.isFinite(elapsed)
-      ) {
+      if (hasInterval && Number.isFinite(elapsed)) {
         const staleThreshold = intervalSeconds * 3;
         const criticalThreshold = intervalSeconds * 6;
         if (elapsed > criticalThreshold) {
@@ -571,22 +607,25 @@ function updateRoiSourceTable(details = []) {
       if (tooltipParts.length) {
         avgCell.title = tooltipParts.join(' ');
       } else {
+        const intervalText = hasInterval
+          ? ` เทียบ Interval ${formatSeconds(intervalSeconds)}`
+          : '';
         avgCell.title =
-          'เวลาที่ใช้ในการ inference ครบทุก ROI ในเฟรมล่าสุด (ตั้งแต่ ROI แรกจนถึง ROI สุดท้าย)';
+          `เวลาที่ใช้ในการ inference ครบทุก ROI ในเฟรมล่าสุด (ตั้งแต่ ROI แรกจนถึง ROI สุดท้าย)${intervalText}`;
       }
       durationWrapper.appendChild(metaEl);
     } else {
+      const intervalText = hasInterval
+        ? ` เทียบ Interval ${formatSeconds(intervalSeconds)}`
+        : '';
       avgCell.title =
-        'เวลาที่ใช้ในการ inference ครบทุก ROI ในเฟรมล่าสุด (ตั้งแต่ ROI แรกจนถึง ROI สุดท้าย)';
+        `เวลาที่ใช้ในการ inference ครบทุก ROI ในเฟรมล่าสุด (ตั้งแต่ ROI แรกจนถึง ROI สุดท้าย)${intervalText}`;
     }
 
     avgCell.appendChild(durationWrapper);
 
     const maxCell = document.createElement('td');
     maxCell.textContent = formatSeconds(detail?.max_duration);
-
-    const intervalCell = document.createElement('td');
-    intervalCell.textContent = formatSeconds(detail?.interval);
 
     const statusCell = document.createElement('td');
     statusCell.appendChild(createStatusBadge(detail));
@@ -598,7 +637,6 @@ function updateRoiSourceTable(details = []) {
       moduleCell,
       avgCell,
       maxCell,
-      intervalCell,
       statusCell,
     );
     tbody.appendChild(row);

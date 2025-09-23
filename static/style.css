@@ -655,6 +655,37 @@ main.app-main {
   color: rgba(15, 23, 42, 0.6);
 }
 
+.roi-source-duration__bar {
+  position: relative;
+  width: 100%;
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.35);
+  overflow: hidden;
+}
+
+.roi-source-duration__bar-fill {
+  height: 100%;
+  background: rgba(34, 197, 94, 0.85);
+  border-radius: inherit;
+  transition: width 0.3s ease;
+}
+
+.roi-source-duration__bar-fill--over {
+  background: rgba(239, 68, 68, 0.85);
+}
+
+.roi-source-duration__ratio {
+  font-size: 0.75rem;
+  color: rgba(15, 23, 42, 0.65);
+  font-weight: 500;
+}
+
+.roi-source-duration__ratio--over {
+  color: #dc2626;
+  font-weight: 600;
+}
+
 .roi-source-duration__meta--stale {
   color: #b45309;
   font-weight: 500;

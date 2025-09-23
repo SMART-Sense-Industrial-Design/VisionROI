@@ -1070,29 +1070,47 @@ def build_dashboard_payload() -> dict[str, Any]:
             (perf.get("total", 0.0) or 0.0) / sample_count if sample_count else None
         )
         interval_val = info.get("interval")
+        latest_duration_raw = perf.get("latest_duration")
+        try:
+            latest_duration_val = (
+                float(latest_duration_raw)
+                if latest_duration_raw is not None
+                else None
+            )
+        except (TypeError, ValueError):
+            latest_duration_val = None
+
         meets_interval: bool | None
         interval_gap: float | None
+        latest_interval_ratio: float | None
         if (
             isinstance(interval_val, (int, float))
             and interval_val is not None
-            and average_duration is not None
+            and latest_duration_val is not None
         ):
-            meets_interval = average_duration <= float(interval_val)
-            interval_gap = float(interval_val) - average_duration
+            meets_interval = latest_duration_val <= float(interval_val)
+            interval_gap = float(interval_val) - latest_duration_val
+            latest_interval_ratio = (
+                latest_duration_val / float(interval_val)
+                if float(interval_val) > 0
+                else None
+            )
         else:
             meets_interval = None
             interval_gap = None
+            latest_interval_ratio = None
         source_details.append(
             {
                 **info,
                 "average_duration": average_duration,
                 "max_duration": perf.get("max"),
                 "min_duration": perf.get("min"),
-                "latest_duration": perf.get("latest_duration"),
+                "latest_duration": latest_duration_val,
                 "latest_completed_at": _to_iso(perf.get("latest_timestamp")),
                 "samples": sample_count,
                 "meets_interval": meets_interval,
                 "interval_gap": interval_gap,
+                "latest_interval_ratio": latest_interval_ratio,
             }
         )
 
