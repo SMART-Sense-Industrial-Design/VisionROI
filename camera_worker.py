@@ -85,7 +85,7 @@ class CameraWorker:
         self._ffmpeg_pix_fmt: str | None = None
         self._stdout_fd: int | None = None
         self._last_returncode_logged: int | None = None
-        self._read_timeout = 3.0  # ปรับเป็น 5.0 ถ้าเครือข่ายแย่
+        self._read_timeout = 4.0  # ขยับขึ้นให้ทน jitter/collection ช้าบ้าง
 
         # robust state
         self._err_window = deque(maxlen=300)
@@ -158,7 +158,7 @@ class CameraWorker:
         สร้างคำสั่ง ffmpeg แบบ robust สำหรับ RTSP (ทุกกล้อง):
         - บังคับ TCP ก่อน ถ้าแตกเยอะจะ fallback ไป UDP อัตโนมัติ
         - genpts/reorder_queue_size/max_delay เพื่อทน jitter
-        - read/socket timeout ป้องกันแฮงก์
+        - read timeout ป้องกันแฮงก์
         - ลอง HW decode แล้วถอยเป็น SW เอง
         """
         cmd = ["ffmpeg", "-hide_banner", "-loglevel", self._loglevel, "-nostdin"]
@@ -166,13 +166,12 @@ class CameraWorker:
         transport = self._rtsp_transport_cycle[self._rtsp_transport_idx]
         if self._is_rtsp(src):
             cmd += ["-rtsp_transport", transport]
-            # ถ้าเป็น tcp ให้บอก prefer_tcp (ffmpeg จะเมินเมื่อไม่เกี่ยว)
             if transport == "tcp":
                 cmd += ["-rtsp_flags", "prefer_tcp"]
             else:
                 cmd += ["-rtsp_flags", "none"]
-            # บาง build รองรับ stimeout; ถ้าไม่รองรับ ffmpeg จะเมินเอง
-            cmd += ["-rw_timeout", "5000000", "-stimeout", "5000000"]  # 5s
+            # ใช้เฉพาะ -rw_timeout (บาง build ไม่รองรับ -stimeout)
+            cmd += ["-rw_timeout", "5000000"]  # 5s
 
         # วิเคราะห์สตรีมพอประมาณ
         cmd += ["-probesize", "16M", "-analyzeduration", "2M"]
