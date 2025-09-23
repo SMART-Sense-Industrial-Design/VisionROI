@@ -100,6 +100,11 @@ class CameraWorker:
         self._decoder_cycle = ["h264_v4l2m2m", "h264"] if use_hw_decode else ["h264"]
         self._decoder_idx = 0
 
+        # cache capability probes (ตรวจครั้งเดียว)
+        self._ff_caps_checked = False
+        self._ff_rtsp_opts: set[str] = set()
+        self._ff_decoders: set[str] = set()
+
         self._logger.info("%s initializing camera worker", self._log_prefix)
 
         if backend == "ffmpeg":
@@ -112,6 +117,9 @@ class CameraWorker:
                     w2, h2 = self._probe_with_opencv_once(str(src))
                     if w2 and h2:
                         self.width, self.height = w2, h2
+
+            # probe ความสามารถของ ffmpeg ก่อนสร้างคำสั่ง
+            self._probe_ffmpeg_caps()
 
             cmd = self._build_ffmpeg_cmd(str(src))
             self._ffmpeg_cmd = cmd
@@ -151,27 +159,76 @@ class CameraWorker:
         else:
             raise ValueError(f"Unknown backend: {backend}")
 
+    # ---------- ffmpeg capabilities probe ----------
+
+    def _probe_ffmpeg_caps(self) -> None:
+        """เช็คว่า ffmpeg build นี้รองรับ RTSP options/decoders อะไรบ้าง (ครั้งเดียว)"""
+        if self._ff_caps_checked:
+            return
+        self._ff_caps_checked = True
+
+        # 1) rtsp protocol options
+        try:
+            out = subprocess.run(
+                ["ffmpeg", "-hide_banner", "-h", "protocol=rtsp"],
+                capture_output=True, text=True, check=False
+            )
+            text = (out.stdout or "") + (out.stderr or "")
+            for opt in ("stimeout", "rw_timeout", "timeout", "rtsp_flags", "rtsp_transport"):
+                if f" {opt} " in text or f"\n{opt} " in text or f"{opt}=" in text:
+                    self._ff_rtsp_opts.add(opt)
+        except Exception:
+            pass
+
+        # 2) decoders
+        try:
+            out = subprocess.run(
+                ["ffmpeg", "-hide_banner", "-decoders"],
+                capture_output=True, text=True, check=False
+            )
+            text = (out.stdout or "") + (out.stderr or "")
+            for dec in ("h264_v4l2m2m", "h264"):
+                if dec in text:
+                    self._ff_decoders.add(dec)
+        except Exception:
+            pass
+
+        self._logger.info(
+            "%s ffmpeg caps: rtsp_opts=%s decoders=%s",
+            self._log_prefix, sorted(self._ff_rtsp_opts), sorted(self._ff_decoders)
+        )
+
     # ---------- ffmpeg command builder ----------
 
     def _build_ffmpeg_cmd(self, src: str) -> list[str]:
         """
         สร้างคำสั่ง ffmpeg แบบ robust สำหรับ RTSP (ทุกกล้อง):
-        - บังคับ TCP ก่อน ถ้าแตกเยอะจะ fallback ไป UDP อัตโนมัติ
+        - บังคับ TCP ก่อน ถ้าแตกเยอะจะ fallback ไป UDP อัตโนมัติ (ถ้า build รองรับ)
         - genpts/reorder_queue_size/max_delay เพื่อทน jitter
-        - read timeout ป้องกันแฮงก์
+        - read timeout (เฉพาะที่รองรับจริง) ป้องกันแฮงก์
         - ลอง HW decode แล้วถอยเป็น SW เอง
         """
         cmd = ["ffmpeg", "-hide_banner", "-loglevel", self._loglevel, "-nostdin"]
 
         transport = self._rtsp_transport_cycle[self._rtsp_transport_idx]
         if self._is_rtsp(src):
-            cmd += ["-rtsp_transport", transport]
-            if transport == "tcp":
-                cmd += ["-rtsp_flags", "prefer_tcp"]
-            else:
-                cmd += ["-rtsp_flags", "none"]
-            # ใช้เฉพาะ -rw_timeout (บาง build ไม่รองรับ -stimeout)
-            cmd += ["-rw_timeout", "5000000"]  # 5s
+            # transport
+            if "rtsp_transport" in self._ff_rtsp_opts:
+                cmd += ["-rtsp_transport", transport]
+            # flags
+            if "rtsp_flags" in self._ff_rtsp_opts:
+                if transport == "tcp":
+                    cmd += ["-rtsp_flags", "prefer_tcp"]
+                else:
+                    cmd += ["-rtsp_flags", "none"]
+            # timeouts (เฉพาะที่มีจริงใน build นี้)
+            if "rw_timeout" in self._ff_rtsp_opts:
+                cmd += ["-rw_timeout", "5000000"]  # 5s
+            elif "stimeout" in self._ff_rtsp_opts:
+                cmd += ["-stimeout", "5000000"]    # 5s
+            elif "timeout" in self._ff_rtsp_opts:
+                # บาง build มี 'timeout' แทน (หลายกรณีหน่วยเป็นไมโครวินาที)
+                cmd += ["-timeout", "5000000"]
 
         # วิเคราะห์สตรีมพอประมาณ
         cmd += ["-probesize", "16M", "-analyzeduration", "2M"]
@@ -190,10 +247,12 @@ class CameraWorker:
         # เปิด input
         cmd += ["-i", src, "-map", "0:v:0", "-an"]
 
-        # ดีโค้ดเดอร์
+        # ดีโค้ดเดอร์ (เฉพาะที่มีจริง)
         decoder = self._decoder_cycle[self._decoder_idx]
-        if self.use_hw_decode and decoder == "h264_v4l2m2m":
+        if self.use_hw_decode and decoder == "h264_v4l2m2m" and ("h264_v4l2m2m" in self._ff_decoders):
             cmd += ["-c:v", "h264_v4l2m2m"]
+        elif decoder == "h264" and ("h264" in self._ff_decoders):
+            cmd += ["-c:v", "h264"]
 
         # ลด frame queue ของ demux บางกรณี
         cmd += ["-thread_queue_size", "512"]
@@ -651,10 +710,10 @@ class CameraWorker:
     def _track_ffmpeg_errors(self, line: str) -> None:
         """
         จับแพตเทิร์น error จาก ffmpeg; ถ้ามี burst ภายในหน้าต่างสั้น ๆ:
-        - รีสตาร์ท
-        - และถ้า robust เปิดอยู่ ให้ 'สลับตัวเลือก' ทีละขั้น:
-            1) transport: tcp -> udp
-            2) decoder: h264_v4l2m2m -> h264
+            - รีสตาร์ท
+            - และถ้า robust เปิดอยู่ ให้ 'สลับตัวเลือก' ทีละขั้น:
+                1) transport: tcp -> udp
+                2) decoder: h264_v4l2m2m -> h264
         เพื่อให้ครอบคลุมกล้อง/RTSP server หลายยี่ห้อ
         """
         now = time.monotonic()
@@ -679,16 +738,17 @@ class CameraWorker:
                     self._log_prefix, len(self._err_window), self._err_window_secs, self.last_ffmpeg_stderr()
                 )
                 if self.robust:
-                    # ลองสลับ transport ก่อน (tcp <-> udp)
-                    next_transport_idx = (self._rtsp_transport_idx + 1) % len(self._rtsp_transport_cycle)
-                    if next_transport_idx != self._rtsp_transport_idx:
-                        self._rtsp_transport_idx = next_transport_idx
-                        self._logger.warning(
-                            "%s switching RTSP transport -> %s",
-                            self._log_prefix, self._rtsp_transport_cycle[self._rtsp_transport_idx]
-                        )
+                    # ลองสลับ transport ก่อน (tcp <-> udp) ถ้า build รองรับ
+                    if "rtsp_transport" in self._ff_rtsp_opts and len(self._rtsp_transport_cycle) > 1:
+                        next_transport_idx = (self._rtsp_transport_idx + 1) % len(self._rtsp_transport_cycle)
+                        if next_transport_idx != self._rtsp_transport_idx:
+                            self._rtsp_transport_idx = next_transport_idx
+                            self._logger.warning(
+                                "%s switching RTSP transport -> %s",
+                                self._log_prefix, self._rtsp_transport_cycle[self._rtsp_transport_idx]
+                            )
                     else:
-                        # ถ้าสลับ transport ครบแล้ว ลอง decoder
+                        # ถ้าสลับ transport ไม่ได้/ครบแล้ว ลอง decoder
                         next_dec_idx = (self._decoder_idx + 1) % len(self._decoder_cycle)
                         if next_dec_idx != self._decoder_idx:
                             self._decoder_idx = next_dec_idx
