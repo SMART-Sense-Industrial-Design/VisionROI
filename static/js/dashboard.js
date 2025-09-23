@@ -414,12 +414,13 @@ function renderSourceRunList(runs = []) {
     stats.appendChild(createRoiRunStat('จำนวน ROI', run?.roi_count));
     const moduleCount = Array.isArray(run?.modules) ? run.modules.length : 0;
     stats.appendChild(createRoiRunStat('จำนวนโมดูล', moduleCount));
-    if (
-      run?.total_duration !== null
-      && run?.total_duration !== undefined
-      && Number.isFinite(Number(run.total_duration))
-    ) {
-      stats.appendChild(createRoiRunStat('เวลารอบนี้', formatSeconds(run.total_duration)));
+    const runDurationSeconds = Number(
+      run?.frame_duration !== undefined && run?.frame_duration !== null
+        ? run.frame_duration
+        : run?.total_duration
+    );
+    if (Number.isFinite(runDurationSeconds)) {
+      stats.appendChild(createRoiRunStat('เวลารอบนี้', formatSeconds(runDurationSeconds)));
     }
     card.appendChild(stats);
 
