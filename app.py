@@ -2237,12 +2237,18 @@ async def apply_camera_settings(cam_id: str, data: dict) -> bool:
         ):
             width, height = camera_resolutions.get(cam_id, (None, None))
             worker = CameraWorker(
-                camera_sources[cam_id],
-                asyncio.get_running_loop(),
-                width,
-                height,
-                backend=backend,
+                src=camera_sources[cam_id],
+                loop=asyncio.get_running_loop(),
+                width=width,
+                height=height,
+                read_interval=0.0,       # ถ้าอยากเว้นจังหวะอ่านใส่เพิ่มได้
+                backend=backend,         # ใช้ "ffmpeg" เพื่อโหมด robust
+                robust=True,             # เปิด fallback/วอทช์ด็อก
+                low_latency=False,       # ถ้าจะเน้นหน่วงต่ำค่อยสลับ True
+                use_hw_decode=True,      # h264_v4l2m2m ถ้ามีใน ffmpeg build
+                loglevel="error",        # ลดสแปม log swscale
             )
+
             if not worker.start():
                 save_service_state()
                 return False
