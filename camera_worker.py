@@ -227,7 +227,6 @@ class CameraWorker:
             elif "stimeout" in self._ff_rtsp_opts:
                 cmd += ["-stimeout", "5000000"]    # 5s
             elif "timeout" in self._ff_rtsp_opts:
-                # บาง build มี 'timeout' แทน (หลายกรณีหน่วยเป็นไมโครวินาที)
                 cmd += ["-timeout", "5000000"]
 
         # วิเคราะห์สตรีมพอประมาณ
@@ -235,14 +234,15 @@ class CameraWorker:
 
         # โปรไฟล์ robust/low_latency
         if self.low_latency:
-            # เน้นหน่วงต่ำ (เสี่ยงเฟรมแตก)
             cmd += ["-fflags", "+discardcorrupt", "-flags", "low_delay", "-fflags", "nobuffer"]
         else:
-            # เน้นนิ่ง/ทน jitter
             cmd += ["-fflags", "+discardcorrupt+genpts", "-flags2", "+showall", "-reorder_queue_size", "0"]
-            # จำกัด jitter buffer/การหน่วง demux
             cmd += ["-max_delay", "500000"]  # 500ms
             cmd += ["-use_wallclock_as_timestamps", "1"]
+
+        # !!! สำคัญ: ใส่ input option ก่อน -i !!!
+        # ลดคิวแพ็กเก็ตของอินพุต (ต้องมาก่อน -i เพื่อผูกกับอินพุต ไม่ใช่เอาต์พุต)
+        cmd += ["-thread_queue_size", "512"]
 
         # เปิด input
         cmd += ["-i", src, "-map", "0:v:0", "-an"]
@@ -253,9 +253,6 @@ class CameraWorker:
             cmd += ["-c:v", "h264_v4l2m2m"]
         elif decoder == "h264" and ("h264" in self._ff_decoders):
             cmd += ["-c:v", "h264"]
-
-        # ลด frame queue ของ demux บางกรณี
-        cmd += ["-thread_queue_size", "512"]
 
         # สเกล/สี (ให้ ffmpeg แปลงเป็น bgr24 ออกมา)
         filters: list[str] = []
@@ -270,6 +267,7 @@ class CameraWorker:
         self._ffmpeg_pix_fmt = "bgr24"
         self._logger.info("%s ffmpeg cmd: %s", self._log_prefix, " ".join(cmd))
         return cmd
+
 
     # ---------- helpers ----------
 
