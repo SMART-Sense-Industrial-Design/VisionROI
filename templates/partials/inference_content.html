@@ -260,6 +260,55 @@
             return (data?.type ?? 'roi') === 'roi';
         }
 
+        function resolveImageSource(imageData) {
+            if (imageData == null) {
+                return { src: '', revoke: null };
+            }
+            if (typeof imageData === 'string') {
+                const trimmed = imageData.trim();
+                if (!trimmed) {
+                    return { src: '', revoke: null };
+                }
+                return { src: `data:image/jpeg;base64,${trimmed}`, revoke: null };
+            }
+            let bytes = null;
+            if (imageData instanceof ArrayBuffer) {
+                bytes = new Uint8Array(imageData);
+            } else if (Array.isArray(imageData)) {
+                bytes = new Uint8Array(imageData);
+            } else if (ArrayBuffer.isView(imageData)) {
+                bytes = new Uint8Array(
+                    imageData.buffer,
+                    imageData.byteOffset,
+                    imageData.byteLength
+                );
+            }
+            if (!bytes || !bytes.length) {
+                return { src: '', revoke: null };
+            }
+            const blob = new Blob([bytes], { type: 'image/jpeg' });
+            const url = URL.createObjectURL(blob);
+            return { src: url, revoke: url };
+        }
+
+        function setImageFromData(imgEl, imageData) {
+            if (!imgEl) return;
+            const prev = imgEl.dataset.objectUrl;
+            if (prev) {
+                URL.revokeObjectURL(prev);
+                delete imgEl.dataset.objectUrl;
+            }
+            const { src, revoke } = resolveImageSource(imageData);
+            if (src) {
+                imgEl.src = src;
+            } else {
+                imgEl.removeAttribute('src');
+            }
+            if (revoke) {
+                imgEl.dataset.objectUrl = revoke;
+            }
+        }
+
         function ensureRoiItem(id) {
             if (document.getElementById(`${cellId}-roi-${id}`)) return;
             const r = findRoiDataById(id) || { id };
@@ -304,7 +353,7 @@
             updateRoiModuleLabel(roiId, result.module);
             const imgEl = document.getElementById(`${cellId}-roi-${roiId}`);
             if (imgEl && Object.prototype.hasOwnProperty.call(result, 'image')) {
-                imgEl.src = result.image ? `data:image/jpeg;base64,${result.image}` : '';
+                setImageFromData(imgEl, result.image);
             }
             const textEl = document.getElementById(`${cellId}-text-${roiId}`);
             if (textEl) {

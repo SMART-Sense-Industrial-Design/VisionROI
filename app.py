@@ -251,6 +251,33 @@ def ensure_roi_ids(rois):
     return rois
 
 
+def _decode_image_data(value: Any) -> bytes | None:
+    if isinstance(value, str):
+        value = value.strip()
+        if not value:
+            return None
+        try:
+            return base64.b64decode(value, validate=True)
+        except Exception:
+            return None
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        data = bytes(value)
+        return data if data else None
+    if isinstance(value, list):
+        try:
+            buf = bytes(int(v) & 0xFF for v in value)
+        except Exception:
+            return None
+        return buf if buf else None
+    return None
+
+
+def _json_default(obj: Any) -> Any:
+    if isinstance(obj, (bytes, bytearray, memoryview)):
+        return list(obj)
+    raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
+
+
 def push_recent_notification(entry: dict[str, Any]) -> None:
     recent_notifications.append(entry)
     if len(recent_notifications) > MAX_RECENT_NOTIFICATIONS:
@@ -1485,7 +1512,7 @@ async def run_inference_loop(cam_id: str):
             pass
         try:
             q = get_roi_result_queue(key[0])
-            payload = json.dumps(payload_dict)
+            payload = json.dumps(payload_dict, default=_json_default)
             if q.full():
                 q.get_nowait()
             q.put_nowait(payload)
@@ -1583,7 +1610,10 @@ async def run_inference_loop(cam_id: str):
             if active_group or scores:
                 try:
                     q = get_roi_result_queue(cam_id)
-                    payload = json.dumps({'group': active_group, 'scores': scores})
+                    payload = json.dumps(
+                        {'group': active_group, 'scores': scores},
+                        default=_json_default,
+                    )
                     if q.full():
                         q.get_nowait()
                     await q.put(payload)
@@ -1792,11 +1822,7 @@ async def run_inference_loop(cam_id: str):
                                             [int(cv2.IMWRITE_JPEG_QUALITY), 80],
                                         )
                                         if encoded and roi_buf is not None:
-                                            image_bytes = await asyncio.to_thread(
-                                                base64.b64encode,
-                                                roi_buf,
-                                            )
-                                            entry['image'] = image_bytes.decode('ascii')
+                                            entry['image'] = roi_buf.tobytes()
                                 except Exception:
                                     pass
 
@@ -2564,14 +2590,15 @@ async def perform_start_inference(cam_id: str, rois=None, group: str | None = No
     if np is not None:
         for r in rois:
             if isinstance(r, dict) and r.get("type") == "page":
-                img_b64 = r.get("image")
-                if img_b64:
+                img_data = _decode_image_data(r.get("image"))
+                tmpl = None
+                if img_data:
                     try:
-                        arr = np.frombuffer(base64.b64decode(img_b64), np.uint8)
+                        arr = np.frombuffer(img_data, np.uint8)
                         tmpl = cv2.imdecode(arr, cv2.IMREAD_GRAYSCALE)
                     except Exception:
                         tmpl = None
-                    r["_template"] = tmpl
+                r["_template"] = tmpl
 
     inference_rois[cam_id] = rois
     if group is None:
