@@ -47,9 +47,9 @@ camera_sources: dict[str, int | str] = {}
 camera_resolutions: dict[str, tuple[int | None, int | None]] = {}
 camera_backends: dict[str, str] = {}
 camera_locks: dict[str, asyncio.Lock] = {}
-frame_queues: dict[str, asyncio.Queue[bytes]] = {}
+frame_queues: dict[str, asyncio.Queue[memoryview | bytes]] = {}
 inference_tasks: dict[str, asyncio.Task | None] = {}
-roi_frame_queues: dict[str, asyncio.Queue[bytes | None]] = {}
+roi_frame_queues: dict[str, asyncio.Queue[memoryview | bytes | None]] = {}
 roi_result_queues: dict[str, asyncio.Queue[str | None]] = {}
 roi_tasks: dict[str, asyncio.Task | None] = {}
 inference_rois: dict[str, list[dict]] = {}
@@ -78,6 +78,18 @@ DEFAULT_PENDING_RESULT_TIMEOUT = float(os.getenv("INFERENCE_RESULT_TIMEOUT", "10
 app = Quart(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 100 * 1024 * 1024
 ALLOWED_ROI_DIR = os.path.realpath("data_sources")
+
+_JPEG_ENCODE_PARAMS = (
+    int(getattr(cv2, "IMWRITE_JPEG_QUALITY", 1)),
+    80,
+)
+
+
+def _release_memoryview(value: object) -> None:
+    if isinstance(value, memoryview):
+        with contextlib.suppress(Exception):
+            value.release()
+
 
 # =========================
 # Global inference queue & thread pool
@@ -1304,11 +1316,11 @@ def load_custom_module(name: str) -> ModuleType | None:
 # =========================
 # Queues getters
 # =========================
-def get_frame_queue(cam_id: str) -> asyncio.Queue[bytes]:
+def get_frame_queue(cam_id: str) -> asyncio.Queue[memoryview | bytes]:
     return frame_queues.setdefault(cam_id, asyncio.Queue(maxsize=1))
 
 
-def get_roi_frame_queue(cam_id: str) -> asyncio.Queue[bytes | None]:
+def get_roi_frame_queue(cam_id: str) -> asyncio.Queue[memoryview | bytes | None]:
     return roi_frame_queues.setdefault(cam_id, asyncio.Queue(maxsize=1))
 
 
@@ -1322,14 +1334,15 @@ def _drain_queue(queue: asyncio.Queue[Any] | None) -> None:
         return
     with contextlib.suppress(asyncio.QueueEmpty):
         while True:
-            queue.get_nowait()
+            item = queue.get_nowait()
+            _release_memoryview(item)
 
 
 # =========================
 # Frame readers
 # =========================
 async def read_and_queue_frame(
-    cam_id: str, queue: asyncio.Queue[bytes], frame_processor=None
+    cam_id: str, queue: asyncio.Queue[memoryview | bytes], frame_processor=None
 ) -> None:
     worker = camera_workers.get(cam_id)
     if worker is None:
@@ -1346,23 +1359,37 @@ async def read_and_queue_frame(
         frame = await frame_processor(frame)
         if frame is None:
             return
+    if queue.full():
+        with contextlib.suppress(asyncio.QueueEmpty):
+            old_item = queue.get_nowait()
+            _release_memoryview(old_item)
     try:
         encoded, buffer = await asyncio.to_thread(
-            cv2.imencode, '.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 80]
+            cv2.imencode,
+            '.jpg',
+            frame,
+            _JPEG_ENCODE_PARAMS,
         )
     except Exception:
         await asyncio.sleep(0.01)
         return
+    finally:
+        frame = None
     if not encoded or buffer is None:
         await asyncio.sleep(0.01)
         return
-    frame_bytes = buffer.tobytes() if hasattr(buffer, "tobytes") else buffer
-    if queue.full():
-        try:
-            queue.get_nowait()
-        except asyncio.QueueEmpty:
-            pass
-    await queue.put(frame_bytes)
+    try:
+        frame_bytes: memoryview | bytes = memoryview(buffer)
+    except TypeError:
+        if isinstance(buffer, (bytes, bytearray, memoryview)):
+            frame_bytes = buffer  # type: ignore[assignment]
+        else:
+            frame_bytes = bytes(buffer)
+    try:
+        await queue.put(frame_bytes)
+    except Exception:
+        _release_memoryview(frame_bytes)
+        raise
     await asyncio.sleep(0)
 
 
@@ -1943,6 +1970,7 @@ async def run_inference_loop(cam_id: str):
     except asyncio.CancelledError:
         pass
     finally:
+        _drain_queue(queue)
         cleanup_pending_results(force=True)
         pending_results.clear()
         pending_expected.clear()
@@ -1969,6 +1997,8 @@ async def run_roi_loop(cam_id: str):
             await read_and_queue_frame(cam_id, queue)
     except asyncio.CancelledError:
         pass
+    finally:
+        _drain_queue(queue)
 
 
 # =========================
@@ -2011,7 +2041,7 @@ async def start_camera_task(
 async def stop_camera_task(
     cam_id: str,
     task_dict: dict[str, asyncio.Task | None],
-    queue_dict: dict[str, asyncio.Queue[bytes | None]] | None = None,
+    queue_dict: dict[str, asyncio.Queue[memoryview | bytes | None]] | None = None,
 ):
     async with get_cam_lock(cam_id):
         task = task_dict.pop(cam_id, None)
@@ -2059,15 +2089,20 @@ async def stop_camera_task(
 # =========================
 # WebSockets
 # =========================
-async def _stream_queue_over_websocket(queue: asyncio.Queue[bytes | str | None]) -> None:
+async def _stream_queue_over_websocket(
+    queue: asyncio.Queue[memoryview | bytes | str | None]
+) -> None:
     """Relay items from *queue* to the active websocket connection."""
     try:
         while True:
             item = await queue.get()
-            if item is None:
-                await websocket.close(code=1000)
-                break
-            await websocket.send(item)
+            try:
+                if item is None:
+                    await websocket.close(code=1000)
+                    break
+                await websocket.send(item)
+            finally:
+                _release_memoryview(item)
     except ConnectionClosed:
         pass
     finally:
