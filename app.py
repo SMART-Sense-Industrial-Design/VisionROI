@@ -610,6 +610,7 @@ def build_dashboard_payload() -> dict[str, Any]:
     module_duration_stats: dict[str, dict[str, float | int | None]] = {}
     source_duration_stats: dict[str, dict[str, float | int | None]] = {}
     latest_frame_snapshot: dict[str, Any] | None = None
+    latest_source_frames: dict[str, dict[str, Any]] = {}
 
     def _clean_optional_str(value: object) -> str | None:
         if value is None:
@@ -721,6 +722,9 @@ def build_dashboard_payload() -> dict[str, Any]:
                 module_entry["slowest_roi_name"] = _clean_optional_str(result.get("name"))
                 module_entry["slowest_source"] = _clean_optional_str(notif.get("source"))
                 module_entry["slowest_cam_id"] = _clean_optional_str(notif.get("cam_id"))
+        cam_id_clean = _clean_optional_str(notif.get("cam_id"))
+        source_clean = _clean_optional_str(notif.get("source"))
+
         if frame_measurements:
             frame_timestamp_iso = _to_iso(ts) or (
                 str(notif.get("timestamp")).strip()
@@ -737,11 +741,35 @@ def build_dashboard_payload() -> dict[str, Any]:
                 slowest_entry["timestamp"] = frame_timestamp_iso
             latest_frame_snapshot = {
                 "timestamp": frame_timestamp_iso,
-                "cam_id": _clean_optional_str(notif.get("cam_id")),
-                "source": _clean_optional_str(notif.get("source")),
+                "cam_id": cam_id_clean,
+                "source": source_clean,
                 "fastest": fastest_entry,
                 "slowest": slowest_entry,
             }
+            if cam_id_clean:
+                frame_modules = sorted(
+                    {
+                        str(item.get("module") or item.get("name") or "").strip()
+                        for item in frame_measurements
+                        if (item.get("module") or item.get("name"))
+                    }
+                )
+                latest_snapshot = latest_source_frames.get(cam_id_clean)
+                should_update = not latest_snapshot or ts >= float(
+                    latest_snapshot.get("timestamp_epoch", 0.0) or 0.0
+                )
+                if should_update:
+                    latest_source_frames[cam_id_clean] = {
+                        "timestamp": frame_timestamp_iso,
+                        "timestamp_epoch": ts,
+                        "cam_id": cam_id_clean,
+                        "source": source_clean,
+                        "roi_count": len(frame_measurements),
+                        "modules": frame_modules,
+                        "fastest": fastest_entry,
+                        "slowest": slowest_entry,
+                        "total_duration": total_duration,
+                    }
         cam_id = notif.get("cam_id")
         if cam_id and total_duration > 0:
             source_entry = source_duration_stats.setdefault(
@@ -1063,6 +1091,8 @@ def build_dashboard_payload() -> dict[str, Any]:
     module_details.sort(key=lambda item: (-item.get("roi_count", 0), item.get("name", "")))
 
     source_details: list[dict[str, Any]] = []
+    source_run_entries: list[dict[str, Any]] = []
+
     for cam_id, info in source_roi_map.items():
         perf = source_duration_stats.get(str(cam_id), {})
         sample_count = int(perf.get("count", 0) or 0)
@@ -1070,31 +1100,81 @@ def build_dashboard_payload() -> dict[str, Any]:
             (perf.get("total", 0.0) or 0.0) / sample_count if sample_count else None
         )
         interval_val = info.get("interval")
+        latest_duration_raw = perf.get("latest_duration")
+        try:
+            latest_duration_val = (
+                float(latest_duration_raw)
+                if latest_duration_raw is not None
+                else None
+            )
+        except (TypeError, ValueError):
+            latest_duration_val = None
+
         meets_interval: bool | None
         interval_gap: float | None
+        latest_interval_ratio: float | None
         if (
             isinstance(interval_val, (int, float))
             and interval_val is not None
-            and average_duration is not None
+            and latest_duration_val is not None
         ):
-            meets_interval = average_duration <= float(interval_val)
-            interval_gap = float(interval_val) - average_duration
+            meets_interval = latest_duration_val <= float(interval_val)
+            interval_gap = float(interval_val) - latest_duration_val
+            latest_interval_ratio = (
+                latest_duration_val / float(interval_val)
+                if float(interval_val) > 0
+                else None
+            )
         else:
             meets_interval = None
             interval_gap = None
+            latest_interval_ratio = None
         source_details.append(
             {
                 **info,
                 "average_duration": average_duration,
                 "max_duration": perf.get("max"),
                 "min_duration": perf.get("min"),
-                "latest_duration": perf.get("latest_duration"),
+                "latest_duration": latest_duration_val,
                 "latest_completed_at": _to_iso(perf.get("latest_timestamp")),
                 "samples": sample_count,
                 "meets_interval": meets_interval,
                 "interval_gap": interval_gap,
+                "latest_interval_ratio": latest_interval_ratio,
             }
         )
+
+        frame_snapshot = latest_source_frames.get(str(cam_id)) or latest_source_frames.get(
+            _clean_optional_str(cam_id)
+        )
+        if frame_snapshot:
+            source_run_entries.append(
+                {
+                    "cam_id": str(cam_id),
+                    "display_name": info.get("display_name") or str(cam_id),
+                    "group": info.get("group"),
+                    "source": frame_snapshot.get("source") or info.get("source"),
+                    "timestamp": frame_snapshot.get("timestamp"),
+                    "timestamp_epoch": frame_snapshot.get("timestamp_epoch"),
+                    "roi_count": frame_snapshot.get("roi_count"),
+                    "modules": frame_snapshot.get("modules", []),
+                    "total_duration": frame_snapshot.get("total_duration"),
+                    "fastest": frame_snapshot.get("fastest"),
+                    "slowest": frame_snapshot.get("slowest"),
+                    "interval": info.get("interval"),
+                }
+            )
+
+    source_run_entries.sort(
+        key=lambda item: (
+            -float(item.get("timestamp_epoch", 0.0) or 0.0)
+            if item.get("timestamp_epoch") is not None
+            else float("inf")
+        )
+    )
+
+    for entry in source_run_entries:
+        entry.pop("timestamp_epoch", None)
 
     source_details.sort(
         key=lambda item: (
@@ -1114,6 +1194,7 @@ def build_dashboard_payload() -> dict[str, Any]:
             "latest_frame": latest_frame_snapshot,
         },
         "source_details": source_details,
+        "source_runs": source_run_entries,
     }
     return {
         "summary": summary,
