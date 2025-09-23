@@ -288,66 +288,6 @@ function updateCameraInsights(cameras = []) {
   setElementText('insight-average-fps', stats.fpsCount ? averageFps.toFixed(2) : '0.0');
 }
 
-function renderModuleCards(modules = []) {
-  const container = document.getElementById('roi-module-list');
-  if (!container) return;
-  container.innerHTML = '';
-
-  if (!Array.isArray(modules) || !modules.length) {
-    const empty = document.createElement('div');
-    empty.className = 'roi-module-list__empty';
-    empty.textContent = 'ยังไม่มีการกำหนด ROI';
-    container.appendChild(empty);
-    return;
-  }
-
-  modules.slice(0, 6).forEach((module) => {
-    const card = document.createElement('div');
-    card.className = 'roi-module-card';
-
-    const title = document.createElement('p');
-    title.className = 'roi-module-card__title';
-    title.textContent = module?.name || 'ไม่ระบุโมดูล';
-
-    const meta = document.createElement('p');
-    meta.className = 'roi-module-card__meta';
-    const roiCount = Number(module?.roi_count ?? 0);
-    const sourceCount = Number(module?.source_count ?? 0);
-    meta.textContent = `ROI ${roiCount} · แหล่ง ${sourceCount}`;
-
-    const value = document.createElement('p');
-    value.className = 'roi-module-card__value';
-    if (module?.average_duration != null) {
-      const formatted = formatSecondsWithUnit(module.average_duration);
-      value.textContent = formatted ? `เวลาเฉลี่ย ${formatted}` : 'รอข้อมูล';
-    } else {
-      value.textContent = 'รอข้อมูล';
-    }
-
-    const footer = document.createElement('p');
-    footer.className = 'roi-module-card__footer';
-    const samples = Number(module?.sample_count ?? 0);
-    footer.textContent = samples > 0 ? `จาก ${samples} รอบตัวอย่าง` : 'รอข้อมูลเพิ่มเติม';
-
-    card.append(title, meta, value, footer);
-
-    if (Array.isArray(module?.types) && module.types.length) {
-      const tags = document.createElement('div');
-      tags.className = 'roi-module-card__tags';
-      module.types.forEach((type) => {
-        if (!type) return;
-        const tag = document.createElement('span');
-        tag.className = 'roi-module-card__tag';
-        tag.textContent = type;
-        tags.appendChild(tag);
-      });
-      card.appendChild(tags);
-    }
-
-    container.appendChild(card);
-  });
-}
-
 function createModuleBadge(name) {
   const badge = document.createElement('span');
   badge.className = 'module-badge';
@@ -746,7 +686,6 @@ function updateRoiAnalytics(metrics = {}, summary = {}) {
   setElementText('roi-source-count', metrics?.sources_with_roi ?? 0);
   setElementText('roi-running-count', summary?.inference_running ?? 0);
 
-  renderModuleCards(metrics?.module_details);
   renderSourceRunList(metrics?.source_runs);
   updateRoiSourceTable(metrics?.source_details);
 }
