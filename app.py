@@ -626,6 +626,14 @@ def build_dashboard_payload() -> dict[str, Any]:
         except (TypeError, ValueError, OSError, OverflowError):
             return None
 
+    def _safe_float(value: object) -> float | None:
+        try:
+            if value is None:
+                return None
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
     for notif in notifications_snapshot:
         try:
             ts = float(notif.get("timestamp_epoch", 0.0))
@@ -634,7 +642,8 @@ def build_dashboard_payload() -> dict[str, Any]:
         if now_epoch - ts <= 3600:
             alerts_last_hour += 1
         results = notif.get("results") or []
-        total_duration = 0.0
+        roi_total_duration = 0.0
+        frame_duration_val = _safe_float(notif.get("frame_duration"))
         frame_measurements: list[dict[str, Any]] = []
         for result in results:
             module_name = str(result.get("module") or "ไม่ระบุ")
@@ -644,7 +653,7 @@ def build_dashboard_payload() -> dict[str, Any]:
                 duration_val = None
             if duration_val is None:
                 continue
-            total_duration += duration_val
+            roi_total_duration += duration_val
             frame_measurements.append(
                 {
                     "name": module_name,
@@ -746,6 +755,14 @@ def build_dashboard_payload() -> dict[str, Any]:
                 "fastest": fastest_entry,
                 "slowest": slowest_entry,
             }
+            frame_time_epoch = _safe_float(notif.get("frame_time"))
+            result_time_epoch = _safe_float(notif.get("result_time"))
+            if frame_duration_val is None and (
+                frame_time_epoch is not None and result_time_epoch is not None
+            ):
+                diff = result_time_epoch - frame_time_epoch
+                if diff >= 0:
+                    frame_duration_val = diff
             if cam_id_clean:
                 frame_modules = sorted(
                     {
@@ -759,6 +776,10 @@ def build_dashboard_payload() -> dict[str, Any]:
                     latest_snapshot.get("timestamp_epoch", 0.0) or 0.0
                 )
                 if should_update:
+                    if frame_duration_val is None and roi_total_duration > 0:
+                        duration_for_frame = roi_total_duration
+                    else:
+                        duration_for_frame = frame_duration_val
                     latest_source_frames[cam_id_clean] = {
                         "timestamp": frame_timestamp_iso,
                         "timestamp_epoch": ts,
@@ -768,10 +789,25 @@ def build_dashboard_payload() -> dict[str, Any]:
                         "modules": frame_modules,
                         "fastest": fastest_entry,
                         "slowest": slowest_entry,
-                        "total_duration": total_duration,
+                        "frame_duration": duration_for_frame,
+                        "total_duration": roi_total_duration,
                     }
+        if frame_duration_val is None:
+            frame_time_epoch = _safe_float(notif.get("frame_time"))
+            result_time_epoch = _safe_float(notif.get("result_time"))
+            if frame_time_epoch is not None and result_time_epoch is not None:
+                diff = result_time_epoch - frame_time_epoch
+                if diff >= 0:
+                    frame_duration_val = diff
+        duration_for_source: float | None
+        if frame_duration_val is not None:
+            duration_for_source = frame_duration_val
+        elif roi_total_duration > 0:
+            duration_for_source = roi_total_duration
+        else:
+            duration_for_source = None
         cam_id = notif.get("cam_id")
-        if cam_id and total_duration > 0:
+        if cam_id and duration_for_source is not None:
             source_entry = source_duration_stats.setdefault(
                 str(cam_id),
                 {
@@ -783,18 +819,18 @@ def build_dashboard_payload() -> dict[str, Any]:
                     "latest_timestamp": 0.0,
                 },
             )
-            source_entry["total"] += total_duration
+            source_entry["total"] += duration_for_source
             source_entry["count"] += 1
             source_entry["min"] = (
-                total_duration
+                duration_for_source
                 if source_entry["min"] is None
-                else min(float(source_entry["min"]), total_duration)
+                else min(float(source_entry["min"]), duration_for_source)
             )
             source_entry["max"] = max(
-                float(source_entry.get("max", 0.0) or 0.0), total_duration
+                float(source_entry.get("max", 0.0) or 0.0), duration_for_source
             )
             if ts >= float(source_entry.get("latest_timestamp", 0.0) or 0.0):
-                source_entry["latest_duration"] = total_duration
+                source_entry["latest_duration"] = duration_for_source
                 source_entry["latest_timestamp"] = ts
     for cam_id in sorted(known_ids, key=str):
         task = inference_tasks.get(cam_id)
@@ -1158,6 +1194,7 @@ def build_dashboard_payload() -> dict[str, Any]:
                     "timestamp_epoch": frame_snapshot.get("timestamp_epoch"),
                     "roi_count": frame_snapshot.get("roi_count"),
                     "modules": frame_snapshot.get("modules", []),
+                    "frame_duration": frame_snapshot.get("frame_duration"),
                     "total_duration": frame_snapshot.get("total_duration"),
                     "fastest": frame_snapshot.get("fastest"),
                     "slowest": frame_snapshot.get("slowest"),
@@ -1496,12 +1533,22 @@ async def run_inference_loop(cam_id: str):
         results_list = [results_map[rid] for rid in ordered_keys]
         if not results_list:
             return
+        now_time = time.time()
         payload_dict = {
             'frame_time': key[1],
-            'result_time': time.time(),
+            'result_time': now_time,
             'results': results_list,
             'cam_id': key[0],
         }
+        frame_duration: float | None
+        try:
+            frame_duration = float(payload_dict['result_time']) - float(payload_dict['frame_time'])
+        except (TypeError, ValueError):
+            frame_duration = None
+        if frame_duration is not None:
+            if frame_duration < 0:
+                frame_duration = 0.0
+            payload_dict['frame_duration'] = frame_duration
         context = pending_context.pop(key, None) or {}
         source_name = context.get('source') or active_sources.get(key[0], '')
         group_name = context.get('group') or ''
@@ -1539,6 +1586,8 @@ async def run_inference_loop(cam_id: str):
                         'source': source_name,
                         'results': sanitized_results,
                     }
+                    if frame_duration is not None:
+                        log_entry['frame_duration'] = frame_duration
                     agg_logger.info(
                         "AGGREGATED_ROI %s",
                         json.dumps(log_entry, ensure_ascii=False),
@@ -1549,19 +1598,22 @@ async def run_inference_loop(cam_id: str):
                         ).isoformat()
                     except Exception:
                         ts = datetime.utcnow().isoformat()
-                    push_recent_notification(
-                        {
-                            "cam_id": key[0],
-                            "group": group_name or "",
-                            "source": source_name or "",
-                            "count": len(sanitized_results),
-                            "results": sanitized_results[:5],
-                            "timestamp": ts,
-                            "timestamp_epoch": float(
-                                payload_dict.get('result_time', time.time())
-                            ),
-                        }
-                    )
+                    recent_entry = {
+                        "cam_id": key[0],
+                        "group": group_name or "",
+                        "source": source_name or "",
+                        "count": len(sanitized_results),
+                        "results": sanitized_results[:5],
+                        "timestamp": ts,
+                        "timestamp_epoch": float(
+                            payload_dict.get('result_time', time.time())
+                        ),
+                    }
+                    if frame_duration is not None:
+                        recent_entry["frame_duration"] = frame_duration
+                    recent_entry["frame_time"] = payload_dict.get('frame_time')
+                    recent_entry["result_time"] = payload_dict.get('result_time')
+                    push_recent_notification(recent_entry)
         except Exception:
             pass
         try:
