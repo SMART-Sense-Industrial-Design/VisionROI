@@ -348,75 +348,171 @@ function renderModuleCards(modules = []) {
   });
 }
 
-function formatPerformanceMeta(entry, frameContext = null) {
-  if (frameContext) {
-    const locationParts = [];
-    if (frameContext.cam_id) {
-      locationParts.push(`กล้อง ${frameContext.cam_id}`);
-    }
-    if (frameContext.source && frameContext.source !== frameContext.cam_id) {
-      locationParts.push(frameContext.source);
-    }
-    const locationText = locationParts.join(' · ');
-    const timestamp = frameContext.timestamp || entry?.timestamp;
-    const timeText = timestamp ? formatDateTime(timestamp) : null;
-
-    if (locationText && timeText) {
-      return `เฟรมเดียวกัน (${locationText}) · รับเมื่อ ${timeText}`;
-    }
-    if (timeText) {
-      return `เฟรมเดียวกัน · รับเมื่อ ${timeText}`;
-    }
-    if (locationText) {
-      return `เฟรมเดียวกัน (${locationText})`;
-    }
-    return 'เฟรมเดียวกัน';
-  }
-
-  if (!entry) {
-    return 'รอข้อมูล';
-  }
-  const timestamp = entry?.timestamp;
-  if (!timestamp) {
-    return 'รอข้อมูล';
-  }
-  return `บันทึกเมื่อ ${formatDateTime(timestamp)}`;
-}
-
-function updateModulePerformance(performance = {}) {
-  const latestFrame = performance?.latest_frame;
-  const fastest = latestFrame?.fastest ?? performance?.fastest;
-  const slowest = latestFrame?.slowest ?? performance?.slowest;
-
-  const fastestContext = latestFrame?.fastest ? latestFrame : null;
-  const slowestContext = latestFrame?.slowest ? latestFrame : null;
-
-  const fastestName = fastest?.module ?? fastest?.name;
-  setElementText('module-fastest-name', fastestName || '-');
-  const fastestDuration = fastest?.duration;
-  setElementText(
-    'module-fastest-duration',
-    fastestDuration != null ? formatSecondsWithUnit(fastestDuration) || '-' : '-',
-  );
-  setElementText('module-fastest-roi', formatRoiDetail(fastest));
-  setElementText('module-fastest-meta', formatPerformanceMeta(fastest, fastestContext));
-
-  const slowestName = slowest?.module ?? slowest?.name;
-  setElementText('module-slowest-name', slowestName || '-');
-  const slowestDuration = slowest?.duration;
-  setElementText(
-    'module-slowest-duration',
-    slowestDuration != null ? formatSecondsWithUnit(slowestDuration) || '-' : '-',
-  );
-  setElementText('module-slowest-roi', formatRoiDetail(slowest));
-  setElementText('module-slowest-meta', formatPerformanceMeta(slowest, slowestContext));
-}
-
 function createModuleBadge(name) {
   const badge = document.createElement('span');
   badge.className = 'module-badge';
   badge.textContent = name || 'ไม่ระบุ';
   return badge;
+}
+
+function createRoiRunStat(label, value) {
+  const wrapper = document.createElement('div');
+  wrapper.className = 'roi-run-card__stat';
+
+  const labelEl = document.createElement('p');
+  labelEl.className = 'roi-run-card__stat-label';
+  labelEl.textContent = label;
+  wrapper.appendChild(labelEl);
+
+  const valueEl = document.createElement('p');
+  valueEl.className = 'roi-run-card__stat-value';
+  if (typeof value === 'string') {
+    valueEl.textContent = value;
+  } else if (value === null || value === undefined) {
+    valueEl.textContent = '-';
+  } else {
+    const numeric = Number(value);
+    valueEl.textContent = Number.isFinite(numeric) ? numeric.toString() : '-';
+  }
+  wrapper.appendChild(valueEl);
+
+  return wrapper;
+}
+
+function createRoiRunExtrema(label, entry, type) {
+  const wrapper = document.createElement('div');
+  wrapper.className = `roi-run-card__extrema-item roi-run-card__extrema-item--${type}`;
+
+  const labelEl = document.createElement('p');
+  labelEl.className = 'roi-run-card__extrema-label';
+  labelEl.textContent = label;
+  wrapper.appendChild(labelEl);
+
+  const durationEl = document.createElement('p');
+  durationEl.className = 'roi-run-card__extrema-duration';
+  if (entry?.duration != null && Number.isFinite(Number(entry.duration))) {
+    durationEl.textContent = formatSeconds(entry.duration);
+  } else {
+    durationEl.textContent = '-';
+  }
+  wrapper.appendChild(durationEl);
+
+  const detailEl = document.createElement('p');
+  detailEl.className = 'roi-run-card__extrema-detail';
+  detailEl.textContent = entry ? formatRoiDetail(entry) : 'รอข้อมูล ROI';
+  wrapper.appendChild(detailEl);
+
+  return wrapper;
+}
+
+function renderSourceRunList(runs = []) {
+  const container = document.getElementById('roi-run-list');
+  if (!container) return;
+  container.innerHTML = '';
+
+  if (!Array.isArray(runs) || !runs.length) {
+    const empty = document.createElement('div');
+    empty.className = 'roi-run-list__empty';
+    empty.textContent = 'รอข้อมูลการประมวลผลจากแหล่งสัญญาณ';
+    container.appendChild(empty);
+    return;
+  }
+
+  runs.forEach((run) => {
+    const card = document.createElement('div');
+    card.className = 'roi-run-card';
+
+    const header = document.createElement('div');
+    header.className = 'roi-run-card__header';
+
+    const titleWrap = document.createElement('div');
+    const titleEl = document.createElement('p');
+    titleEl.className = 'roi-run-card__title';
+    titleEl.textContent = run?.display_name || run?.cam_id || 'ไม่ทราบแหล่ง';
+    titleWrap.appendChild(titleEl);
+
+    const subtitleEl = document.createElement('p');
+    subtitleEl.className = 'roi-run-card__subtitle';
+    const subtitleParts = [];
+    if (run?.cam_id) {
+      subtitleParts.push(`รหัส ${run.cam_id}`);
+    }
+    if (run?.group) {
+      subtitleParts.push(`กลุ่ม ${run.group}`);
+    }
+    if (run?.source && run.source !== run.cam_id) {
+      const sourceText = String(run.source);
+      subtitleParts.push(sourceText.length > 36 ? `${sourceText.slice(0, 36)}…` : sourceText);
+    }
+    subtitleEl.textContent = subtitleParts.join(' · ') || 'ไม่ระบุรายละเอียดเพิ่มเติม';
+    titleWrap.appendChild(subtitleEl);
+
+    header.appendChild(titleWrap);
+
+    const timeEl = document.createElement('p');
+    timeEl.className = 'roi-run-card__time';
+    if (run?.timestamp) {
+      const absolute = formatDateTime(run.timestamp) || '-';
+      timeEl.textContent = `เฟรมล่าสุด ${absolute}`;
+      const relative = formatRelativeTime(run.timestamp);
+      if (relative && relative !== absolute) {
+        const br = document.createElement('br');
+        const relativeSpan = document.createElement('span');
+        relativeSpan.textContent = relative;
+        timeEl.appendChild(br);
+        timeEl.appendChild(relativeSpan);
+      }
+    } else {
+      timeEl.textContent = 'ยังไม่มีข้อมูลเฟรมล่าสุด';
+    }
+    header.appendChild(timeEl);
+
+    card.appendChild(header);
+
+    const stats = document.createElement('div');
+    stats.className = 'roi-run-card__stats';
+    stats.appendChild(createRoiRunStat('จำนวน ROI', run?.roi_count));
+    const moduleCount = Array.isArray(run?.modules) ? run.modules.length : 0;
+    stats.appendChild(createRoiRunStat('จำนวนโมดูล', moduleCount));
+    if (
+      run?.total_duration !== null
+      && run?.total_duration !== undefined
+      && Number.isFinite(Number(run.total_duration))
+    ) {
+      stats.appendChild(createRoiRunStat('เวลารอบนี้', formatSeconds(run.total_duration)));
+    }
+    card.appendChild(stats);
+
+    const modulesSection = document.createElement('div');
+    modulesSection.className = 'roi-run-card__modules';
+    const modulesLabel = document.createElement('p');
+    modulesLabel.className = 'roi-run-card__stat-label';
+    modulesLabel.textContent = 'โมดูลที่ทำงานในเฟรม';
+    modulesSection.appendChild(modulesLabel);
+
+    if (Array.isArray(run?.modules) && run.modules.length) {
+      const badgeWrap = document.createElement('div');
+      badgeWrap.className = 'module-badge-group';
+      run.modules.forEach((moduleName) => {
+        badgeWrap.appendChild(createModuleBadge(moduleName));
+      });
+      modulesSection.appendChild(badgeWrap);
+    } else {
+      const emptyModules = document.createElement('p');
+      emptyModules.className = 'roi-run-card__modules-empty';
+      emptyModules.textContent = 'ยังไม่มีข้อมูลโมดูล';
+      modulesSection.appendChild(emptyModules);
+    }
+    card.appendChild(modulesSection);
+
+    const extrema = document.createElement('div');
+    extrema.className = 'roi-run-card__extrema';
+    extrema.appendChild(createRoiRunExtrema('เร็วที่สุด', run?.fastest, 'fast'));
+    extrema.appendChild(createRoiRunExtrema('ช้าที่สุด', run?.slowest, 'slow'));
+    card.appendChild(extrema);
+
+    container.appendChild(card);
+  });
 }
 
 function createStatusBadge(detail) {
@@ -651,7 +747,7 @@ function updateRoiAnalytics(metrics = {}, summary = {}) {
   setElementText('roi-running-count', summary?.inference_running ?? 0);
 
   renderModuleCards(metrics?.module_details);
-  updateModulePerformance(metrics?.module_performance);
+  renderSourceRunList(metrics?.source_runs);
   updateRoiSourceTable(metrics?.source_details);
 }
 

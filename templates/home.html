@@ -148,23 +148,11 @@
             <div class="roi-module-list__empty">ยังไม่มีการกำหนด ROI</div>
           </div>
         </div>
-        <div class="roi-overview__performance">
-          <h3 class="roi-overview__title">เวลาในการประมวลผลของโมดูล</h3>
-          <div class="performance-cards">
-            <div class="performance-card performance-card--fast">
-              <p class="performance-card__label">เร็วที่สุด</p>
-              <h4 class="performance-card__title" id="module-fastest-name">-</h4>
-              <p class="performance-card__value" id="module-fastest-duration">-</p>
-              <p class="performance-card__meta performance-card__meta--detail" id="module-fastest-roi">รอข้อมูล ROI</p>
-              <p class="performance-card__meta performance-card__meta--frame" id="module-fastest-meta">รอข้อมูล</p>
-            </div>
-            <div class="performance-card performance-card--slow">
-              <p class="performance-card__label">ช้าที่สุด</p>
-              <h4 class="performance-card__title" id="module-slowest-name">-</h4>
-              <p class="performance-card__value" id="module-slowest-duration">-</p>
-              <p class="performance-card__meta performance-card__meta--detail" id="module-slowest-roi">รอข้อมูล ROI</p>
-              <p class="performance-card__meta performance-card__meta--frame" id="module-slowest-meta">รอข้อมูล</p>
-            </div>
+        <div class="roi-overview__runs">
+          <h3 class="roi-overview__title">เฟรมล่าสุดแยกตามแหล่งสัญญาณ</h3>
+          <p class="roi-overview__caption">สรุปจำนวน ROI โมดูลที่ใช้ และ ROI ที่เร็ว/ช้าในรอบล่าสุดของแต่ละแหล่ง</p>
+          <div class="roi-run-list" id="roi-run-list">
+            <div class="roi-run-list__empty">รอข้อมูลการประมวลผลจากแหล่งสัญญาณ</div>
           </div>
         </div>
       </div>
