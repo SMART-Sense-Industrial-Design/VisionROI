@@ -82,7 +82,17 @@
       ['source', 'interval'].forEach(migrateLegacyKey);
       const getEl = suffix => document.getElementById(`${cellId}-${suffix}`);
       const video = getEl('video');
-      const videoCtx = video.getContext('2d');
+      const bitmapRendererCtx = video && typeof video.getContext === 'function'
+        ? video.getContext('bitmaprenderer')
+        : null;
+      const canUseBitmapRenderer = Boolean(
+        bitmapRendererCtx && typeof bitmapRendererCtx.transferFromImageBitmap === 'function'
+      );
+      const videoCtx = canUseBitmapRenderer
+        ? bitmapRendererCtx
+        : (video && typeof video.getContext === 'function'
+          ? video.getContext('2d')
+          : null);
       const startButton = getEl('startButton');
       const stopButton = getEl('stopButton');
       const statusEl = getEl('status');
@@ -98,6 +108,77 @@
       const scoreTableWrapper = getEl('pageScoresWrapper');
       const scoreEmptyEl = getEl('pageScoresEmpty');
       let logTimer;
+      const clearCanvas = () => {
+        if (!video) {
+          return;
+        }
+        if (canUseBitmapRenderer) {
+          video.width = 0;
+          video.height = 0;
+        } else if (videoCtx && typeof videoCtx.clearRect === 'function') {
+          videoCtx.clearRect(0, 0, video.width || 0, video.height || 0);
+        }
+      };
+      const queueFrameForRender = (() => {
+        if (!videoCtx) {
+          return () => {};
+        }
+        let pendingFrame = null;
+        let isRendering = false;
+
+        const processNext = async () => {
+          if (!pendingFrame) {
+            isRendering = false;
+            return;
+          }
+          isRendering = true;
+          const blob = pendingFrame;
+          pendingFrame = null;
+          let bitmap;
+          try {
+            bitmap = await createImageBitmap(blob);
+            if (!bitmap) {
+              return;
+            }
+            const width = bitmap.width || 0;
+            const height = bitmap.height || 0;
+            if (video && (video.width !== width || video.height !== height)) {
+              video.width = width;
+              video.height = height;
+            }
+            if (canUseBitmapRenderer && typeof videoCtx.transferFromImageBitmap === 'function') {
+              videoCtx.transferFromImageBitmap(bitmap);
+            } else if (
+              typeof videoCtx.clearRect === 'function' && typeof videoCtx.drawImage === 'function'
+            ) {
+              videoCtx.clearRect(0, 0, video.width || 0, video.height || 0);
+              videoCtx.drawImage(bitmap, 0, 0);
+            }
+          } catch (err) {
+            console.error('Failed to render frame', err);
+          } finally {
+            if (bitmap && typeof bitmap.close === 'function') {
+              bitmap.close();
+            }
+            if (pendingFrame) {
+              processNext();
+            } else {
+              isRendering = false;
+            }
+          }
+        };
+
+        return blob => {
+          if (!blob) {
+            pendingFrame = null;
+            return;
+          }
+          pendingFrame = blob;
+          if (!isRendering) {
+            processNext();
+          }
+        };
+      })();
       let isLogUpdating = false;
       let logSessionId = 0;
       let currentLogSource;
@@ -608,11 +689,10 @@
           roiSocket = null;
         }
         stopLogUpdates();
-        if (videoCtx) {
-          videoCtx.clearRect(0, 0, video.width || 0, video.height || 0);
-        }
+        clearCanvas();
         video.width = 0;
         video.height = 0;
+        queueFrameForRender(null);
         rois = [];
         allRois = [];
         roiGrid.innerHTML = '';
@@ -634,21 +714,8 @@
         const wsBase = `${wsScheme}://${location.host}`;
         socket = new WebSocket(`${wsBase}/ws/${cam}`);
         socket.binaryType = 'blob';
-        socket.onmessage = async function(event) {
-          try {
-            const bitmap = await createImageBitmap(event.data);
-            if (video.width !== bitmap.width || video.height !== bitmap.height) {
-              video.width = bitmap.width;
-              video.height = bitmap.height;
-            }
-            if (videoCtx) {
-              videoCtx.clearRect(0, 0, video.width, video.height);
-              videoCtx.drawImage(bitmap, 0, 0);
-            }
-            bitmap.close();
-          } catch (err) {
-            console.error('Failed to render frame', err);
-          }
+        socket.onmessage = function(event) {
+          queueFrameForRender(event.data);
         };
       }
 
