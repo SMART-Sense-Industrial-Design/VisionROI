@@ -8,6 +8,7 @@ import subprocess
 import os
 import logging
 import select
+import re
 from typing import Optional, Tuple
 from queue import Queue, Empty
 from contextlib import contextmanager
@@ -84,6 +85,7 @@ class CameraWorker:
         self._stdout_fd: int | None = None
         self._last_returncode_logged: int | None = None
         self._read_timeout = 4.0  # ทน jitter/collection ช้าบ้าง
+        self._next_resolution_probe = 0.0
 
         # robust state
         self._err_window = deque(maxlen=300)
@@ -283,6 +285,63 @@ class CameraWorker:
             pass
         return None, None
 
+    def _maybe_update_resolution(self) -> bool:
+        """พยายามหาความกว้าง/สูงแบบขี้เกียจในระหว่างรัน (ffmpeg เท่านั้น)."""
+        if self.width and self.height:
+            return True
+
+        if self._maybe_parse_resolution_from_logs():
+            return True
+
+        now = time.monotonic()
+        if now < self._next_resolution_probe:
+            return False
+
+        self._next_resolution_probe = now + 15.0
+
+        src = str(self.src)
+        w, h = self._probe_resolution(src)
+        if not (w and h):
+            w, h = self._probe_with_opencv_once(src)
+        if w and h:
+            self.width, self.height = w, h
+            self._logger.info(
+                "%s inferred resolution %sx%s during runtime", self._log_prefix, w, h
+            )
+            return True
+        return False
+
+    def _maybe_parse_resolution_from_logs(self) -> bool:
+        if self.width and self.height:
+            return True
+        if not self._last_stderr:
+            return False
+
+        pattern = re.compile(r"(\d{2,5})x(\d{2,5})")
+        for line in reversed(self._last_stderr):
+            if "x" not in line:
+                continue
+            match = pattern.search(line)
+            if not match:
+                continue
+            try:
+                w = int(match.group(1))
+                h = int(match.group(2))
+            except Exception:
+                continue
+            if w <= 0 or h <= 0:
+                continue
+            if w < 32 or h < 32:
+                continue
+            if w > 16384 or h > 16384:
+                continue
+            self.width, self.height = w, h
+            self._logger.info(
+                "%s parsed resolution %sx%s from ffmpeg stderr", self._log_prefix, w, h
+            )
+            return True
+        return False
+
     def _drain_stderr(self) -> None:
         """ดูด stderr กันบล็อก และเก็บบรรทัดท้าย ๆ ไว้ดีบัก + ป้อนให้ watchdog"""
         proc = self._proc
@@ -393,18 +452,34 @@ class CameraWorker:
         self._fail_count = 0
         self._err_window.clear()
         self._last_returncode_logged = None
+        self._next_resolution_probe = 0.0
 
     # ---------- lifecycle ----------
 
     def start(self) -> bool:
-        if self.backend == "ffmpeg":
-            if self._proc is None or self._proc.poll() is not None:
-                return False
-        elif self.backend == "opencv":
-            if not self._cap or not self._cap.isOpened():
-                return False
-        else:
+        if self.backend not in {"ffmpeg", "opencv"}:
             raise ValueError(f"Unknown backend: {self.backend}")
+
+        def _backend_ready() -> bool:
+            if self.backend == "ffmpeg":
+                return self._proc is not None and self._proc.poll() is None
+            return bool(self._cap and self._cap.isOpened())
+
+        if not _backend_ready():
+            self._logger.warning(
+                "%s backend not ready during start(); attempting single restart",
+                self._log_prefix,
+            )
+            self._restart_backend()
+
+        if not _backend_ready():
+            self._logger.error(
+                "%s unable to start backend; last stderr: %s",
+                self._log_prefix,
+                self.last_ffmpeg_stderr() if self.backend == "ffmpeg" else "",
+            )
+            return False
+
         if self._thread is None or not self._thread.is_alive():
             self._thread = threading.Thread(target=self._run, daemon=True)
             self._thread.start()
@@ -434,7 +509,24 @@ class CameraWorker:
                     time.sleep(0.05)
                     continue
 
-                if not (self.width and self.height and np is not None):
+                if np is None:
+                    time.sleep(0.03)
+                    continue
+
+                if not (self.width and self.height):
+                    if not self._maybe_update_resolution():
+                        self._fail_count += 1
+                        if self._fail_count in (1, 25) or self._fail_count % 50 == 0:
+                            self._logger.warning(
+                                "%s awaiting resolution discovery; consecutive failures=%d; last stderr: %s",
+                                self._log_prefix,
+                                self._fail_count,
+                                self.last_ffmpeg_stderr(),
+                            )
+                        time.sleep(0.05)
+                        continue
+
+                if not (self.width and self.height):
                     time.sleep(0.03)
                     continue
                 frame_size = self._expected_frame_size()
@@ -575,6 +667,7 @@ class CameraWorker:
 
             self._fail_count = 0
             self._last_returncode_logged = None
+            self._restart_backoff = 0.0
             self._last_frame = frame
             frame_copy = frame
             if self._q.full():
