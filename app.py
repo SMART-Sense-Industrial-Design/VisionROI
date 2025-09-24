@@ -2135,9 +2135,11 @@ async def stop_camera_task(
         if queue_dict is not None:
             queue = queue_dict.pop(cam_id, None)
             if queue is not None:
+                # Drain stale frames before sending the stop sentinel so
+                # websocket consumers still observe the ``None`` item.
+                _drain_queue(queue)
                 with contextlib.suppress(Exception):
                     await asyncio.wait_for(queue.put(None), timeout=0.2)
-                _drain_queue(queue)
 
         inf_task = inference_tasks.get(cam_id)
         roi_task = roi_tasks.get(cam_id)
