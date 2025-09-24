@@ -9,6 +9,7 @@ import os
 import logging
 import select
 import re
+from pathlib import Path
 from typing import Optional, Tuple
 from queue import Queue, Empty
 from contextlib import contextmanager
@@ -86,6 +87,8 @@ class CameraWorker:
         self._last_returncode_logged: int | None = None
         self._read_timeout = 4.0  # ทน jitter/collection ช้าบ้าง
         self._next_resolution_probe = 0.0
+        self._image_path: Path | None = None
+        self._image_frame = None
 
         # robust state
         self._err_window = deque(maxlen=300)
@@ -142,19 +145,42 @@ class CameraWorker:
                         )
 
         elif backend == "opencv":
-            cap = cv2.VideoCapture(src)
-            self._cap = cap
-            with silent():
-                self._cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-            if width:
+            self._image_path = self._maybe_image_path(src)
+            if self._image_path is not None:
+                self._image_frame = cv2.imread(str(self._image_path), cv2.IMREAD_COLOR)
+                if self._image_frame is None:
+                    self._logger.error(
+                        "%s unable to read image file %s", self._log_prefix, self._image_path
+                    )
+            else:
+                cap = cv2.VideoCapture(src)
+                self._cap = cap
                 with silent():
-                    self._cap.set(cv2.CAP_PROP_FRAME_WIDTH, int(width))
-            if height:
-                with silent():
-                    self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, int(height))
+                    self._cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+                if width:
+                    with silent():
+                        self._cap.set(cv2.CAP_PROP_FRAME_WIDTH, int(width))
+                if height:
+                    with silent():
+                        self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, int(height))
 
         else:
             raise ValueError(f"Unknown backend: {backend}")
+
+    def _maybe_image_path(self, src) -> Path | None:
+        if isinstance(src, (str, os.PathLike)):
+            path = Path(src)
+            if path.is_file() and path.suffix.lower() in {
+                ".png",
+                ".jpg",
+                ".jpeg",
+                ".bmp",
+                ".tif",
+                ".tiff",
+                ".webp",
+            }:
+                return path
+        return None
 
     # ---------- ffmpeg capabilities probe ----------
 
@@ -437,18 +463,27 @@ class CameraWorker:
                                 exc,
                             )
             elif self.backend == "opencv":
-                if self._cap is not None and self._cap.isOpened():
-                    try:
-                        self._cap.release()
-                    except Exception:
-                        pass
-                self._cap = cv2.VideoCapture(self.src)
-                with silent():
-                    self._cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-                    if self.width:
-                        self._cap.set(cv2.CAP_PROP_FRAME_WIDTH, int(self.width))
-                    if self.height:
-                        self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, int(self.height))
+                if self._image_path is not None:
+                    self._image_frame = cv2.imread(str(self._image_path), cv2.IMREAD_COLOR)
+                    if self._image_frame is None:
+                        self._logger.error(
+                            "%s unable to read image file %s on restart",
+                            self._log_prefix,
+                            self._image_path,
+                        )
+                else:
+                    if self._cap is not None and self._cap.isOpened():
+                        try:
+                            self._cap.release()
+                        except Exception:
+                            pass
+                    self._cap = cv2.VideoCapture(self.src)
+                    with silent():
+                        self._cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+                        if self.width:
+                            self._cap.set(cv2.CAP_PROP_FRAME_WIDTH, int(self.width))
+                        if self.height:
+                            self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, int(self.height))
         self._fail_count = 0
         self._err_window.clear()
         self._last_returncode_logged = None
@@ -463,6 +498,8 @@ class CameraWorker:
         def _backend_ready() -> bool:
             if self.backend == "ffmpeg":
                 return self._proc is not None and self._proc.poll() is None
+            if self._image_path is not None:
+                return self._image_frame is not None
             return bool(self._cap and self._cap.isOpened())
 
         if not _backend_ready():
@@ -637,31 +674,46 @@ class CameraWorker:
                     continue
 
             elif self.backend == "opencv":
-                if self._cap is None or not self._cap.isOpened():
-                    self._fail_count += 1
-                    if self._fail_count in (1, 10) or self._fail_count % 25 == 0:
-                        self._logger.warning(
-                            "%s OpenCV capture not opened; consecutive failures=%d",
-                            self._log_prefix,
-                            self._fail_count,
-                        )
-                    if self._fail_count > 100:
-                        self._restart_backend()
-                    time.sleep(0.05)
-                    continue
-                ok, frame = self._cap.read()
-                if not ok or frame is None:
-                    self._fail_count += 1
-                    if self._fail_count in (1, 10) or self._fail_count % 25 == 0:
-                        self._logger.warning(
-                            "%s OpenCV read returned empty frame; consecutive failures=%d",
-                            self._log_prefix,
-                            self._fail_count,
-                        )
-                    if self._fail_count > 100:
-                        self._restart_backend()
-                    time.sleep(0.01)
-                    continue
+                if self._image_path is not None:
+                    if self._image_frame is None:
+                        self._fail_count += 1
+                        if self._fail_count in (1, 10) or self._fail_count % 25 == 0:
+                            self._logger.warning(
+                                "%s unable to read still image; consecutive failures=%d",
+                                self._log_prefix,
+                                self._fail_count,
+                            )
+                        if self._fail_count > 100:
+                            self._restart_backend()
+                        time.sleep(0.2)
+                        continue
+                    frame = self._image_frame.copy()
+                else:
+                    if self._cap is None or not self._cap.isOpened():
+                        self._fail_count += 1
+                        if self._fail_count in (1, 10) or self._fail_count % 25 == 0:
+                            self._logger.warning(
+                                "%s OpenCV capture not opened; consecutive failures=%d",
+                                self._log_prefix,
+                                self._fail_count,
+                            )
+                        if self._fail_count > 100:
+                            self._restart_backend()
+                        time.sleep(0.05)
+                        continue
+                    ok, frame = self._cap.read()
+                    if not ok or frame is None:
+                        self._fail_count += 1
+                        if self._fail_count in (1, 10) or self._fail_count % 25 == 0:
+                            self._logger.warning(
+                                "%s OpenCV read returned empty frame; consecutive failures=%d",
+                                self._log_prefix,
+                                self._fail_count,
+                            )
+                        if self._fail_count > 100:
+                            self._restart_backend()
+                        time.sleep(0.01)
+                        continue
             else:
                 raise ValueError(f"Unknown backend: {self.backend}")
 
