@@ -89,6 +89,11 @@ class CameraWorker:
         self._next_resolution_probe = 0.0
         self._image_path: Path | None = None
         self._image_frame = None
+        now = time.monotonic()
+        self._last_frame_at = now
+        self._last_restart_at: float | None = None
+        self._stall_restart_secs = max(6.0, self._read_timeout * 2.5)
+        self._min_restart_interval = 1.5
 
         # robust state
         self._err_window = deque(maxlen=300)
@@ -416,6 +421,22 @@ class CameraWorker:
             remaining -= len(chunk)
         return remaining <= 0
 
+    def _maybe_restart_on_stall(self) -> bool:
+        """ตรวจจับกรณีไม่มีเฟรมสำเร็จเป็นเวลานานแล้วบังคับ restart"""
+        now = time.monotonic()
+        elapsed = now - self._last_frame_at if self._last_frame_at is not None else float("inf")
+        if elapsed < self._stall_restart_secs:
+            return False
+        if self._last_restart_at is not None and now - self._last_restart_at < self._min_restart_interval:
+            return False
+        self._logger.warning(
+            "%s no successful frame for %.1fs; forcing backend restart",
+            self._log_prefix,
+            elapsed,
+        )
+        self._restart_backend()
+        return True
+
     def _restart_backend(self) -> None:
         """พยายามเชื่อมต่อสตรีมใหม่เมื่ออ่านไม่ได้"""
         self._logger.warning("%s restarting backend after failures", self._log_prefix)
@@ -488,6 +509,7 @@ class CameraWorker:
         self._err_window.clear()
         self._last_returncode_logged = None
         self._next_resolution_probe = 0.0
+        self._last_restart_at = time.monotonic()
 
     # ---------- lifecycle ----------
 
@@ -541,6 +563,9 @@ class CameraWorker:
                                 returncode,
                                 self.last_ffmpeg_stderr(),
                             )
+                    if self._maybe_restart_on_stall():
+                        time.sleep(0.1)
+                        continue
                     if self._fail_count > 100:
                         self._restart_backend()
                     time.sleep(0.05)
@@ -560,6 +585,9 @@ class CameraWorker:
                                 self._fail_count,
                                 self.last_ffmpeg_stderr(),
                             )
+                        if self._maybe_restart_on_stall():
+                            time.sleep(0.1)
+                            continue
                         time.sleep(0.05)
                         continue
 
@@ -576,12 +604,18 @@ class CameraWorker:
                             self._ffmpeg_pix_fmt,
                             self._fail_count,
                         )
+                    if self._maybe_restart_on_stall():
+                        time.sleep(0.1)
+                        continue
                     time.sleep(0.05)
                     continue
 
                 stdout = self._proc.stdout
                 if stdout is None:
                     self._fail_count += 1
+                    if self._maybe_restart_on_stall():
+                        time.sleep(0.1)
+                        continue
                     if self._fail_count > 100:
                         self._restart_backend()
                     time.sleep(0.05)
@@ -652,6 +686,9 @@ class CameraWorker:
                             frame_size,
                             self._fail_count,
                         )
+                    if self._maybe_restart_on_stall():
+                        time.sleep(0.1)
+                        continue
                     if self._fail_count > 100:
                         self._restart_backend()
                     time.sleep(0.01)
@@ -668,6 +705,9 @@ class CameraWorker:
                             self._log_prefix,
                             self._fail_count,
                         )
+                    if self._maybe_restart_on_stall():
+                        time.sleep(0.1)
+                        continue
                     if self._fail_count > 100:
                         self._restart_backend()
                     time.sleep(0.01)
@@ -683,6 +723,9 @@ class CameraWorker:
                                 self._log_prefix,
                                 self._fail_count,
                             )
+                        if self._maybe_restart_on_stall():
+                            time.sleep(0.1)
+                            continue
                         if self._fail_count > 100:
                             self._restart_backend()
                         time.sleep(0.2)
@@ -697,6 +740,9 @@ class CameraWorker:
                                 self._log_prefix,
                                 self._fail_count,
                             )
+                        if self._maybe_restart_on_stall():
+                            time.sleep(0.1)
+                            continue
                         if self._fail_count > 100:
                             self._restart_backend()
                         time.sleep(0.05)
@@ -710,6 +756,9 @@ class CameraWorker:
                                 self._log_prefix,
                                 self._fail_count,
                             )
+                        if self._maybe_restart_on_stall():
+                            time.sleep(0.1)
+                            continue
                         if self._fail_count > 100:
                             self._restart_backend()
                         time.sleep(0.01)
@@ -721,6 +770,7 @@ class CameraWorker:
             self._last_returncode_logged = None
             self._restart_backoff = 0.0
             self._last_frame = frame
+            self._last_frame_at = time.monotonic()
             frame_copy = frame
             if self._q.full():
                 with silent():
