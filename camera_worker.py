@@ -9,6 +9,7 @@ import os
 import logging
 import select
 import re
+import errno
 from pathlib import Path
 from typing import Optional, Tuple
 from queue import Queue, Empty
@@ -416,29 +417,47 @@ class CameraWorker:
             remaining -= len(chunk)
         return remaining <= 0
 
+    def _cleanup_ffmpeg_process(self) -> None:
+        """ปิดโปรเซส ffmpeg และ thread ที่เกี่ยวข้องอย่างปลอดภัย."""
+        proc = self._proc
+        self._proc = None
+        try:
+            if proc is not None:
+                with silent():
+                    if proc.stdout:
+                        proc.stdout.close()
+                    if proc.stderr:
+                        proc.stderr.close()
+                with silent():
+                    proc.terminate()
+                    proc.wait(timeout=0.8)
+        except subprocess.TimeoutExpired:
+            with silent():
+                if proc is not None:
+                    proc.kill()
+        except Exception:
+            with silent():
+                if proc is not None:
+                    proc.kill()
+        if self._stderr_thread and self._stderr_thread.is_alive():
+            with silent():
+                self._stderr_thread.join(timeout=0.2)
+        self._stderr_thread = None
+        self._stdout_fd = None
+
     def _restart_backend(self) -> None:
         """พยายามเชื่อมต่อสตรีมใหม่เมื่ออ่านไม่ได้"""
         self._logger.warning("%s restarting backend after failures", self._log_prefix)
         with silent():
             if self.backend == "ffmpeg":
-                if self._proc is not None:
-                    try:
-                        if self._proc.stdout:
-                            self._proc.stdout.close()
-                        if self._proc.stderr:
-                            self._proc.stderr.close()
-                        self._proc.terminate()
-                        self._proc.wait(timeout=0.5)
-                    except Exception:
-                        try:
-                            self._proc.kill()
-                        except Exception:
-                            pass
+                self._cleanup_ffmpeg_process()
                 if self._ffmpeg_cmd is not None:
                     # exponential backoff (สูงสุด ~2s) ช่วยหลบช่วง jitter หนัก
                     if self._restart_backoff > 0:
                         time.sleep(min(self._restart_backoff, 2.0))
                     self._restart_backoff = min(self._restart_backoff * 2 + 0.1, 2.0) if self._restart_backoff else 0.2
+                    if len(self._rtsp_transport_cycle) > 1:
+                        self._rtsp_transport_idx = (self._rtsp_transport_idx + 1) % len(self._rtsp_transport_cycle)
                     # สร้างคำสั่งใหม่ (เผื่อมีการสลับ transport)
                     self._ffmpeg_cmd = self._build_ffmpeg_cmd(str(self.src))
                     self._proc = subprocess.Popen(
@@ -626,12 +645,31 @@ class CameraWorker:
                             )
                             break
                         continue
+                    except OSError as exc:
+                        if exc.errno in (errno.EBADF, errno.EPIPE, errno.EIO):
+                            self._logger.warning(
+                                "%s read from ffmpeg stdout failed with errno=%s; restarting backend",
+                                self._log_prefix,
+                                exc.errno,
+                            )
+                            self._restart_backend()
+                            time.sleep(0.1)
+                            buffer.clear()
+                            break
+                        self._logger.warning(
+                            "%s unexpected OSError while reading stdout: %s",
+                            self._log_prefix,
+                            exc,
+                        )
+                        break
                     if not chunk:
                         break
                     buffer.extend(chunk)
                     start_wait = time.monotonic()
 
                 if len(buffer) != frame_size:
+                    if not buffer:
+                        continue
                     if 0 < len(buffer) < frame_size:
                         leftover = frame_size - len(buffer)
                         if not self._flush_partial_ffmpeg_frame(fd, leftover):
@@ -754,31 +792,7 @@ class CameraWorker:
                 await asyncio.to_thread(self._thread.join, 0.5)
 
         if self.backend == "ffmpeg":
-            with silent():
-                if self._proc is not None:
-                    try:
-                        # ปิด stdout/stderr ก่อน เพื่อปลดบล็อก thread/reader
-                        if self._proc.stdout:
-                            self._proc.stdout.close()
-                        if self._proc.stderr:
-                            self._proc.stderr.close()
-                    except Exception:
-                        pass
-                    try:
-                        self._proc.terminate()
-                        self._proc.wait(timeout=0.8)
-                    except Exception:
-                        try:
-                            self._proc.kill()
-                        except Exception:
-                            pass
-            self._proc = None
-
-            with silent():
-                if self._stderr_thread and self._stderr_thread.is_alive():
-                    self._stderr_thread.join(timeout=0.2)
-            self._stderr_thread = None
-            self._stdout_fd = None
+            self._cleanup_ffmpeg_process()
 
         elif self.backend == "opencv":
             with silent():
