@@ -79,7 +79,6 @@ class CameraWorker:
         self._stop_evt = threading.Event()
         self._thread: Optional[threading.Thread] = None
         self._q: Queue = Queue(maxsize=1)
-        self._last_frame = None
         self._fail_count = 0
         self._ffmpeg_cmd = None
         self._ffmpeg_pix_fmt: str | None = None
@@ -89,11 +88,20 @@ class CameraWorker:
         self._next_resolution_probe = 0.0
         self._image_path: Path | None = None
         self._image_frame = None
+        self._frame_interval_avg: float | None = None
+        self._stall_frame_factor = 3.0
+        self._freeze_frame_factor = 6.0
+        self._freeze_detection_enabled = robust
         now = time.monotonic()
-        self._last_frame_at = now
         self._last_restart_at: float | None = None
-        self._stall_restart_secs = max(6.0, self._read_timeout * 2.5)
+        self._stall_base_secs = max(6.0, self._read_timeout * 2.5)
         self._min_restart_interval = 1.5
+        self._last_frame = None
+        self._last_frame_at: float | None = None
+        self._last_frame_signature = None
+        self._last_frame_change_at: float | None = None
+        self._unchanged_frame_count = 0
+        self._reset_frame_metrics(now)
 
         # robust state
         self._err_window = deque(maxlen=300)
@@ -152,6 +160,7 @@ class CameraWorker:
         elif backend == "opencv":
             self._image_path = self._maybe_image_path(src)
             if self._image_path is not None:
+                self._freeze_detection_enabled = False
                 self._image_frame = cv2.imread(str(self._image_path), cv2.IMREAD_COLOR)
                 if self._image_frame is None:
                     self._logger.error(
@@ -239,6 +248,15 @@ class CameraWorker:
                 cmd += ["-stimeout", "5000000"]    # 5s
             elif "timeout" in self._ff_rtsp_opts:
                 cmd += ["-timeout", "5000000"]
+            # auto reconnect (ลดหลุดชั่วคราว)
+            cmd += [
+                "-reconnect",
+                "1",
+                "-reconnect_streamed",
+                "1",
+                "-reconnect_delay_max",
+                "4",
+            ]
 
         # วิเคราะห์สตรีมพอประมาณ
         cmd += ["-probesize", "16M", "-analyzeduration", "2M"]
@@ -421,18 +439,98 @@ class CameraWorker:
             remaining -= len(chunk)
         return remaining <= 0
 
-    def _maybe_restart_on_stall(self) -> bool:
+    def _reset_frame_metrics(self, now: Optional[float] = None) -> None:
+        if now is None:
+            now = time.monotonic()
+        self._last_frame = None
+        self._last_frame_at = now
+        self._last_frame_signature = None
+        self._last_frame_change_at = now
+        self._unchanged_frame_count = 0
+        self._frame_interval_avg = None
+
+    def _compute_stall_threshold(self) -> float:
+        threshold = self._stall_base_secs
+        if self._frame_interval_avg:
+            threshold = max(threshold, self._frame_interval_avg * self._stall_frame_factor)
+        return threshold
+
+    def _freeze_threshold(self) -> float:
+        threshold = self._stall_base_secs
+        if self._frame_interval_avg:
+            threshold = max(threshold, self._frame_interval_avg * self._freeze_frame_factor)
+        return threshold
+
+    def _compute_frame_signature(self, frame) -> Optional[bytes | int]:
+        if frame is None:
+            return None
+        if np is not None:
+            try:
+                arr = np.asarray(frame)
+                if arr.size == 0:
+                    return None
+                arr = np.ascontiguousarray(arr)
+                small = cv2.resize(arr, (8, 8), interpolation=cv2.INTER_AREA)
+                return small.tobytes()
+            except Exception:
+                pass
+        try:
+            return hash(frame.tobytes())
+        except Exception:
+            return None
+
+    def _update_frame_metrics(self, frame, now: float) -> bool:
+        prev = self._last_frame_at
+        if prev is not None:
+            interval = max(0.0, now - prev)
+            if interval > 0:
+                if self._frame_interval_avg is None:
+                    self._frame_interval_avg = interval
+                else:
+                    alpha = 0.2
+                    self._frame_interval_avg = (
+                        (1 - alpha) * self._frame_interval_avg + alpha * interval
+                    )
+        changed = True
+        if self._freeze_detection_enabled:
+            signature = self._compute_frame_signature(frame)
+            if signature is not None and signature == self._last_frame_signature:
+                changed = False
+                self._unchanged_frame_count += 1
+            else:
+                self._last_frame_signature = signature
+                self._last_frame_change_at = now
+                self._unchanged_frame_count = 0
+        else:
+            self._last_frame_change_at = now
+            self._unchanged_frame_count = 0
+            self._last_frame_signature = None
+        return changed
+
+    def _maybe_restart_on_stall(
+        self,
+        elapsed: Optional[float] = None,
+        threshold: Optional[float] = None,
+        reason: str = "no successful frame",
+        now: Optional[float] = None,
+    ) -> bool:
         """ตรวจจับกรณีไม่มีเฟรมสำเร็จเป็นเวลานานแล้วบังคับ restart"""
-        now = time.monotonic()
-        elapsed = now - self._last_frame_at if self._last_frame_at is not None else float("inf")
-        if elapsed < self._stall_restart_secs:
+        if now is None:
+            now = time.monotonic()
+        if elapsed is None:
+            elapsed = now - self._last_frame_at if self._last_frame_at is not None else float("inf")
+        if threshold is None:
+            threshold = self._compute_stall_threshold()
+        if elapsed < threshold:
             return False
         if self._last_restart_at is not None and now - self._last_restart_at < self._min_restart_interval:
             return False
         self._logger.warning(
-            "%s no successful frame for %.1fs; forcing backend restart",
+            "%s %s for %.1fs (threshold=%.1fs); forcing backend restart",
             self._log_prefix,
+            reason,
             elapsed,
+            threshold,
         )
         self._restart_backend()
         return True
@@ -510,7 +608,9 @@ class CameraWorker:
         self._err_window.clear()
         self._last_returncode_logged = None
         self._next_resolution_probe = 0.0
-        self._last_restart_at = time.monotonic()
+        now = time.monotonic()
+        self._last_restart_at = now
+        self._reset_frame_metrics(now)
 
     # ---------- lifecycle ----------
 
@@ -778,11 +878,29 @@ class CameraWorker:
             else:
                 raise ValueError(f"Unknown backend: {self.backend}")
 
+            now = time.monotonic()
+            changed = self._update_frame_metrics(frame, now)
+            if (
+                self._freeze_detection_enabled
+                and not changed
+                and self._last_frame_change_at is not None
+            ):
+                unchanged_duration = max(0.0, now - self._last_frame_change_at)
+                freeze_threshold = self._freeze_threshold()
+                if self._maybe_restart_on_stall(
+                    elapsed=unchanged_duration,
+                    threshold=freeze_threshold,
+                    reason="frames unchanged",
+                    now=now,
+                ):
+                    time.sleep(0.1)
+                    continue
+
             self._fail_count = 0
             self._last_returncode_logged = None
             self._restart_backoff = 0.0
             self._last_frame = frame
-            self._last_frame_at = time.monotonic()
+            self._last_frame_at = now
             frame_copy = frame
             if self._q.full():
                 with silent():
