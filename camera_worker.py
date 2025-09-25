@@ -117,6 +117,7 @@ class CameraWorker:
         # cache capability probes (ตรวจครั้งเดียว)
         self._ff_caps_checked = False
         self._ff_rtsp_opts: set[str] = set()
+        self._ff_common_opts: set[str] = set()
 
         self._logger.info("%s initializing camera worker", self._log_prefix)
 
@@ -216,9 +217,23 @@ class CameraWorker:
         except Exception:
             pass
 
+        try:
+            out = subprocess.run(
+                ["ffmpeg", "-hide_banner", "-h"],
+                capture_output=True, text=True, check=False
+            )
+            text = (out.stdout or "") + (out.stderr or "")
+            for opt in ("reconnect", "reconnect_streamed", "reconnect_delay_max"):
+                if f"-{opt}" in text or f" {opt}" in text:
+                    self._ff_common_opts.add(opt)
+        except Exception:
+            pass
+
         self._logger.info(
-            "%s ffmpeg caps: rtsp_opts=%s",
-            self._log_prefix, sorted(self._ff_rtsp_opts)
+            "%s ffmpeg caps: rtsp_opts=%s, common_opts=%s",
+            self._log_prefix,
+            sorted(self._ff_rtsp_opts),
+            sorted(self._ff_common_opts),
         )
 
     # ---------- ffmpeg command builder ----------
@@ -249,14 +264,15 @@ class CameraWorker:
             elif "timeout" in self._ff_rtsp_opts:
                 cmd += ["-timeout", "5000000"]
             # auto reconnect (ลดหลุดชั่วคราว)
-            cmd += [
-                "-reconnect",
-                "1",
-                "-reconnect_streamed",
-                "1",
-                "-reconnect_delay_max",
-                "4",
-            ]
+            if {"reconnect", "reconnect_streamed", "reconnect_delay_max"}.issubset(self._ff_common_opts):
+                cmd += [
+                    "-reconnect",
+                    "1",
+                    "-reconnect_streamed",
+                    "1",
+                    "-reconnect_delay_max",
+                    "4",
+                ]
 
         # วิเคราะห์สตรีมพอประมาณ
         cmd += ["-probesize", "16M", "-analyzeduration", "2M"]
