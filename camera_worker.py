@@ -6,6 +6,7 @@ import asyncio
 import gc
 import subprocess
 import os
+import signal
 import logging
 import select
 import re
@@ -57,6 +58,9 @@ class CameraWorker:
         robust: bool = True,        # เปิด watchdog + fallback transport
         low_latency: bool = False,  # โหมดหน่วงต่ำ (ยอม jitter/เฟรมเสียได้มากขึ้น)
         loglevel: str = "error",    # ลดสแปม log จาก ffmpeg
+        # === พารามิเตอร์ watchdog ===
+        err_window_secs: float = 5.0,
+        err_threshold: int = 25,    # จำนวน error ใน err_window_secs ที่จะทริกเกอร์การรีสตาร์ท/สลับ transport
     ) -> None:
         self.src = src
         self.loop = loop
@@ -92,8 +96,8 @@ class CameraWorker:
 
         # robust state
         self._err_window = deque(maxlen=300)
-        self._err_window_secs = 5.0
-        self._err_threshold = 25
+        self._err_window_secs = float(err_window_secs)
+        self._err_threshold = int(err_threshold)
         self._last_err_prune = 0.0
         self._restart_backoff = 0.0  # exponential backoff ก่อน restart ffmpeg
 
@@ -215,7 +219,7 @@ class CameraWorker:
         - บังคับ TCP ก่อน ถ้าแตกเยอะจะ fallback ไป UDP อัตโนมัติ (ถ้า build รองรับ)
         - genpts/max_delay เพื่อทน jitter
         - timeout (เฉพาะที่รองรับจริง) ป้องกันแฮงก์
-        - ไม่ตั้ง -c:v ใด ๆ (กันไปชนเอาต์พุต)
+        - อ่าน stdout เป็น rawvideo/bgr24
         """
         cmd = ["ffmpeg", "-hide_banner", "-loglevel", self._loglevel, "-nostdin"]
 
@@ -231,7 +235,7 @@ class CameraWorker:
             if "rw_timeout" in self._ff_rtsp_opts:
                 cmd += ["-rw_timeout", "5000000"]  # 5s
             elif "stimeout" in self._ff_rtsp_opts:
-                cmd += ["-stimeout", "5000000"]    # 5s
+                cmd += ["-stimeout", "5000000"]    # 5s (ไมโครวินาที)
             elif "timeout" in self._ff_rtsp_opts:
                 cmd += ["-timeout", "5000000"]
 
@@ -240,7 +244,7 @@ class CameraWorker:
 
         # โปรไฟล์ robust/low_latency
         if self.low_latency:
-            cmd += ["-fflags", "+discardcorrupt", "-flags", "low_delay", "-fflags", "nobuffer"]
+            cmd += ["-fflags", "+discardcorrupt+nobuffer", "-flags", "low_delay", "-fflags", "nobuffer"]
         else:
             cmd += ["-fflags", "+discardcorrupt+genpts"]
             cmd += ["-max_delay", "500000"]  # 500ms
@@ -416,24 +420,54 @@ class CameraWorker:
             remaining -= len(chunk)
         return remaining <= 0
 
+    # ---------- process termination (process group safe) ----------
+
+    def _terminate_proc_tree(self, proc: subprocess.Popen, grace: float = 0.8) -> None:
+        """ส่งสัญญาณไปทั้ง process group เพื่อล้างตัวลูก demux/decoder ให้หมด"""
+        if proc is None:
+            return
+        try:
+            pid = proc.pid
+            if pid:
+                pgid = os.getpgid(pid)
+                try:
+                    os.killpg(pgid, signal.SIGTERM)
+                except Exception:
+                    # ถ้า kill group ไม่ได้ ลองเฉพาะโปรเซส
+                    with silent():
+                        proc.terminate()
+                try:
+                    proc.wait(timeout=grace)
+                except Exception:
+                    with silent():
+                        if pid:
+                            try:
+                                os.killpg(pgid, signal.SIGKILL)
+                            except Exception:
+                                proc.kill()
+        except Exception:
+            with silent():
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
+
     def _restart_backend(self) -> None:
         """พยายามเชื่อมต่อสตรีมใหม่เมื่ออ่านไม่ได้"""
         self._logger.warning("%s restarting backend after failures", self._log_prefix)
         with silent():
             if self.backend == "ffmpeg":
                 if self._proc is not None:
+                    # ปิด stdout/stderr ก่อน แล้ว terminate ทั้ง group ให้สะอาด
                     try:
                         if self._proc.stdout:
                             self._proc.stdout.close()
                         if self._proc.stderr:
                             self._proc.stderr.close()
-                        self._proc.terminate()
-                        self._proc.wait(timeout=0.5)
                     except Exception:
-                        try:
-                            self._proc.kill()
-                        except Exception:
-                            pass
+                        pass
+                    self._terminate_proc_tree(self._proc, grace=0.5)
+
                 if self._ffmpeg_cmd is not None:
                     # exponential backoff (สูงสุด ~2s) ช่วยหลบช่วง jitter หนัก
                     if self._restart_backoff > 0:
@@ -764,14 +798,8 @@ class CameraWorker:
                             self._proc.stderr.close()
                     except Exception:
                         pass
-                    try:
-                        self._proc.terminate()
-                        self._proc.wait(timeout=0.8)
-                    except Exception:
-                        try:
-                            self._proc.kill()
-                        except Exception:
-                            pass
+                    # ปิดทั้ง process group ให้สะอาด
+                    self._terminate_proc_tree(self._proc, grace=0.8)
             self._proc = None
 
             with silent():
