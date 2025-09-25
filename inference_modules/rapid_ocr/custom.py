@@ -15,14 +15,22 @@ import gc
 from src.utils.logger import get_logger
 from src.utils.image import save_image_async
 
-
-
 from inference_modules.base_ocr import BaseOCR, np, Image, cv2
 
+# ------------------------------
+# RapidOCR (ONNXRuntime) backend
+# ------------------------------
 try:
-    from rapidocr import RapidOCR as RapidOCRLib
-except Exception:  # pragma: no cover - fallback when rapidocr missing
+    # เปลี่ยนมาใช้ rapidocr_onnxruntime
+    from rapidocr_onnxruntime import RapidOCR as RapidOCRLib  # type: ignore
+except Exception:  # pragma: no cover - fallback when rapidocr_onnxruntime missing
     RapidOCRLib = None  # type: ignore[assignment]
+
+# onnxruntime ใช้สำหรับตรวจสอบ/เลือก EP
+try:
+    import onnxruntime as ort
+except Exception:
+    ort = None  # type: ignore
 
 MODULE_NAME = "rapid_ocr"
 logger = logging.getLogger(MODULE_NAME)
@@ -32,15 +40,79 @@ _data_sources_root = Path(__file__).resolve().parents[2] / "data_sources"
 _reader = None
 _reader_lock = threading.Lock()
 
+# ค่าดีฟอลต์ของ ORT/TensorRT (สามารถ override ได้ด้วย env ภายนอก)
+def _ensure_default_ort_envs() -> None:
+    os.environ.setdefault("ORT_TENSORRT_ENGINE_CACHE_ENABLE", "1")
+    os.environ.setdefault("ORT_TENSORRT_ENGINE_CACHE_PATH", str((_data_sources_root / "trt_cache").resolve()))
+    # เปิด FP16 บน Jetson (หากต้องการปิด ให้ตั้งค่าเป็น "0" ภายนอก)
+    os.environ.setdefault("ORT_TENSORRT_FP16_ENABLE", "1")
+
+
+def _choose_providers() -> list[str]:
+    """
+    เลือก EP ตามความพร้อมของระบบโดยเรียงลำดับความเร็ว:
+    TensorRT -> CUDA -> CPU
+    สามารถ override ด้วย env: RAPIDOCR_ORT_PROVIDERS="TensorrtExecutionProvider,CUDAExecutionProvider,CPUExecutionProvider"
+    """
+    # ถ้าผู้ใช้กำหนดเองผ่าน env ให้เคารพตามนั้น
+    env_val = os.getenv("RAPIDOCR_ORT_PROVIDERS")
+    if env_val:
+        providers = [p.strip() for p in env_val.split(",") if p.strip()]
+        return providers
+
+    available = []
+    if ort is not None:
+        try:
+            available = ort.get_available_providers()
+        except Exception:
+            available = []
+
+    # ลิสต์เป้าหมายตามลำดับความต้องการ
+    preferred = [
+        "TensorrtExecutionProvider",
+        "CUDAExecutionProvider",
+        "CPUExecutionProvider",
+    ]
+
+    if not available:
+        # ถ้าเช็คไม่ได้ ให้ส่ง preferred ไปก่อน (RapidOCR/ORT จะจัดการเอง)
+        return preferred
+
+    # เลือกเฉพาะที่ระบบมี
+    chosen = [p for p in preferred if p in available]
+    # เผื่อกรณีไม่มีสักอย่าง ให้ใช้ CPUExecutionProvider เป็น fallback
+    if "CPUExecutionProvider" not in chosen:
+        chosen.append("CPUExecutionProvider")
+    return chosen
+
+
+def _new_reader_instance() -> Any:
+    """สร้างอินสแตนซ์ RapidOCRLib (onnxruntime backend) พร้อม providers"""
+    if RapidOCRLib is None:
+        raise RuntimeError("rapidocr_onnxruntime is not installed")
+
+    _ensure_default_ort_envs()
+    providers = _choose_providers()
+    logger.info(f"[RapidOCR-ORT] selected providers={providers}")
+
+    # RapidOCR (onnxruntime) รองรับพารามิเตอร์ providers
+    try:
+        reader = RapidOCRLib(providers=providers)  # type: ignore[call-arg]
+    except TypeError:
+        # เผื่อเวอร์ชันที่ไม่รองรับ providers ใน constructor
+        # (ส่วนใหญ่รองรับ แต่ใส่ fallback เฉยๆ)
+        reader = RapidOCRLib()  # type: ignore[call-arg]
+    return reader
+
 
 def _get_reader():
     """สร้างและคืนค่า RapidOCR แบบ singleton"""
     if RapidOCRLib is None:
-        raise RuntimeError("rapidocr library is not installed")
+        raise RuntimeError("rapidocr_onnxruntime library is not installed")
     global _reader
     with _reader_lock:
         if _reader is None:
-            _reader = RapidOCRLib()
+            _reader = _new_reader_instance()
         return _reader
 
 
@@ -54,10 +126,10 @@ class RapidOCR(BaseOCR):
 
     def _get_reader(self):
         if RapidOCRLib is None:
-            raise RuntimeError("rapidocr library is not installed")
+            raise RuntimeError("rapidocr_onnxruntime library is not installed")
         with self._reader_lock:
             if self._reader is None:
-                self._reader = RapidOCRLib()
+                self._reader = _new_reader_instance()
             return self._reader
 
     def _run_ocr(self, frame, roi_id, save: bool, source: str) -> str:
@@ -261,4 +333,3 @@ def cleanup() -> None:
         last_ocr_results.clear()
 
     gc.collect()
-
