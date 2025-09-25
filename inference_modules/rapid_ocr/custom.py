@@ -4,7 +4,7 @@ import time
 from collections import deque
 from collections.abc import Iterable
 from typing import Any
-from PIL import Image as PILImage  # ป้องกันชนกับ base_ocr.Image
+from PIL import Image
 import cv2
 import logging
 import os
@@ -15,35 +15,9 @@ import gc
 from src.utils.logger import get_logger
 from src.utils.image import save_image_async
 
-from inference_modules.base_ocr import BaseOCR, np, Image, cv2  # ใช้ Image, cv2 จาก base_ocr
 
-# -------------------- ORT GPU on Jetson: compatibility + preference --------------------
-# 1) ตั้งค่าที่ปลอดภัยบน Jetson (ปรับได้ตามเครื่อง)
-os.environ.setdefault("OMP_NUM_THREADS", "1")
-os.environ.setdefault("ORT_DISABLE_THREAD_SPIN", "1")
-# หากใช้ TensorRT EP บน Jetson และต้องการ cache engine
-os.environ.setdefault("ORT_TENSORRT_ENGINE_CACHE_ENABLE", "1")
-os.environ.setdefault("ORT_TENSORRT_FP16_ENABLE", "1")  # ปิดเป็น "0" หากต้อง FP32 เท่านั้น
-os.environ.setdefault("ORT_TENSORRT_ENGINE_CACHE_PATH", "/tmp/ort_trt_cache")
 
-# 2) ORT shim: เติม GraphOptimizationLevel หาก wheel ที่ติดตั้งไม่มี enum นี้
-#    ทำก่อน import RapidOCRLib เพื่อให้ "from onnxruntime import GraphOptimizationLevel" ภายใน rapidocr ผ่าน
-import sys
-
-try:
-    import onnxruntime as _ort  # type: ignore
-    if not hasattr(_ort, "GraphOptimizationLevel"):
-        class _GOL:
-            ORT_DISABLE_ALL = 0
-            ORT_ENABLE_BASIC = 1
-            ORT_ENABLE_EXTENDED = 2
-            ORT_ENABLE_ALL = 99
-        _ort.GraphOptimizationLevel = _GOL  # type: ignore[attr-defined]
-        sys.modules["onnxruntime"] = _ort
-except Exception:
-    # ให้ RapidOCR โยนข้อผิดพลาดตามเดิมถ้า ORT import ไม่ได้เลย
-    pass
-# --------------------------------------------------------------------------------------
+from inference_modules.base_ocr import BaseOCR, np, Image, cv2
 
 try:
     from rapidocr import RapidOCR as RapidOCRLib
@@ -55,35 +29,17 @@ logger = logging.getLogger(MODULE_NAME)
 logger.setLevel(logging.INFO)
 _data_sources_root = Path(__file__).resolve().parents[2] / "data_sources"
 
-_reader: Any | None = None
+_reader = None
 _reader_lock = threading.Lock()
-
-# ตัวแปรควบคุมเวลาเรียก OCR แยกตาม roi พร้อมตัวล็อกป้องกันการเข้าถึงพร้อมกัน
-last_ocr_times: dict[Any, float] = {}
-last_ocr_results: dict[Any, str] = {}
-_last_ocr_lock = threading.Lock()
 
 
 def _get_reader():
     """สร้างและคืนค่า RapidOCR แบบ singleton"""
     if RapidOCRLib is None:
         raise RuntimeError("rapidocr library is not installed")
-
     global _reader
     with _reader_lock:
         if _reader is None:
-            # บันทึกข้อมูล ORT ที่โหลดจริงเพื่อดีบักให้ชัดเจน
-            try:
-                import onnxruntime as ort
-                ort_ver = getattr(ort, "__version__", "unknown")
-                providers = getattr(ort, "get_available_providers", lambda: [])()
-                logger.info(
-                    "[RapidOCR] onnxruntime version=%s providers=%s has_GraphOptimizationLevel=%s",
-                    ort_ver, providers, hasattr(ort, "GraphOptimizationLevel"),
-                )
-            except Exception:
-                logger.warning("[RapidOCR] onnxruntime precheck failed", exc_info=True)
-
             _reader = RapidOCRLib()
         return _reader
 
@@ -94,24 +50,13 @@ class RapidOCR(BaseOCR):
     def __init__(self) -> None:
         super().__init__()
         self._reader_lock = threading.Lock()
-        self._reader: Any | None = None
+        self._reader = None
 
     def _get_reader(self):
         if RapidOCRLib is None:
             raise RuntimeError("rapidocr library is not installed")
         with self._reader_lock:
             if self._reader is None:
-                # precheck ORT ภายในอินสแตนซ์
-                try:
-                    import onnxruntime as ort
-                    ort_ver = getattr(ort, "__version__", "unknown")
-                    providers = getattr(ort, "get_available_providers", lambda: [])()
-                    self.logger.info(
-                        "[RapidOCR] (instance) onnxruntime version=%s providers=%s has_GraphOptimizationLevel=%s",
-                        ort_ver, providers, hasattr(ort, "GraphOptimizationLevel"),
-                    )
-                except Exception:
-                    self.logger.warning("[RapidOCR] (instance) onnxruntime precheck failed", exc_info=True)
                 self._reader = RapidOCRLib()
             return self._reader
 
@@ -146,6 +91,11 @@ class RapidOCR(BaseOCR):
         with _last_ocr_lock:
             last_ocr_times.clear()
             last_ocr_results.clear()
+
+# ตัวแปรควบคุมเวลาเรียก OCR แยกตาม roi พร้อมตัวล็อกป้องกันการเข้าถึงพร้อมกัน
+last_ocr_times: dict = {}
+last_ocr_results: dict = {}
+_last_ocr_lock = threading.Lock()
 
 
 def _normalise_reader_output(result: Any) -> Any:
@@ -281,7 +231,7 @@ def process(
         except Exception:  # pragma: no cover
             pass
 
-    if isinstance(frame, PILImage) and np is not None:
+    if isinstance(frame, Image.Image) and np is not None:
         frame = cv2.cvtColor(np.array(frame), cv2.COLOR_RGB2BGR)
 
     current_time = time.monotonic()
@@ -311,3 +261,4 @@ def cleanup() -> None:
         last_ocr_results.clear()
 
     gc.collect()
+
