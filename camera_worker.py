@@ -624,6 +624,7 @@ class CameraWorker:
                 buffer = bytearray()
                 start_wait = time.monotonic()
                 fd = self._stdout_fd or stdout.fileno()
+                read_error = False
                 while len(buffer) < frame_size and not self._stop_evt.is_set():
                     remaining = frame_size - len(buffer)
                     wait_time = max(0.1, min(0.5, self._read_timeout))
@@ -660,10 +661,52 @@ class CameraWorker:
                             )
                             break
                         continue
+                    except OSError as exc:
+                        self._logger.warning(
+                            "%s os.read failed while collecting frame (%d/%d bytes): %s",
+                            self._log_prefix,
+                            len(buffer),
+                            frame_size,
+                            exc,
+                        )
+                        leftover = frame_size - len(buffer)
+                        if leftover > 0:
+                            with silent():
+                                self._flush_partial_ffmpeg_frame(fd, leftover)
+                        buffer.clear()
+                        read_error = True
+                        break
+                    except Exception as exc:
+                        self._logger.warning(
+                            "%s unexpected error reading ffmpeg stdout (%d/%d bytes): %s",
+                            self._log_prefix,
+                            len(buffer),
+                            frame_size,
+                            exc,
+                        )
+                        leftover = frame_size - len(buffer)
+                        if leftover > 0:
+                            with silent():
+                                self._flush_partial_ffmpeg_frame(fd, leftover)
+                        buffer.clear()
+                        read_error = True
+                        break
                     if not chunk:
                         break
                     buffer.extend(chunk)
                     start_wait = time.monotonic()
+
+                if read_error:
+                    self._fail_count += 1
+                    if self._fail_count in (1, 10) or self._fail_count % 25 == 0:
+                        self._logger.warning(
+                            "%s restarting backend after read error; consecutive failures=%d",
+                            self._log_prefix,
+                            self._fail_count,
+                        )
+                    self._restart_backend()
+                    time.sleep(0.05)
+                    continue
 
                 if len(buffer) != frame_size:
                     if 0 < len(buffer) < frame_size:
