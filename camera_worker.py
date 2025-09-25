@@ -10,6 +10,7 @@ import logging
 import select
 import re
 import errno
+from urllib.parse import urlparse
 from pathlib import Path
 from typing import Optional, Tuple
 from queue import Queue, Empty
@@ -77,6 +78,12 @@ class CameraWorker:
         self._logger = logging.getLogger("camera_worker")
         self._log_prefix = f"[{backend}:{src}]"
 
+        # RTSP transport / port state
+        self._rtsp_port: int | None = None
+        self._rtsp_transport_cycle: list[str] = []
+        self._rtsp_transport_idx = 0
+        self._configure_rtsp_transports(str(src))
+
         self._stop_evt = threading.Event()
         self._thread: Optional[threading.Thread] = None
         self._q: Queue = Queue(maxsize=1)
@@ -97,10 +104,6 @@ class CameraWorker:
         self._err_threshold = 25
         self._last_err_prune = 0.0
         self._restart_backoff = 0.0  # exponential backoff ก่อน restart ffmpeg
-
-        # วน fallback: transport (tcp <-> udp) ถ้า build รองรับ
-        self._rtsp_transport_cycle = ["tcp", "udp"] if robust else ["tcp"]
-        self._rtsp_transport_idx = 0
 
         # cache capability probes (ตรวจครั้งเดียว)
         self._ff_caps_checked = False
@@ -220,8 +223,11 @@ class CameraWorker:
         """
         cmd = ["ffmpeg", "-hide_banner", "-loglevel", self._loglevel, "-nostdin"]
 
-        transport = self._rtsp_transport_cycle[self._rtsp_transport_idx]
-        if self._is_rtsp(src):
+        transport = "tcp"
+        if self._is_rtsp(src) and self._rtsp_transport_cycle:
+            if self._rtsp_transport_idx >= len(self._rtsp_transport_cycle):
+                self._rtsp_transport_idx = 0
+            transport = self._rtsp_transport_cycle[self._rtsp_transport_idx]
             # transport
             if "rtsp_transport" in self._ff_rtsp_opts:
                 cmd += ["-rtsp_transport", transport]
@@ -275,6 +281,45 @@ class CameraWorker:
     def _is_rtsp(src: str) -> bool:
         s = str(src).lower()
         return s.startswith("rtsp://") or s.startswith("rtsps://")
+
+    @staticmethod
+    def _extract_rtsp_port(src: str) -> Optional[int]:
+        try:
+            parsed = urlparse(src)
+            if parsed.port:
+                return int(parsed.port)
+            if parsed.scheme in {"rtsp", "rtsps"}:
+                return 554
+        except Exception:
+            pass
+        return None
+
+    def _configure_rtsp_transports(self, src: str) -> None:
+        if not self._is_rtsp(src):
+            self._rtsp_port = None
+            self._rtsp_transport_cycle = ["tcp"]
+            self._rtsp_transport_idx = 0
+            return
+
+        self._rtsp_port = self._extract_rtsp_port(src)
+
+        if not self.robust:
+            transports = ["tcp"]
+        else:
+            transports = ["tcp", "udp"]
+            if self._rtsp_port == 8554 or src.lower().startswith("rtsps://"):
+                transports = ["tcp"]
+
+        self._rtsp_transport_cycle = transports
+        self._rtsp_transport_idx = 0 if not transports else min(self._rtsp_transport_idx, len(transports) - 1)
+
+        port_log = self._rtsp_port if self._rtsp_port is not None else "default"
+        self._logger.info(
+            "%s configured RTSP transports=%s for port=%s",
+            self._log_prefix,
+            self._rtsp_transport_cycle,
+            port_log,
+        )
 
     def _probe_resolution(self, src: str) -> Tuple[Optional[int], Optional[int]]:
         """ใช้ ffprobe หา width/height พร้อม RTSP (ไม่ใช้ timeout option)"""
@@ -608,7 +653,29 @@ class CameraWorker:
 
                 buffer = bytearray()
                 start_wait = time.monotonic()
-                fd = self._stdout_fd or stdout.fileno()
+                try:
+                    fd = self._stdout_fd if self._stdout_fd is not None else stdout.fileno()
+                except Exception as exc:
+                    self._logger.warning(
+                        "%s unable to obtain stdout fd: %s",
+                        self._log_prefix,
+                        exc,
+                    )
+                    if not self._stop_evt.is_set():
+                        self._restart_backend()
+                        time.sleep(0.1)
+                    continue
+                if fd < 0:
+                    if self._stop_evt.is_set():
+                        break
+                    self._logger.warning(
+                        "%s detected invalid stdout fd=%d; restarting backend",
+                        self._log_prefix,
+                        fd,
+                    )
+                    self._restart_backend()
+                    time.sleep(0.1)
+                    continue
                 while len(buffer) < frame_size and not self._stop_evt.is_set():
                     remaining = frame_size - len(buffer)
                     wait_time = max(0.1, min(0.5, self._read_timeout))
@@ -646,6 +713,9 @@ class CameraWorker:
                             break
                         continue
                     except OSError as exc:
+                        if self._stop_evt.is_set():
+                            buffer.clear()
+                            break
                         if exc.errno in (errno.EBADF, errno.EPIPE, errno.EIO):
                             self._logger.warning(
                                 "%s read from ffmpeg stdout failed with errno=%s; restarting backend",
