@@ -409,6 +409,8 @@ class CameraWorker:
                 if time.monotonic() > deadline:
                     return False
                 continue
+            except OSError:
+                return False
             except Exception:
                 return False
             if not chunk:
@@ -423,6 +425,7 @@ class CameraWorker:
             if self.backend == "ffmpeg":
                 if self._proc is not None:
                     try:
+                        self._stdout_fd = None
                         if self._proc.stdout:
                             self._proc.stdout.close()
                         if self._proc.stderr:
@@ -527,6 +530,7 @@ class CameraWorker:
             frame = None
             if self.backend == "ffmpeg":
                 if self._proc is None or self._proc.poll() is not None:
+                    self._stdout_fd = None
                     self._fail_count += 1
                     if self._proc is not None:
                         returncode = self._proc.poll()
@@ -587,11 +591,13 @@ class CameraWorker:
                     time.sleep(0.05)
                     continue
 
-                buffer = bytearray()
+                buffer = bytearray(frame_size)
+                view = memoryview(buffer)
+                written = 0
                 start_wait = time.monotonic()
                 fd = self._stdout_fd or stdout.fileno()
-                while len(buffer) < frame_size and not self._stop_evt.is_set():
-                    remaining = frame_size - len(buffer)
+                while written < frame_size and not self._stop_evt.is_set():
+                    remaining = frame_size - written
                     wait_time = max(0.1, min(0.5, self._read_timeout))
                     try:
                         ready, _, _ = select.select([fd], [], [], wait_time)
@@ -608,7 +614,7 @@ class CameraWorker:
                                 "%s no video data for %.1fs (collected %d/%d bytes); last stderr: %s",
                                 self._log_prefix,
                                 self._read_timeout,
-                                len(buffer),
+                                written,
                                 frame_size,
                                 self.last_ffmpeg_stderr(),
                             )
@@ -626,14 +632,28 @@ class CameraWorker:
                             )
                             break
                         continue
+                    except OSError as exc:
+                        self._logger.warning(
+                            "%s read() failed on ffmpeg stdout (fd=%s): %s",
+                            self._log_prefix,
+                            fd,
+                            exc,
+                        )
+                        self._fail_count += 1
+                        if self._fail_count > 5:
+                            self._restart_backend()
+                        time.sleep(0.05)
+                        break
                     if not chunk:
                         break
-                    buffer.extend(chunk)
+                    end = written + len(chunk)
+                    view[written:end] = chunk
+                    written = end
                     start_wait = time.monotonic()
 
-                if len(buffer) != frame_size:
-                    if 0 < len(buffer) < frame_size:
-                        leftover = frame_size - len(buffer)
+                if written != frame_size:
+                    if 0 < written < frame_size:
+                        leftover = frame_size - written
                         if not self._flush_partial_ffmpeg_frame(fd, leftover):
                             self._logger.warning(
                                 "%s unable to flush %d bytes of partial frame; restarting backend",
@@ -648,7 +668,7 @@ class CameraWorker:
                         self._logger.warning(
                             "%s received incomplete frame (%d/%d bytes); consecutive failures=%d",
                             self._log_prefix,
-                            len(buffer),
+                            written,
                             frame_size,
                             self._fail_count,
                         )
