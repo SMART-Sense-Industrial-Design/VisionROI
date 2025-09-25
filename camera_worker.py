@@ -455,6 +455,7 @@ class CameraWorker:
                             self._proc.kill()
                         except Exception:
                             pass
+                self._stdout_fd = None
                 if self._ffmpeg_cmd is not None:
                     # exponential backoff (สูงสุด ~2s) ช่วยหลบช่วง jitter หนัก
                     if self._restart_backoff > 0:
@@ -624,6 +625,7 @@ class CameraWorker:
                 buffer = bytearray()
                 start_wait = time.monotonic()
                 fd = self._stdout_fd or stdout.fileno()
+                read_failed = False
                 while len(buffer) < frame_size and not self._stop_evt.is_set():
                     remaining = frame_size - len(buffer)
                     wait_time = max(0.1, min(0.5, self._read_timeout))
@@ -660,13 +662,23 @@ class CameraWorker:
                             )
                             break
                         continue
+                    except OSError as exc:
+                        self._logger.warning(
+                            "%s read from ffmpeg stdout failed: %s; restarting backend",
+                            self._log_prefix,
+                            exc,
+                        )
+                        self._restart_backend()
+                        time.sleep(0.1)
+                        read_failed = True
+                        break
                     if not chunk:
                         break
                     buffer.extend(chunk)
                     start_wait = time.monotonic()
 
                 if len(buffer) != frame_size:
-                    if 0 < len(buffer) < frame_size:
+                    if not read_failed and 0 < len(buffer) < frame_size:
                         leftover = frame_size - len(buffer)
                         if not self._flush_partial_ffmpeg_frame(fd, leftover):
                             self._logger.warning(
