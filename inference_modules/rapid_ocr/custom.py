@@ -56,6 +56,7 @@ def _ensure_default_ort_envs() -> None:
     os.environ.setdefault("ORT_CUDA_DEVICE_ID", "0")
     os.environ.setdefault("ORT_LOGGING_LEVEL", "2")  # INFO
     os.environ.setdefault("ORT_CUDA_GRAPH_ENABLE", "1")
+    os.environ.setdefault("CUDA_VISIBLE_DEVICES", "0")
 
 
 def _available_providers() -> list[str]:
@@ -63,7 +64,7 @@ def _available_providers() -> list[str]:
         return []
     try:
         av = ort.get_available_providers()
-        logger.info(f"[RapidOCR-ORT] onnxruntime available providers: {av}")
+        logger.warning(f"[RapidOCR-ORT] onnxruntime available providers: {av}")
         return av
     except Exception as e:
         logger.warning(f"[RapidOCR-ORT] get_available_providers() failed: {e}")
@@ -155,7 +156,6 @@ def _discover_rapidocr_model_paths() -> dict[str, str]:
         if not cands:
             return None
         if prefer_sub:
-            # ให้โมเดลที่ชื่อมีคำใบ้มาก่อน
             pri = [c for c in cands if prefer_sub in c.name.lower()]
             if pri:
                 return max(pri, key=lambda x: x.stat().st_size)
@@ -201,33 +201,28 @@ def _discover_rapidocr_model_paths() -> dict[str, str]:
     except Exception as e:
         logger.debug(f"[RapidOCR-ORT] scan rapidocr package failed: {e}")
 
-    # log ผล
-    logger.info(f"[RapidOCR-ORT] discovered model paths: {found}")
+    logger.warning(f"[RapidOCR-ORT] discovered model paths: {found}")
     return found
 
 
 def _rebind_internal_sessions_if_cpu_only(reader: Any, providers: list[str], model_paths: dict[str, str]) -> None:
+    """
+    รีบิลด์ใหม่ด้วย GPU providers แม้ sess เดิมจะ None:
+      - ถ้ามีพาธโมเดล -> สร้าง InferenceSession ใหม่ แล้ว set กลับเข้า reader
+    """
     if ort is None:
         return
 
     so = _make_sess_options()
 
     def _rebuild_one(name: str, sess_attr: str, key_in_paths: str):
-        sess = getattr(reader, sess_attr, None)
-        if sess is None:
-            logger.warning(f"[RapidOCR-ORT] skip rebuild: {sess_attr} is None")
-            return
-        if _session_uses_gpu(sess):
-            logger.info(f"[RapidOCR-ORT] {name}_sess already GPU: {sess.get_providers()}")
-            return
-
         mp = model_paths.get(key_in_paths)
         if not mp:
             logger.warning(f"[RapidOCR-ORT] cannot rebuild {name}_sess: model path not found")
             return
 
         try:
-            logger.info(f"[RapidOCR-ORT] rebuilding {name}_sess with {providers} from model: {mp}")
+            logger.warning(f"[RapidOCR-ORT] rebuilding {name}_sess with {providers} from model: {mp}")
             try:
                 new_sess = ort.InferenceSession(
                     mp,
@@ -238,13 +233,27 @@ def _rebind_internal_sessions_if_cpu_only(reader: Any, providers: list[str], mod
             except TypeError:
                 new_sess = ort.InferenceSession(mp, sess_options=so, providers=providers)
             setattr(reader, sess_attr, new_sess)
-            logger.info(f"[RapidOCR-ORT] {name}_sess providers now = {new_sess.get_providers()}")
+            if hasattr(new_sess, "get_providers"):
+                logger.warning(f"[RapidOCR-ORT] {name}_sess providers now = {new_sess.get_providers()}")
         except Exception as e:
             logger.exception(f"[RapidOCR-ORT] failed to rebuild {name}_sess: {e}")
 
     _rebuild_one("det", "det_sess", "det")
     _rebuild_one("rec", "rec_sess", "rec")
     _rebuild_one("cls", "cls_sess", "cls")
+
+
+def _prime_reader_sessions(reader: Any) -> None:
+    """
+    บังคับให้ RapidOCR สร้าง det/rec/cls sessions (แก้เคส lazy-init)
+    """
+    try:
+        import numpy as _np
+        dummy = _np.zeros((8, 8, 3), dtype=_np.uint8)
+        reader(dummy)
+        logger.warning("[RapidOCR-ORT] warmup call executed to initialize sessions")
+    except Exception as e:
+        logger.warning(f"[RapidOCR-ORT] warmup call failed: {e}")
 
 
 def _new_reader_instance() -> Any:
@@ -255,7 +264,7 @@ def _new_reader_instance() -> Any:
     providers = _build_provider_priority()
     provider_options = _build_provider_options(providers)
     model_paths = _discover_rapidocr_model_paths()
-    logger.info(f"[RapidOCR-ORT] requested providers={providers}")
+    logger.warning(f"[RapidOCR-ORT] requested providers={providers}")
 
     reader = None
 
@@ -264,7 +273,6 @@ def _new_reader_instance() -> Any:
         kwargs = {"providers": providers}
         if provider_options is not None:
             kwargs["provider_options"] = provider_options  # type: ignore[assignment]
-        # ถ้า lib รองรับ path parameters ให้ส่งต่อเข้าไป
         for k in ("det_path", "det_model_path"):
             if k not in kwargs and "det" in model_paths:
                 kwargs[k] = model_paths["det"]  # type: ignore[index]
@@ -279,23 +287,25 @@ def _new_reader_instance() -> Any:
                 break
 
         reader = RapidOCRLib(**kwargs)  # type: ignore
-        logger.info("[RapidOCR-ORT] RapidOCRLib created with providers(+paths if supported) ✅")
+        logger.warning("[RapidOCR-ORT] RapidOCRLib created with providers(+paths if supported) ✅")
     except TypeError:
-        # รุ่นเก่าที่ไม่รองรับ kwargs เหล่านี้
         reader = RapidOCRLib()  # type: ignore
         logger.warning("[RapidOCR-ORT] RapidOCRLib ignored providers/paths (fallback) ❌")
     except Exception as e:
         logger.exception(f"[RapidOCR-ORT] RapidOCRLib init failed: {e}")
         raise
 
-    # Log providers ของแต่ละ session (รอบแรก)
+    # อุ่นเครื่องให้สร้าง sessions
+    _prime_reader_sessions(reader)
+
+    # Log providers ของแต่ละ session (รอบแรกหลัง warm-up)
     try:
         if hasattr(reader, "det_sess"):
-            logger.info(f"[RapidOCR-ORT] det_sess providers={reader.det_sess.get_providers()}")
+            logger.warning(f"[RapidOCR-ORT] det_sess providers={reader.det_sess.get_providers()}")
         if hasattr(reader, "rec_sess"):
-            logger.info(f"[RapidOCR-ORT] rec_sess providers={reader.rec_sess.get_providers()}")
+            logger.warning(f"[RapidOCR-ORT] rec_sess providers={reader.rec_sess.get_providers()}")
         if hasattr(reader, "cls_sess"):
-            logger.info(f"[RapidOCR-ORT] cls_sess providers={reader.cls_sess.get_providers()}")
+            logger.warning(f"[RapidOCR-ORT] cls_sess providers={reader.cls_sess.get_providers()}")
     except Exception as e:
         logger.debug(f"[RapidOCR-ORT] cannot inspect actual providers: {e}")
 
@@ -310,11 +320,11 @@ def _new_reader_instance() -> Any:
 
             # log ซ้ำหลังรีบิลด์
             if hasattr(reader, "det_sess"):
-                logger.info(f"[RapidOCR-ORT] det_sess providers(after)={reader.det_sess.get_providers()}")
+                logger.warning(f"[RapidOCR-ORT] det_sess providers(after)={reader.det_sess.get_providers()}")
             if hasattr(reader, "rec_sess"):
-                logger.info(f"[RapidOCR-ORT] rec_sess providers(after)={reader.rec_sess.get_providers()}")
+                logger.warning(f"[RapidOCR-ORT] rec_sess providers(after)={reader.rec_sess.get_providers()}")
             if hasattr(reader, "cls_sess"):
-                logger.info(f"[RapidOCR-ORT] cls_sess providers(after)={reader.cls_sess.get_providers()}")
+                logger.warning(f"[RapidOCR-ORT] cls_sess providers(after)={reader.cls_sess.get_providers()}")
     except Exception as e:
         logger.exception(f"[RapidOCR-ORT] post-init GPU self-check failed: {e}")
 
