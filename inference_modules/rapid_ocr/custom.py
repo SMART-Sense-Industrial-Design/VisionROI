@@ -135,187 +135,79 @@ def _make_sess_options() -> "ort.SessionOptions | None":
     return so
 
 
-def _session_uses_gpu(sess: Any) -> bool:
-    try:
-        ps = sess.get_providers() if hasattr(sess, "get_providers") else []
-        return any(p in ("TensorrtExecutionProvider", "CUDAExecutionProvider") for p in ps)
-    except Exception:
-        return False
-
-
 # =======================
 # Model path discovery 🔎
 # =======================
 def _discover_rapidocr_model_paths() -> dict[str, str]:
     """
-    คืน dict ที่อาจมีคีย์ det/rec/cls -> absolute path ของ .onnx
+    คืน dict ที่อาจมีคีย์ rec -> absolute path ของ .onnx
     ลำดับค้นหา:
-      1) ENV: RAPIDOCR_DET_PATH / RAPIDOCR_REC_PATH / RAPIDOCR_CLS_PATH
+      1) ENV: RAPIDOCR_REC_PATH
       2) ~/.rapidocr/**/*.onnx
       3) โฟลเดอร์ในแพ็กเกจ rapidocr_onnxruntime
     """
     found: dict[str, str] = {}
 
-    # 1) ENV override
-    env_keys = [("det", "RAPIDOCR_DET_PATH"), ("rec", "RAPIDOCR_REC_PATH"), ("cls", "RAPIDOCR_CLS_PATH")]
-    for k, envk in env_keys:
-        p = os.getenv(envk)
-        if p and Path(p).exists():
-            found[k] = str(Path(p).resolve())
+    # 1) ENV override (เฉพาะ rec เท่านั้น)
+    rec_env = os.getenv("RAPIDOCR_REC_PATH")
+    if rec_env and Path(rec_env).exists():
+        found["rec"] = str(Path(rec_env).resolve())
 
-    def _pick_best(cands: list[Path], prefer_sub: str | None = None) -> Path | None:
+    def _pick_best(cands: list[Path]) -> Path | None:
         if not cands:
             return None
-        if prefer_sub:
-            pri = [c for c in cands if prefer_sub in c.name.lower()]
-            if pri:
-                return max(pri, key=lambda x: x.stat().st_size)
         return max(cands, key=lambda x: x.stat().st_size)
 
-    # 2) ~/.rapidocr scan
+    # 2) ~/.rapidocr scan หาเฉพาะ rec model
     try:
         home_cache = Path.home() / ".rapidocr"
-        if home_cache.exists():
+        if home_cache.exists() and "rec" not in found:
             onnx_files = list(home_cache.rglob("*.onnx"))
-            if "det" not in found:
-                det = _pick_best([p for p in onnx_files if "det" in p.name.lower()], "det")
-                if det:
-                    found["det"] = str(det.resolve())
-            if "rec" not in found:
-                rec = _pick_best([p for p in onnx_files if "rec" in p.name.lower() or "crnn" in p.name.lower()], "rec")
-                if rec:
-                    found["rec"] = str(rec.resolve())
-            if "cls" not in found:
-                cls = _pick_best([p for p in onnx_files if "cls" in p.name.lower()], "cls")
-                if cls:
-                    found["cls"] = str(cls.resolve())
+            rec = _pick_best(
+                [
+                    p
+                    for p in onnx_files
+                    if "rec" in p.name.lower() or "crnn" in p.name.lower()
+                ]
+            )
+            if rec:
+                found["rec"] = str(rec.resolve())
     except Exception as e:
         logger.debug(f"[RapidOCR-ORT] scan ~/.rapidocr failed: {e}")
 
-    # 3) package folder scan
+    # 3) package folder scan หาเฉพาะ rec model
     try:
-        if rapidocr_pkg is not None:
+        if rapidocr_pkg is not None and "rec" not in found:
             base = Path(rapidocr_pkg.__file__).resolve().parent
             onnx_files = list(base.rglob("*.onnx"))
-            if "det" not in found:
-                det = _pick_best([p for p in onnx_files if "det" in p.name.lower()], "det")
-                if det:
-                    found["det"] = str(det.resolve())
-            if "rec" not in found:
-                rec = _pick_best([p for p in onnx_files if "rec" in p.name.lower() or "crnn" in p.name.lower()], "rec")
-                if rec:
-                    found["rec"] = str(rec.resolve())
-            if "cls" not in found:
-                cls = _pick_best([p for p in onnx_files if "cls" in p.name.lower()], "cls")
-                if cls:
-                    found["cls"] = str(cls.resolve())
+            rec = _pick_best(
+                [
+                    p
+                    for p in onnx_files
+                    if "rec" in p.name.lower() or "crnn" in p.name.lower()
+                ]
+            )
+            if rec:
+                found["rec"] = str(rec.resolve())
     except Exception as e:
         logger.debug(f"[RapidOCR-ORT] scan rapidocr package failed: {e}")
 
-    logger.warning(f"[RapidOCR-ORT] discovered model paths: {found}")
+    logger.warning(f"[RapidOCR-ORT] discovered recognition model path: {found}")
     return found
-
-
-# ================
-# Strict build 🔧
-# ================
-def _try_create_session_strict(
-    model_path: str,
-    order: list[str],
-    so: "ort.SessionOptions",
-) -> tuple[Any | None, list[str]]:
-    """
-    สร้าง session แบบ strict:
-      - ขอ EP ทีละตัว (ไม่พ่วง CPU) เพื่อให้เห็น error จริง
-      - ถ้า session ที่ได้ไม่ได้ใช้ EP ที่ขอ (เช็ค s.get_providers()[0]) => ถือว่า fail
-      - ถ้า GPU พังทุกตัว ค่อย fallback CPU ตอนท้าย
-    """
-    errors: list[str] = []
-    for ep in order:
-        try_providers = [ep]
-        try_opts = _select_provider_options(try_providers)
-        try:
-            s = ort.InferenceSession(
-                model_path,
-                sess_options=so,
-                providers=try_providers,
-                provider_options=try_opts,
-            )
-            actual = s.get_providers() if hasattr(s, "get_providers") else []
-            if not actual or actual[0] != ep:
-                raise RuntimeError(f"requested {ep} but actual providers={actual}")
-            logger.warning(f"[RapidOCR-ORT] built session ✔️ requested={ep} actual={actual}")
-            return s, errors
-        except Exception as e:
-            msg = f"{ep} failed or not actually used: {e}"
-            errors.append(msg)
-            logger.warning(f"[RapidOCR-ORT] {_short_model(model_path)} -> {msg}")
-
-    # Fallback CPU (สุดท้ายจริง ๆ)
-    try:
-        s = ort.InferenceSession(
-            model_path,
-            sess_options=so,
-            providers=["CPUExecutionProvider"],
-            provider_options=[{}],
-        )
-        logger.warning(f"[RapidOCR-ORT] fallback CPUExecutionProvider for {_short_model(model_path)}")
-        return s, errors
-    except Exception as e:
-        errors.append(f"CPUExecutionProvider failed too: {e}")
-        logger.exception(f"[RapidOCR-ORT] even CPU failed for {_short_model(model_path)}: {e}")
-        return None, errors
-
-
-def _short_model(p: str) -> str:
-    try:
-        return str(Path(p).name)
-    except Exception:
-        return p
-
-
-def _rebind_internal_sessions_if_cpu_only(reader: Any, providers: list[str], model_paths: dict[str, str]) -> None:
-    """
-    รีบิลด์ใหม่ด้วยลำดับ strict ตาม providers ที่เลือกไว้ (ยึดตาม env ถ้ามี):
-      - CUDA -> TRT (หรือเฉพาะตัวที่มีใน providers)
-      - ถ้า GPU ใช้ไม่ได้ทั้งหมด ค่อย fallback CPU
-    """
-    if ort is None:
-        return
-
-    so = _make_sess_options()
-
-    # ลำดับความพยายาม: ยึดตาม providers ที่ถูกเลือกไว้ (เช่นจาก env)
-    try_order_env = [ep for ep in providers if ep in ("CUDAExecutionProvider", "TensorrtExecutionProvider")]
-    try_order = try_order_env if try_order_env else ["CUDAExecutionProvider", "TensorrtExecutionProvider"]
-
-    def _rebuild_one(name: str, sess_attr: str, key_in_paths: str):
-        mp = model_paths.get(key_in_paths)
-        if not mp:
-            logger.warning(f"[RapidOCR-ORT] cannot rebuild {name}_sess: model path not found")
-            return
-        sess, errs = _try_create_session_strict(mp, try_order, so)
-        if errs:
-            logger.warning(f"[RapidOCR-ORT] {_short_model(mp)} GPU init errors: {errs}")
-        if sess is not None:
-            setattr(reader, sess_attr, sess)
-            if hasattr(sess, "get_providers"):
-                logger.warning(f"[RapidOCR-ORT] {sess_attr} providers now = {sess.get_providers()}")
-
-    _rebuild_one("det", "text_det_sess", "det")
-    _rebuild_one("rec", "text_rec_sess", "rec")
-    _rebuild_one("cls", "text_cls_sess", "cls")
 
 
 def _prime_reader_sessions(reader: Any) -> None:
     """
-    บังคับให้ RapidOCR สร้าง det/rec/cls sessions (แก้เคส lazy-init)
+    บังคับให้ RapidOCR สร้าง session สำหรับงาน recognition (แก้เคส lazy-init)
     """
     try:
         import numpy as _np
         dummy = _np.zeros((8, 8, 3), dtype=_np.uint8)
-        reader(dummy)
-        logger.warning("[RapidOCR-ORT] warmup call executed to initialize sessions")
+        if hasattr(reader, "rec"):
+            reader.rec(dummy)
+        else:
+            reader(dummy)
+        logger.warning("[RapidOCR-ORT] warmup call executed to initialize recognition session")
     except Exception as e:
         logger.warning(f"[RapidOCR-ORT] warmup call failed: {e}")
 
@@ -329,19 +221,14 @@ def _new_reader_instance() -> Any:
     model_paths = _discover_rapidocr_model_paths()
     logger.warning(f"[RapidOCR-ORT] requested providers={providers}")
 
-    # 1) พยายามส่ง providers + model paths เข้า RapidOCRLib โดยตรง (ถ้ารองรับ)
+    # 1) พยายามส่ง providers + recognition model path เข้า RapidOCRLib โดยตรง (ถ้ารองรับ)
     reader = None
     try:
         kwargs: dict[str, Any] = {"providers": providers}
-        # ใส่ path ถ้าจับได้ (ชื่อพารามิเตอร์ที่ถูกต้อง)
-        if "det" in model_paths:
-            kwargs.setdefault("det_model_path", model_paths["det"])
         if "rec" in model_paths:
             kwargs.setdefault("rec_model_path", model_paths["rec"])
-        if "cls" in model_paths:
-            kwargs.setdefault("cls_model_path", model_paths["cls"])
         reader = RapidOCRLib(**kwargs)  # type: ignore
-        logger.warning("[RapidOCR-ORT] RapidOCRLib created with providers(+model_paths) ✅")
+        logger.warning("[RapidOCR-ORT] RapidOCRLib created with recognition model path ✅")
     except TypeError:
         reader = RapidOCRLib()  # type: ignore
         logger.warning("[RapidOCR-ORT] RapidOCRLib ignored providers/paths (fallback) ❌")
@@ -351,36 +238,6 @@ def _new_reader_instance() -> Any:
 
     # อุ่นเครื่องให้สร้าง sessions
     _prime_reader_sessions(reader)
-
-    # Log providers ของแต่ละ session (รอบแรกหลัง warm-up)
-    try:
-        if hasattr(reader, "text_det_sess"):
-            logger.warning(f"[RapidOCR-ORT] text_det_sess providers={reader.text_det_sess.get_providers()}")
-        if hasattr(reader, "text_rec_sess"):
-            logger.warning(f"[RapidOCR-ORT] text_rec_sess providers={reader.text_rec_sess.get_providers()}")
-        if hasattr(reader, "text_cls_sess"):
-            logger.warning(f"[RapidOCR-ORT] text_cls_sess providers={reader.text_cls_sess.get_providers()}")
-    except Exception as e:
-        logger.debug(f"[RapidOCR-ORT] cannot inspect actual providers: {e}")
-
-    # 2) ถ้ายัง CPU-only ให้รีบิลด์ด้วย strict ตามลำดับ (ยึด env ถ้ามี)
-    try:
-        det_ok = hasattr(reader, "text_det_sess") and _session_uses_gpu(reader.text_det_sess)
-        rec_ok = hasattr(reader, "text_rec_sess") and _session_uses_gpu(reader.text_rec_sess)
-        cls_ok = hasattr(reader, "text_cls_sess") and _session_uses_gpu(reader.text_cls_sess)
-        if not (det_ok or rec_ok or cls_ok):
-            logger.warning("[RapidOCR-ORT] sessions appear CPU-only; attempting to rebuild with GPU providers…")
-            _rebind_internal_sessions_if_cpu_only(reader, providers, model_paths)
-
-            # log ซ้ำหลังรีบิลด์
-            if hasattr(reader, "text_det_sess"):
-                logger.warning(f"[RapidOCR-ORT] text_det_sess providers(after)={reader.text_det_sess.get_providers()}")
-            if hasattr(reader, "text_rec_sess"):
-                logger.warning(f"[RapidOCR-ORT] text_rec_sess providers(after)={reader.text_rec_sess.get_providers()}")
-            if hasattr(reader, "text_cls_sess"):
-                logger.warning(f"[RapidOCR-ORT] text_cls_sess providers(after)={reader.text_cls_sess.get_providers()}")
-    except Exception as e:
-        logger.exception(f"[RapidOCR-ORT] post-init GPU self-check failed: {e}")
 
     return reader
 
@@ -474,7 +331,11 @@ def _extract_text(ocr_result: Any) -> str:
 def _run_ocr_async(frame, roi_id, save, source) -> str:
     try:
         reader = _get_global_reader()
-        result = _normalise_reader_output(reader(frame))
+        if hasattr(reader, "rec"):
+            raw_result = reader.rec(frame)
+        else:
+            raw_result = reader(frame)
+        result = _normalise_reader_output(raw_result)
         text = _extract_text(result)
 
         logger.info(
@@ -521,7 +382,11 @@ class RapidOCR(BaseOCR):
         if RapidOCRLib is not None:
             try:
                 reader = self._get_reader()
-                result = _normalise_reader_output(reader(frame))
+                if hasattr(reader, "rec"):
+                    raw_result = reader.rec(frame)
+                else:
+                    raw_result = reader(frame)
+                result = _normalise_reader_output(raw_result)
                 text = _extract_text(result)
             except Exception as e:
                 self.logger.exception(
