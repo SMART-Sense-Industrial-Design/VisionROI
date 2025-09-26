@@ -93,6 +93,7 @@ class CameraWorker:
         self._next_resolution_probe = 0.0
         self._image_path: Path | None = None
         self._image_frame = None
+        self._restart_lock = threading.Lock()
 
         # robust state
         self._err_window = deque(maxlen=300)
@@ -455,69 +456,81 @@ class CameraWorker:
     def _restart_backend(self) -> None:
         """พยายามเชื่อมต่อสตรีมใหม่เมื่ออ่านไม่ได้"""
         self._logger.warning("%s restarting backend after failures", self._log_prefix)
-        with silent():
-            if self.backend == "ffmpeg":
-                if self._proc is not None:
-                    # ปิด stdout/stderr ก่อน แล้ว terminate ทั้ง group ให้สะอาด
-                    try:
-                        if self._proc.stdout:
-                            self._proc.stdout.close()
-                        if self._proc.stderr:
-                            self._proc.stderr.close()
-                    except Exception:
-                        pass
-                    self._terminate_proc_tree(self._proc, grace=0.5)
-
-                if self._ffmpeg_cmd is not None:
-                    # exponential backoff (สูงสุด ~2s) ช่วยหลบช่วง jitter หนัก
-                    if self._restart_backoff > 0:
-                        time.sleep(min(self._restart_backoff, 2.0))
-                    self._restart_backoff = min(self._restart_backoff * 2 + 0.1, 2.0) if self._restart_backoff else 0.2
-                    # สร้างคำสั่งใหม่ (เผื่อมีการสลับ transport)
-                    self._ffmpeg_cmd = self._build_ffmpeg_cmd(str(self.src))
-                    self._proc = subprocess.Popen(
-                        self._ffmpeg_cmd,
-                        stdout=subprocess.PIPE,
-                        stderr=subprocess.PIPE,
-                        bufsize=10**8,
-                        preexec_fn=os.setsid,
-                    )
-                    if self._proc and self._proc.stderr:
-                        self._stderr_thread = threading.Thread(
-                            target=self._drain_stderr, daemon=True
-                        )
-                        self._stderr_thread.start()
-                    if self._proc and self._proc.stdout:
+        with self._restart_lock:
+            with silent():
+                if self.backend == "ffmpeg":
+                    if self._proc is not None:
+                        # ปิด stdout/stderr ก่อน แล้ว terminate ทั้ง group ให้สะอาด
                         try:
-                            self._stdout_fd = self._proc.stdout.fileno()
-                        except Exception as exc:
-                            self._logger.warning(
-                                "%s failed to obtain stdout fd on restart: %s",
-                                self._log_prefix,
-                                exc,
-                            )
-            elif self.backend == "opencv":
-                if self._image_path is not None:
-                    self._image_frame = cv2.imread(str(self._image_path), cv2.IMREAD_COLOR)
-                    if self._image_frame is None:
-                        self._logger.error(
-                            "%s unable to read image file %s on restart",
-                            self._log_prefix,
-                            self._image_path,
-                        )
-                else:
-                    if self._cap is not None and self._cap.isOpened():
-                        try:
-                            self._cap.release()
+                            if self._proc.stdout:
+                                self._proc.stdout.close()
+                            if self._proc.stderr:
+                                self._proc.stderr.close()
                         except Exception:
                             pass
-                    self._cap = cv2.VideoCapture(self.src)
-                    with silent():
-                        self._cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-                        if self.width:
-                            self._cap.set(cv2.CAP_PROP_FRAME_WIDTH, int(self.width))
-                        if self.height:
-                            self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, int(self.height))
+                        self._terminate_proc_tree(self._proc, grace=0.5)
+
+                        if self._stderr_thread and self._stderr_thread.is_alive():
+                            try:
+                                self._stderr_thread.join(timeout=0.2)
+                            except Exception:
+                                pass
+                    self._stderr_thread = None
+
+                    if self._ffmpeg_cmd is not None:
+                        # exponential backoff (สูงสุด ~2s) ช่วยหลบช่วง jitter หนัก
+                        if self._restart_backoff > 0:
+                            time.sleep(min(self._restart_backoff, 2.0))
+                        self._restart_backoff = (
+                            min(self._restart_backoff * 2 + 0.1, 2.0)
+                            if self._restart_backoff
+                            else 0.2
+                        )
+                        # สร้างคำสั่งใหม่ (เผื่อมีการสลับ transport)
+                        self._ffmpeg_cmd = self._build_ffmpeg_cmd(str(self.src))
+                        self._proc = subprocess.Popen(
+                            self._ffmpeg_cmd,
+                            stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE,
+                            bufsize=10**8,
+                            preexec_fn=os.setsid,
+                        )
+                        if self._proc and self._proc.stderr:
+                            self._stderr_thread = threading.Thread(
+                                target=self._drain_stderr, daemon=True
+                            )
+                            self._stderr_thread.start()
+                        if self._proc and self._proc.stdout:
+                            try:
+                                self._stdout_fd = self._proc.stdout.fileno()
+                            except Exception as exc:
+                                self._logger.warning(
+                                    "%s failed to obtain stdout fd on restart: %s",
+                                    self._log_prefix,
+                                    exc,
+                                )
+                elif self.backend == "opencv":
+                    if self._image_path is not None:
+                        self._image_frame = cv2.imread(str(self._image_path), cv2.IMREAD_COLOR)
+                        if self._image_frame is None:
+                            self._logger.error(
+                                "%s unable to read image file %s on restart",
+                                self._log_prefix,
+                                self._image_path,
+                            )
+                    else:
+                        if self._cap is not None and self._cap.isOpened():
+                            try:
+                                self._cap.release()
+                            except Exception:
+                                pass
+                        self._cap = cv2.VideoCapture(self.src)
+                        with silent():
+                            self._cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+                            if self.width:
+                                self._cap.set(cv2.CAP_PROP_FRAME_WIDTH, int(self.width))
+                            if self.height:
+                                self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, int(self.height))
         self._fail_count = 0
         self._err_window.clear()
         self._last_returncode_logged = None
@@ -665,9 +678,11 @@ class CameraWorker:
                     buffer.extend(chunk)
                     start_wait = time.monotonic()
 
-                if len(buffer) != frame_size:
-                    if 0 < len(buffer) < frame_size:
-                        leftover = frame_size - len(buffer)
+                buffer_len = len(buffer)
+
+                if buffer_len != frame_size:
+                    if 0 < buffer_len < frame_size:
+                        leftover = frame_size - buffer_len
                         if not self._flush_partial_ffmpeg_frame(fd, leftover):
                             self._logger.warning(
                                 "%s unable to flush %d bytes of partial frame; restarting backend",
@@ -682,7 +697,7 @@ class CameraWorker:
                         self._logger.warning(
                             "%s received incomplete frame (%d/%d bytes); consecutive failures=%d",
                             self._log_prefix,
-                            len(buffer),
+                            buffer_len,
                             frame_size,
                             self._fail_count,
                         )
@@ -706,6 +721,10 @@ class CameraWorker:
                         self._restart_backend()
                     time.sleep(0.01)
                     continue
+
+                # เฟรมสมบูรณ์แล้ว รีเซ็ตตัวนับ backoff เพื่อให้รีสตาร์ทครั้งถัดไปรอไม่นานเกินไป
+                if self._restart_backoff:
+                    self._restart_backoff = 0.0
 
             elif self.backend == "opencv":
                 if self._image_path is not None:
