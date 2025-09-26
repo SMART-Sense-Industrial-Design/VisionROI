@@ -96,16 +96,16 @@ def _build_provider_priority() -> list[str]:
 
 def _build_provider_options_map() -> dict[str, dict]:
     trt_opts = {
-        "trt_max_workspace_size": str(1 << 30),  # 1GB
-        "trt_engine_cache_enable": "1",
+        "trt_max_workspace_size": 1 << 30,  # 1GB
+        "trt_engine_cache_enable": 1,
         "trt_engine_cache_path": os.environ.get("ORT_TENSORRT_ENGINE_CACHE_PATH", "trt_cache"),
-        "trt_fp16_enable": os.environ.get("ORT_TENSORRT_FP16_ENABLE", "1"),
-        "trt_cuda_graph_enable": "1",
-        "trt_timing_cache_enable": "1",
+        "trt_fp16_enable": int(os.environ.get("ORT_TENSORRT_FP16_ENABLE", "1")),
+        "trt_cuda_graph_enable": 1,
+        "trt_timing_cache_enable": 1,
         "trt_timing_cache_path": os.environ.get("ORT_TENSORRT_ENGINE_CACHE_PATH", "trt_cache"),
     }
     cuda_opts = {
-        "device_id": os.environ.get("ORT_CUDA_DEVICE_ID", "0"),
+        "device_id": int(os.environ.get("ORT_CUDA_DEVICE_ID", "0")),
         "arena_extend_strategy": "kSameAsRequested",
     }
     return {
@@ -300,11 +300,11 @@ def _rebind_internal_sessions_if_cpu_only(reader: Any, providers: list[str], mod
         if sess is not None:
             setattr(reader, sess_attr, sess)
             if hasattr(sess, "get_providers"):
-                logger.warning(f"[RapidOCR-ORT] {name}_sess providers now = {sess.get_providers()}")
+                logger.warning(f"[RapidOCR-ORT] {sess_attr} providers now = {sess.get_providers()}")
 
-    _rebuild_one("det", "det_sess", "det")
-    _rebuild_one("rec", "rec_sess", "rec")
-    _rebuild_one("cls", "cls_sess", "cls")
+    _rebuild_one("det", "text_det_sess", "det")
+    _rebuild_one("rec", "text_rec_sess", "rec")
+    _rebuild_one("cls", "text_cls_sess", "cls")
 
 
 def _prime_reader_sessions(reader: Any) -> None:
@@ -333,15 +333,15 @@ def _new_reader_instance() -> Any:
     reader = None
     try:
         kwargs: dict[str, Any] = {"providers": providers}
-        # ใส่ path ถ้าจับได้
+        # ใส่ path ถ้าจับได้ (ชื่อพารามิเตอร์ที่ถูกต้อง)
         if "det" in model_paths:
-            kwargs.setdefault("det_path", model_paths["det"])
+            kwargs.setdefault("det_model_path", model_paths["det"])
         if "rec" in model_paths:
-            kwargs.setdefault("rec_path", model_paths["rec"])
+            kwargs.setdefault("rec_model_path", model_paths["rec"])
         if "cls" in model_paths:
-            kwargs.setdefault("cls_path", model_paths["cls"])
+            kwargs.setdefault("cls_model_path", model_paths["cls"])
         reader = RapidOCRLib(**kwargs)  # type: ignore
-        logger.warning("[RapidOCR-ORT] RapidOCRLib created with providers(+paths if supported) ✅")
+        logger.warning("[RapidOCR-ORT] RapidOCRLib created with providers(+model_paths) ✅")
     except TypeError:
         reader = RapidOCRLib()  # type: ignore
         logger.warning("[RapidOCR-ORT] RapidOCRLib ignored providers/paths (fallback) ❌")
@@ -354,31 +354,31 @@ def _new_reader_instance() -> Any:
 
     # Log providers ของแต่ละ session (รอบแรกหลัง warm-up)
     try:
-        if hasattr(reader, "det_sess"):
-            logger.warning(f"[RapidOCR-ORT] det_sess providers={reader.det_sess.get_providers()}")
-        if hasattr(reader, "rec_sess"):
-            logger.warning(f"[RapidOCR-ORT] rec_sess providers={reader.rec_sess.get_providers()}")
-        if hasattr(reader, "cls_sess"):
-            logger.warning(f"[RapidOCR-ORT] cls_sess providers={reader.cls_sess.get_providers()}")
+        if hasattr(reader, "text_det_sess"):
+            logger.warning(f"[RapidOCR-ORT] text_det_sess providers={reader.text_det_sess.get_providers()}")
+        if hasattr(reader, "text_rec_sess"):
+            logger.warning(f"[RapidOCR-ORT] text_rec_sess providers={reader.text_rec_sess.get_providers()}")
+        if hasattr(reader, "text_cls_sess"):
+            logger.warning(f"[RapidOCR-ORT] text_cls_sess providers={reader.text_cls_sess.get_providers()}")
     except Exception as e:
         logger.debug(f"[RapidOCR-ORT] cannot inspect actual providers: {e}")
 
     # 2) ถ้ายัง CPU-only ให้รีบิลด์ด้วย strict ตามลำดับ (ยึด env ถ้ามี)
     try:
-        det_ok = hasattr(reader, "det_sess") and _session_uses_gpu(reader.det_sess)
-        rec_ok = hasattr(reader, "rec_sess") and _session_uses_gpu(reader.rec_sess)
-        cls_ok = hasattr(reader, "cls_sess") and _session_uses_gpu(reader.cls_sess)
+        det_ok = hasattr(reader, "text_det_sess") and _session_uses_gpu(reader.text_det_sess)
+        rec_ok = hasattr(reader, "text_rec_sess") and _session_uses_gpu(reader.text_rec_sess)
+        cls_ok = hasattr(reader, "text_cls_sess") and _session_uses_gpu(reader.text_cls_sess)
         if not (det_ok or rec_ok or cls_ok):
             logger.warning("[RapidOCR-ORT] sessions appear CPU-only; attempting to rebuild with GPU providers…")
             _rebind_internal_sessions_if_cpu_only(reader, providers, model_paths)
 
             # log ซ้ำหลังรีบิลด์
-            if hasattr(reader, "det_sess"):
-                logger.warning(f"[RapidOCR-ORT] det_sess providers(after)={reader.det_sess.get_providers()}")
-            if hasattr(reader, "rec_sess"):
-                logger.warning(f"[RapidOCR-ORT] rec_sess providers(after)={reader.rec_sess.get_providers()}")
-            if hasattr(reader, "cls_sess"):
-                logger.warning(f"[RapidOCR-ORT] cls_sess providers(after)={reader.cls_sess.get_providers()}")
+            if hasattr(reader, "text_det_sess"):
+                logger.warning(f"[RapidOCR-ORT] text_det_sess providers(after)={reader.text_det_sess.get_providers()}")
+            if hasattr(reader, "text_rec_sess"):
+                logger.warning(f"[RapidOCR-ORT] text_rec_sess providers(after)={reader.text_rec_sess.get_providers()}")
+            if hasattr(reader, "text_cls_sess"):
+                logger.warning(f"[RapidOCR-ORT] text_cls_sess providers(after)={reader.text_cls_sess.get_providers()}")
     except Exception as e:
         logger.exception(f"[RapidOCR-ORT] post-init GPU self-check failed: {e}")
 
