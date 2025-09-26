@@ -51,11 +51,15 @@ _last_ocr_lock = threading.Lock()
 # ==============================
 def _ensure_default_ort_envs() -> None:
     os.environ.setdefault("ORT_TENSORRT_ENGINE_CACHE_ENABLE", "1")
-    os.environ.setdefault("ORT_TENSORRT_ENGINE_CACHE_PATH", str((_data_sources_root / "trt_cache").resolve()))
+    os.environ.setdefault(
+        "ORT_TENSORRT_ENGINE_CACHE_PATH",
+        str((_data_sources_root / "trt_cache").resolve()),
+    )
     os.environ.setdefault("ORT_TENSORRT_FP16_ENABLE", "1")
     os.environ.setdefault("ORT_TENSORRT_VERBOSE_LOGGING", "1")  # เพิ่ม log ของ TRT EP
     os.environ.setdefault("ORT_CUDA_DEVICE_ID", "0")
-    os.environ.setdefault("ORT_LOGGING_LEVEL", "0")  # VERBOSE เพื่อเก็บสาเหตุเวลา init GPU fail
+    # ลดความดังของ ORT ใน prod (0=VERBOSE, 3=WARNING)
+    os.environ.setdefault("ORT_LOGGING_LEVEL", "3")
     os.environ.setdefault("ORT_CUDA_GRAPH_ENABLE", "1")
     os.environ.setdefault("CUDA_VISIBLE_DEVICES", "0")
 
@@ -73,10 +77,13 @@ def _available_providers() -> list[str]:
 
 
 def _build_provider_priority() -> list[str]:
+    # ให้สามารถ override ผ่าน env ได้
     env_val = os.getenv("RAPIDOCR_ORT_PROVIDERS")
     if env_val:
         providers = [p.strip() for p in env_val.split(",") if p.strip()]
         return providers
+
+    # ค่าตั้งต้น (จะ reorder ตาม availability ภายหลัง)
     preferred = ["TensorrtExecutionProvider", "CUDAExecutionProvider", "CPUExecutionProvider"]
     av = _available_providers()
     if not av:
@@ -212,28 +219,46 @@ def _discover_rapidocr_model_paths() -> dict[str, str]:
 # ================
 # Strict build 🔧
 # ================
-def _try_create_session_strict(model_path: str, order: list[str], so: "ort.SessionOptions") -> tuple[Any | None, list[str]]:
+def _try_create_session_strict(
+    model_path: str,
+    order: list[str],
+    so: "ort.SessionOptions",
+) -> tuple[Any | None, list[str]]:
     """
-    พยายามสร้าง session แบบ "strict":
-      - ทดลองทีละ EP โดย "ไม่" ใส่ CPU ในลิสต์ เพื่อให้ error เด้งออกมา
-      - เก็บข้อความ error ของแต่ละ EP เผื่อ debug
-      - ถ้า GPU ล้มเหลวทั้งหมด ค่อย fallback CPU ตอนท้าย
+    สร้าง session แบบ strict:
+      - ขอ EP ทีละตัว (ไม่พ่วง CPU) เพื่อให้เห็น error จริง
+      - ถ้า session ที่ได้ไม่ได้ใช้ EP ที่ขอ (เช็ค s.get_providers()[0]) => ถือว่า fail
+      - ถ้า GPU พังทุกตัว ค่อย fallback CPU ตอนท้าย
     """
     errors: list[str] = []
     for ep in order:
         try_providers = [ep]
         try_opts = _select_provider_options(try_providers)
         try:
-            s = ort.InferenceSession(model_path, sess_options=so, providers=try_providers, provider_options=try_opts)
-            logger.warning(f"[RapidOCR-ORT] built session with {try_providers} ✔️ providers={s.get_providers()}")
+            s = ort.InferenceSession(
+                model_path,
+                sess_options=so,
+                providers=try_providers,
+                provider_options=try_opts,
+            )
+            actual = s.get_providers() if hasattr(s, "get_providers") else []
+            if not actual or actual[0] != ep:
+                raise RuntimeError(f"requested {ep} but actual providers={actual}")
+            logger.warning(f"[RapidOCR-ORT] built session ✔️ requested={ep} actual={actual}")
             return s, errors
         except Exception as e:
-            msg = f"{ep} failed: {e}"
+            msg = f"{ep} failed or not actually used: {e}"
             errors.append(msg)
             logger.warning(f"[RapidOCR-ORT] {_short_model(model_path)} -> {msg}")
-    # Fallback CPU
+
+    # Fallback CPU (สุดท้ายจริง ๆ)
     try:
-        s = ort.InferenceSession(model_path, sess_options=so, providers=["CPUExecutionProvider"], provider_options=[{}])
+        s = ort.InferenceSession(
+            model_path,
+            sess_options=so,
+            providers=["CPUExecutionProvider"],
+            provider_options=[{}],
+        )
         logger.warning(f"[RapidOCR-ORT] fallback CPUExecutionProvider for {_short_model(model_path)}")
         return s, errors
     except Exception as e:
@@ -251,20 +276,18 @@ def _short_model(p: str) -> str:
 
 def _rebind_internal_sessions_if_cpu_only(reader: Any, providers: list[str], model_paths: dict[str, str]) -> None:
     """
-    รีบิลด์ใหม่ด้วยลำดับ strict: TRT-only -> CUDA-only -> CPU
-    และ log สาเหตุที่ GPU ล้มเหลว
+    รีบิลด์ใหม่ด้วยลำดับ strict ตาม providers ที่เลือกไว้ (ยึดตาม env ถ้ามี):
+      - CUDA -> TRT (หรือเฉพาะตัวที่มีใน providers)
+      - ถ้า GPU ใช้ไม่ได้ทั้งหมด ค่อย fallback CPU
     """
     if ort is None:
         return
 
     so = _make_sess_options()
 
-    # ลำดับความพยายาม
-    try_order = []
-    if "TensorrtExecutionProvider" in providers:
-        try_order.append("TensorrtExecutionProvider")
-    if "CUDAExecutionProvider" in providers:
-        try_order.append("CUDAExecutionProvider")
+    # ลำดับความพยายาม: ยึดตาม providers ที่ถูกเลือกไว้ (เช่นจาก env)
+    try_order_env = [ep for ep in providers if ep in ("CUDAExecutionProvider", "TensorrtExecutionProvider")]
+    try_order = try_order_env if try_order_env else ["CUDAExecutionProvider", "TensorrtExecutionProvider"]
 
     def _rebuild_one(name: str, sess_attr: str, key_in_paths: str):
         mp = model_paths.get(key_in_paths)
@@ -340,7 +363,7 @@ def _new_reader_instance() -> Any:
     except Exception as e:
         logger.debug(f"[RapidOCR-ORT] cannot inspect actual providers: {e}")
 
-    # 2) ถ้ายัง CPU-only ให้รีบิลด์ด้วย strict GPU → CPU
+    # 2) ถ้ายัง CPU-only ให้รีบิลด์ด้วย strict ตามลำดับ (ยึด env ถ้ามี)
     try:
         det_ok = hasattr(reader, "det_sess") and _session_uses_gpu(reader.det_sess)
         rec_ok = hasattr(reader, "rec_sess") and _session_uses_gpu(reader.rec_sess)
