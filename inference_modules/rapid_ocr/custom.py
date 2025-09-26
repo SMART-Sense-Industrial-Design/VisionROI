@@ -63,6 +63,7 @@ def _choose_providers() -> list[str]:
     if ort is not None:
         try:
             available = ort.get_available_providers()
+            print(f"onnxruntime available providers: {available}")
         except Exception:
             available = []
 
