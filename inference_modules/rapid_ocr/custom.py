@@ -54,7 +54,6 @@ def _choose_providers() -> list[str]:
     TensorRT -> CUDA -> CPU
     สามารถ override ด้วย env: RAPIDOCR_ORT_PROVIDERS="TensorrtExecutionProvider,CUDAExecutionProvider,CPUExecutionProvider"
     """
-    # ถ้าผู้ใช้กำหนดเองผ่าน env ให้เคารพตามนั้น
     env_val = os.getenv("RAPIDOCR_ORT_PROVIDERS")
     if env_val:
         providers = [p.strip() for p in env_val.split(",") if p.strip()]
@@ -67,7 +66,6 @@ def _choose_providers() -> list[str]:
         except Exception:
             available = []
 
-    # ลิสต์เป้าหมายตามลำดับความต้องการ
     preferred = [
         "TensorrtExecutionProvider",
         "CUDAExecutionProvider",
@@ -75,12 +73,9 @@ def _choose_providers() -> list[str]:
     ]
 
     if not available:
-        # ถ้าเช็คไม่ได้ ให้ส่ง preferred ไปก่อน (RapidOCR/ORT จะจัดการเอง)
         return preferred
 
-    # เลือกเฉพาะที่ระบบมี
     chosen = [p for p in preferred if p in available]
-    # เผื่อกรณีไม่มีสักอย่าง ให้ใช้ CPUExecutionProvider เป็น fallback
     if "CPUExecutionProvider" not in chosen:
         chosen.append("CPUExecutionProvider")
     return chosen
@@ -93,20 +88,33 @@ def _new_reader_instance() -> Any:
 
     _ensure_default_ort_envs()
     providers = _choose_providers()
-    logger.info(f"[RapidOCR-ORT] selected providers={providers}")
+    logger.info(f"[RapidOCR-ORT] requested providers={providers}")
 
-    # RapidOCR (onnxruntime) รองรับพารามิเตอร์ providers
     try:
         reader = RapidOCRLib(providers=providers)  # type: ignore[call-arg]
+        logger.info("[RapidOCR-ORT] RapidOCRLib accepted 'providers' argument ✅")
     except TypeError:
-        # เผื่อเวอร์ชันที่ไม่รองรับ providers ใน constructor
-        # (ส่วนใหญ่รองรับ แต่ใส่ fallback เฉยๆ)
         reader = RapidOCRLib()  # type: ignore[call-arg]
+        logger.warning("[RapidOCR-ORT] RapidOCRLib did NOT accept 'providers' argument ❌ (fallback to default)")
+
+    # แสดง providers ที่ถูกใช้จริงในแต่ละ session ถ้าเข้าถึงได้
+    try:
+        if hasattr(reader, "det_sess"):
+            _det_prov = getattr(reader.det_sess, "get_providers", lambda: [])()
+            logger.info(f"[RapidOCR-ORT] det_sess providers={_det_prov}")
+        if hasattr(reader, "rec_sess"):
+            _rec_prov = getattr(reader.rec_sess, "get_providers", lambda: [])()
+            logger.info(f"[RapidOCR-ORT] rec_sess providers={_rec_prov}")
+        if hasattr(reader, "cls_sess"):
+            _cls_prov = getattr(reader.cls_sess, "get_providers", lambda: [])()
+            logger.info(f"[RapidOCR-ORT] cls_sess providers={_cls_prov}")
+    except Exception as e:
+        logger.debug(f"[RapidOCR-ORT] cannot inspect actual providers: {e}")
+
     return reader
 
 
 def _get_reader():
-    """สร้างและคืนค่า RapidOCR แบบ singleton"""
     if RapidOCRLib is None:
         raise RuntimeError("rapidocr_onnxruntime library is not installed")
     global _reader
@@ -139,7 +147,7 @@ class RapidOCR(BaseOCR):
                 reader = self._get_reader()
                 result = _normalise_reader_output(reader(frame))
                 text = _extract_text(result)
-            except Exception as e:  # pragma: no cover - log any OCR error
+            except Exception as e:
                 self.logger.exception(
                     f"roi_id={roi_id} {self.MODULE_NAME} OCR error: {e}"
                 )
@@ -164,14 +172,13 @@ class RapidOCR(BaseOCR):
             last_ocr_times.clear()
             last_ocr_results.clear()
 
-# ตัวแปรควบคุมเวลาเรียก OCR แยกตาม roi พร้อมตัวล็อกป้องกันการเข้าถึงพร้อมกัน
+
 last_ocr_times: dict = {}
 last_ocr_results: dict = {}
 _last_ocr_lock = threading.Lock()
 
 
 def _normalise_reader_output(result: Any) -> Any:
-    """แปลงผลลัพธ์จาก RapidOCR ให้อยู่ในรูปที่นำไป extract ข้อความได้ง่าย"""
     if (
         isinstance(result, (list, tuple))
         and len(result) == 2
@@ -183,7 +190,6 @@ def _normalise_reader_output(result: Any) -> Any:
 
 
 def _extract_text(ocr_result: Any) -> str:
-    """แปลงผลลัพธ์ OCR ให้เป็น string เดียวอย่างมีประสิทธิภาพ"""
     if ocr_result is None:
         return ""
 
@@ -233,7 +239,6 @@ def _extract_text(ocr_result: Any) -> str:
 
 
 def _append_text_value(value: Any, pieces: list[str], queue: deque[Any]) -> bool:
-    """เพิ่มค่าข้อความลงใน pieces หรือแตกเป็นชิ้นย่อยถ้าจำเป็น"""
     if value is None:
         return True
 
@@ -255,7 +260,6 @@ def _append_text_value(value: Any, pieces: list[str], queue: deque[Any]) -> bool
 
 
 def _run_ocr_async(frame, roi_id, save, source) -> str:
-    """ประมวลผล OCR และบันทึกรูป"""
     try:
         reader = _get_reader()
         result = _normalise_reader_output(reader(frame))
@@ -268,7 +272,7 @@ def _run_ocr_async(frame, roi_id, save, source) -> str:
         )
         with _last_ocr_lock:
             last_ocr_results[roi_id] = text
-    except Exception as e:  # pragma: no cover - log any OCR error
+    except Exception as e:
         logger.exception(f"roi_id={roi_id} {MODULE_NAME} OCR error: {e}")
         text = ""
 
@@ -292,15 +296,13 @@ def process(
     cam_id: int | None = None,
     interval: float = 3.0,
 ):
-    """ประมวลผล ROI และเรียก OCR เมื่อเวลาห่างจากครั้งก่อน >= interval วินาที
-    (ค่าเริ่มต้น 3 วินาที) บันทึกรูปภาพแบบไม่บล็อกเมื่อระบุให้บันทึก"""
     logger = get_logger(MODULE_NAME, source)
 
     if cam_id is not None:
         try:
             import app  # type: ignore
             app.save_roi_flags[cam_id] = False
-        except Exception:  # pragma: no cover
+        except Exception:
             pass
 
     if isinstance(frame, Image.Image) and np is not None:
@@ -322,14 +324,10 @@ def process(
 
 
 def cleanup() -> None:
-    """รีเซ็ตสถานะและคืนทรัพยากรที่ใช้โดยโมดูล OCR"""
     global _reader
-
     with _reader_lock:
         _reader = None
-
     with _last_ocr_lock:
         last_ocr_times.clear()
         last_ocr_results.clear()
-
     gc.collect()
