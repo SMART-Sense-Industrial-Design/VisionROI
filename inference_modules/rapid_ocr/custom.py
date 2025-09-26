@@ -53,8 +53,9 @@ def _ensure_default_ort_envs() -> None:
     os.environ.setdefault("ORT_TENSORRT_ENGINE_CACHE_ENABLE", "1")
     os.environ.setdefault("ORT_TENSORRT_ENGINE_CACHE_PATH", str((_data_sources_root / "trt_cache").resolve()))
     os.environ.setdefault("ORT_TENSORRT_FP16_ENABLE", "1")
+    os.environ.setdefault("ORT_TENSORRT_VERBOSE_LOGGING", "1")  # เพิ่ม log ของ TRT EP
     os.environ.setdefault("ORT_CUDA_DEVICE_ID", "0")
-    os.environ.setdefault("ORT_LOGGING_LEVEL", "2")  # INFO
+    os.environ.setdefault("ORT_LOGGING_LEVEL", "0")  # VERBOSE เพื่อเก็บสาเหตุเวลา init GPU fail
     os.environ.setdefault("ORT_CUDA_GRAPH_ENABLE", "1")
     os.environ.setdefault("CUDA_VISIBLE_DEVICES", "0")
 
@@ -86,27 +87,30 @@ def _build_provider_priority() -> list[str]:
     return chosen
 
 
-def _build_provider_options(providers: list[str]) -> list[dict] | None:
+def _build_provider_options_map() -> dict[str, dict]:
     trt_opts = {
         "trt_max_workspace_size": str(1 << 30),  # 1GB
         "trt_engine_cache_enable": "1",
         "trt_engine_cache_path": os.environ.get("ORT_TENSORRT_ENGINE_CACHE_PATH", "trt_cache"),
         "trt_fp16_enable": os.environ.get("ORT_TENSORRT_FP16_ENABLE", "1"),
         "trt_cuda_graph_enable": "1",
+        "trt_timing_cache_enable": "1",
+        "trt_timing_cache_path": os.environ.get("ORT_TENSORRT_ENGINE_CACHE_PATH", "trt_cache"),
     }
     cuda_opts = {
         "device_id": os.environ.get("ORT_CUDA_DEVICE_ID", "0"),
         "arena_extend_strategy": "kSameAsRequested",
     }
-    opts: list[dict] = []
-    for p in providers:
-        if p == "TensorrtExecutionProvider":
-            opts.append(trt_opts)
-        elif p == "CUDAExecutionProvider":
-            opts.append(cuda_opts)
-        else:
-            opts.append({})
-    return opts
+    return {
+        "TensorrtExecutionProvider": trt_opts,
+        "CUDAExecutionProvider": cuda_opts,
+        "CPUExecutionProvider": {},
+    }
+
+
+def _select_provider_options(providers: list[str]) -> list[dict]:
+    m = _build_provider_options_map()
+    return [m.get(p, {}) for p in providers]
 
 
 def _make_sess_options() -> "ort.SessionOptions | None":
@@ -140,8 +144,8 @@ def _discover_rapidocr_model_paths() -> dict[str, str]:
     คืน dict ที่อาจมีคีย์ det/rec/cls -> absolute path ของ .onnx
     ลำดับค้นหา:
       1) ENV: RAPIDOCR_DET_PATH / RAPIDOCR_REC_PATH / RAPIDOCR_CLS_PATH
-      2) ~/.rapidocr/**/*.onnx (ดาวน์โหลดอัตโนมัติบ่อยสุด)
-      3) โฟลเดอร์ในแพ็กเกจ rapidocr_onnxruntime (เผื่อฝังมา)
+      2) ~/.rapidocr/**/*.onnx
+      3) โฟลเดอร์ในแพ็กเกจ rapidocr_onnxruntime
     """
     found: dict[str, str] = {}
 
@@ -205,38 +209,75 @@ def _discover_rapidocr_model_paths() -> dict[str, str]:
     return found
 
 
+# ================
+# Strict build 🔧
+# ================
+def _try_create_session_strict(model_path: str, order: list[str], so: "ort.SessionOptions") -> tuple[Any | None, list[str]]:
+    """
+    พยายามสร้าง session แบบ "strict":
+      - ทดลองทีละ EP โดย "ไม่" ใส่ CPU ในลิสต์ เพื่อให้ error เด้งออกมา
+      - เก็บข้อความ error ของแต่ละ EP เผื่อ debug
+      - ถ้า GPU ล้มเหลวทั้งหมด ค่อย fallback CPU ตอนท้าย
+    """
+    errors: list[str] = []
+    for ep in order:
+        try_providers = [ep]
+        try_opts = _select_provider_options(try_providers)
+        try:
+            s = ort.InferenceSession(model_path, sess_options=so, providers=try_providers, provider_options=try_opts)
+            logger.warning(f"[RapidOCR-ORT] built session with {try_providers} ✔️ providers={s.get_providers()}")
+            return s, errors
+        except Exception as e:
+            msg = f"{ep} failed: {e}"
+            errors.append(msg)
+            logger.warning(f"[RapidOCR-ORT] {_short_model(model_path)} -> {msg}")
+    # Fallback CPU
+    try:
+        s = ort.InferenceSession(model_path, sess_options=so, providers=["CPUExecutionProvider"], provider_options=[{}])
+        logger.warning(f"[RapidOCR-ORT] fallback CPUExecutionProvider for {_short_model(model_path)}")
+        return s, errors
+    except Exception as e:
+        errors.append(f"CPUExecutionProvider failed too: {e}")
+        logger.exception(f"[RapidOCR-ORT] even CPU failed for {_short_model(model_path)}: {e}")
+        return None, errors
+
+
+def _short_model(p: str) -> str:
+    try:
+        return str(Path(p).name)
+    except Exception:
+        return p
+
+
 def _rebind_internal_sessions_if_cpu_only(reader: Any, providers: list[str], model_paths: dict[str, str]) -> None:
     """
-    รีบิลด์ใหม่ด้วย GPU providers แม้ sess เดิมจะ None:
-      - ถ้ามีพาธโมเดล -> สร้าง InferenceSession ใหม่ แล้ว set กลับเข้า reader
+    รีบิลด์ใหม่ด้วยลำดับ strict: TRT-only -> CUDA-only -> CPU
+    และ log สาเหตุที่ GPU ล้มเหลว
     """
     if ort is None:
         return
 
     so = _make_sess_options()
 
+    # ลำดับความพยายาม
+    try_order = []
+    if "TensorrtExecutionProvider" in providers:
+        try_order.append("TensorrtExecutionProvider")
+    if "CUDAExecutionProvider" in providers:
+        try_order.append("CUDAExecutionProvider")
+
     def _rebuild_one(name: str, sess_attr: str, key_in_paths: str):
         mp = model_paths.get(key_in_paths)
         if not mp:
             logger.warning(f"[RapidOCR-ORT] cannot rebuild {name}_sess: model path not found")
             return
-
-        try:
-            logger.warning(f"[RapidOCR-ORT] rebuilding {name}_sess with {providers} from model: {mp}")
-            try:
-                new_sess = ort.InferenceSession(
-                    mp,
-                    sess_options=so,
-                    providers=providers,
-                    provider_options=_build_provider_options(providers),
-                )
-            except TypeError:
-                new_sess = ort.InferenceSession(mp, sess_options=so, providers=providers)
-            setattr(reader, sess_attr, new_sess)
-            if hasattr(new_sess, "get_providers"):
-                logger.warning(f"[RapidOCR-ORT] {name}_sess providers now = {new_sess.get_providers()}")
-        except Exception as e:
-            logger.exception(f"[RapidOCR-ORT] failed to rebuild {name}_sess: {e}")
+        sess, errs = _try_create_session_strict(mp, try_order, so)
+        if errs:
+            logger.warning(f"[RapidOCR-ORT] {_short_model(mp)} GPU init errors: {errs}")
+        if sess is not None:
+            setattr(reader, sess_attr, sess)
+            if hasattr(sess, "get_providers"):
+                logger.warning(f"[RapidOCR-ORT] {name}_sess providers now = {sess.get_providers()}")
 
     _rebuild_one("det", "det_sess", "det")
     _rebuild_one("rec", "rec_sess", "rec")
@@ -262,30 +303,20 @@ def _new_reader_instance() -> Any:
 
     _ensure_default_ort_envs()
     providers = _build_provider_priority()
-    provider_options = _build_provider_options(providers)
     model_paths = _discover_rapidocr_model_paths()
     logger.warning(f"[RapidOCR-ORT] requested providers={providers}")
 
+    # 1) พยายามส่ง providers + model paths เข้า RapidOCRLib โดยตรง (ถ้ารองรับ)
     reader = None
-
-    # 1) พยายามส่ง providers + model paths เข้า RapidOCRLib โดยตรง
     try:
-        kwargs = {"providers": providers}
-        if provider_options is not None:
-            kwargs["provider_options"] = provider_options  # type: ignore[assignment]
-        for k in ("det_path", "det_model_path"):
-            if k not in kwargs and "det" in model_paths:
-                kwargs[k] = model_paths["det"]  # type: ignore[index]
-                break
-        for k in ("rec_path", "rec_model_path"):
-            if k not in kwargs and "rec" in model_paths:
-                kwargs[k] = model_paths["rec"]  # type: ignore[index]
-                break
-        for k in ("cls_path", "cls_model_path"):
-            if k not in kwargs and "cls" in model_paths:
-                kwargs[k] = model_paths["cls"]  # type: ignore[index]
-                break
-
+        kwargs: dict[str, Any] = {"providers": providers}
+        # ใส่ path ถ้าจับได้
+        if "det" in model_paths:
+            kwargs.setdefault("det_path", model_paths["det"])
+        if "rec" in model_paths:
+            kwargs.setdefault("rec_path", model_paths["rec"])
+        if "cls" in model_paths:
+            kwargs.setdefault("cls_path", model_paths["cls"])
         reader = RapidOCRLib(**kwargs)  # type: ignore
         logger.warning("[RapidOCR-ORT] RapidOCRLib created with providers(+paths if supported) ✅")
     except TypeError:
@@ -309,7 +340,7 @@ def _new_reader_instance() -> Any:
     except Exception as e:
         logger.debug(f"[RapidOCR-ORT] cannot inspect actual providers: {e}")
 
-    # 2) ถ้ายัง CPU-only ให้รีบิลด์ด้วย ORT + model_paths
+    # 2) ถ้ายัง CPU-only ให้รีบิลด์ด้วย strict GPU → CPU
     try:
         det_ok = hasattr(reader, "det_sess") and _session_uses_gpu(reader.det_sess)
         rec_ok = hasattr(reader, "rec_sess") and _session_uses_gpu(reader.rec_sess)
