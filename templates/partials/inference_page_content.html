@@ -655,7 +655,8 @@
         } else {
           showAlert('Camera started', 'success');
         }
-        startLogUpdates(cfg.name);
+        const logSourceName = cfg.name || name;
+        startLogUpdates(logSourceName);
         setRunningUI();
       }
 
@@ -749,9 +750,32 @@
       }
 
       async function checkStatus() {
-        const name = sourceSelect.value;
+        let name = sourceSelect.value || '';
         const res = await fetchWithStatus(`/inference_status/${cam}`);
         const data = await res.json();
+        const statusSource = typeof data.source === 'string' ? data.source : '';
+        const statusGroupRaw = typeof data.group === 'string' ? data.group : '';
+        const normalizedStatusGroup = normalizeGroupName(statusGroupRaw);
+        if (statusSource) {
+          const options = Array.from(sourceSelect.options || []);
+          const hasOption = options.some(opt => opt.value === statusSource);
+          if (!hasOption) {
+            const opt = document.createElement('option');
+            opt.value = statusSource;
+            opt.textContent = statusSource;
+            sourceSelect.appendChild(opt);
+          }
+          if (sourceSelect.value !== statusSource) {
+            sourceSelect.value = statusSource;
+            storeValue('source', statusSource);
+            updateHeaderSourceLabel();
+          }
+        }
+        if (!name && statusSource) {
+          name = statusSource;
+          storeValue('source', statusSource);
+          updateHeaderSourceLabel();
+        }
         if (data.running && name) {
           openSocket();
           const cfgRes = await fetchWithStatus(`/source_config?name=${encodeURIComponent(name)}`);
@@ -766,6 +790,12 @@
           allRois = roiEntries;
           rebuildRoiGroupIndex(roiEntries);
           resetScoreboard();
+          if (normalizedStatusGroup) {
+            setActiveGroup(normalizedStatusGroup);
+            if (pageNameEl) {
+              pageNameEl.textContent = normalizedStatusGroup;
+            }
+          }
           const hasAnyRoiEntry = roiEntries.length > 0;
           if (roiSocket) {
             roiSocket.close();
@@ -775,7 +805,8 @@
             openRoiSocket();
           }
           stopLogUpdates();
-          startLogUpdates(cfg.name);
+          const logSourceName = cfg.name || statusSource || name;
+          startLogUpdates(logSourceName);
           setRunningUI();
           running = true;
         } else {

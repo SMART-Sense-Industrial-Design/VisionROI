@@ -2857,7 +2857,16 @@ async def stop_roi_stream(cam_id: str):
 @app.route('/inference_status/<string:cam_id>', methods=["GET"])
 async def inference_status(cam_id: str):
     running = inference_tasks.get(cam_id) is not None and not inference_tasks[cam_id].done()
-    return jsonify({"running": running, "cam_id": cam_id})
+    source = active_sources.get(cam_id, "")
+    group = inference_groups.get(cam_id)
+    if not isinstance(group, str):
+        group = ""
+    return jsonify({
+        "running": running,
+        "cam_id": cam_id,
+        "source": source,
+        "group": group,
+    })
 
 
 @app.route('/roi_stream_status/<string:cam_id>', methods=["GET"])
