@@ -651,7 +651,8 @@
             } else {
                 showAlert('Camera started', 'success');
             }
-            startLogUpdates(cfg.name);
+            const logSourceName = cfg.name || name;
+            startLogUpdates(logSourceName);
             setRunningUI();
         }
 
@@ -740,9 +741,31 @@
         }
 
         async function checkStatus() {
-            const name = sourceSelect.value;
+            let name = sourceSelect.value || '';
             const res = await fetchWithStatus(`/inference_status/${cam}`);
             const data = await res.json();
+            const statusSource = typeof data.source === 'string' ? data.source : '';
+            const statusGroup = typeof data.group === 'string' ? data.group : '';
+            if (statusSource) {
+                const options = Array.from(sourceSelect.options || []);
+                const hasOption = options.some(opt => opt.value === statusSource);
+                if (!hasOption) {
+                    const opt = document.createElement('option');
+                    opt.value = statusSource;
+                    opt.textContent = statusSource;
+                    sourceSelect.appendChild(opt);
+                }
+                if (sourceSelect.value !== statusSource) {
+                    sourceSelect.value = statusSource;
+                    storeValue('source', statusSource);
+                    updateHeaderSourceLabel();
+                }
+            }
+            if (!name && statusSource) {
+                name = statusSource;
+                storeValue('source', statusSource);
+                updateHeaderSourceLabel();
+            }
             if (data.running && name) {
                 openSocket();
                 const cfgRes = await fetchWithStatus(`/source_config?name=${encodeURIComponent(name)}`);
@@ -755,8 +778,9 @@
                 const roiData = await roiRes.json();
                 allRois = roiData.rois || [];
                 const roiList = allRois.filter(r => (r.type ?? 'roi') === 'roi');
-                const activeGroup = loadGroupOptions(roiList);
-                const groupToUse = activeGroup || '';
+                const normalizedStatusGroup = typeof statusGroup === 'string' ? statusGroup : '';
+                const activeGroup = loadGroupOptions(roiList, normalizedStatusGroup);
+                const groupToUse = (normalizedStatusGroup || activeGroup || '').trim();
                 if (groupToUse === 'all') {
                     rois = roiList;
                 } else if (groupToUse) {
@@ -771,13 +795,15 @@
                         updateRoiModuleLabel(r.id);
                     }
                 });
+                lastActiveGroup = groupToUse || '';
                 if (roiSocket) {
                     roiSocket.close();
                     roiSocket = null;
                 }
                 openRoiSocket();
                 stopLogUpdates();
-                startLogUpdates(cfg.name);
+                const logSourceName = cfg.name || statusSource || name;
+                startLogUpdates(logSourceName);
                 setRunningUI();
                 running = true;
             } else {
