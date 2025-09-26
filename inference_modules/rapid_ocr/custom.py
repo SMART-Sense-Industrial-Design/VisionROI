@@ -366,6 +366,43 @@ def _build_provider_priority() -> list[str]:
     return chosen
 
 
+def _new_reader_ort() -> Any:
+    if RapidOCROrt is None:
+        raise RuntimeError(f"rapidocr_onnxruntime import failed: {_ort_import_err}")
+
+    _ensure_default_ort_envs()
+    providers = _build_provider_priority()
+    model_paths = _discover_rapidocr_onnx_models()
+
+    # Try pass providers + paths
+    try:
+        kwargs: dict[str, Any] = {"providers": providers}
+        if "det" in model_paths:
+            kwargs.setdefault("det_path", model_paths["det"])
+        if "rec" in model_paths:
+            kwargs.setdefault("rec_path", model_paths["rec"])
+        if "cls" in model_paths:
+            kwargs.setdefault("cls_path", model_paths["cls"])
+        reader = RapidOCROrt(**kwargs)  # type: ignore
+        logger.info(f"[RapidOCR-ORT] created with providers={providers} (+paths if supported)")
+    except TypeError:
+        reader = RapidOCROrt()  # type: ignore
+        logger.warning("[RapidOCR-ORT] providers/paths not supported by this version; using defaults")
+    except Exception as e:
+        logger.exception(f"[RapidOCR-ORT] init failed: {e}")
+        raise
+
+    # Warmup (and force sessions init internally)
+    try:
+        import numpy as _np
+        _ = reader(_np.zeros((8, 8, 3), dtype=_np.uint8))
+        logger.info("[RapidOCR-ORT] warmup executed")
+    except Exception as e:
+        logger.warning(f"[RapidOCR-ORT] warmup failed (ignored): {e}")
+
+    return reader
+
+
 def _discover_rapidocr_onnx_models() -> dict[str, str]:
     found: dict[str, str] = {}
     env_keys = [("det", "RAPIDOCR_DET_PATH"), ("rec", "RAPIDOCR_REC_PATH"), ("cls", "RAPIDOCR_CLS_PATH")]
@@ -427,49 +464,10 @@ def _discover_rapidocr_onnx_models() -> dict[str, str]:
     return found
 
 
-def _new_reader_ort() -> Any:
-    if RapidOCROrt is None:
-        raise RuntimeError(f"rapidocr_onnxruntime import failed: {_ort_import_err}")
-
-    _ensure_default_ort_envs()
-    providers = _build_provider_priority()
-    model_paths = _discover_rapidocr_onnx_models()
-
-    # Try pass providers + paths
-    try:
-        kwargs: dict[str, Any] = {"providers": providers}
-        if "det" in model_paths:
-            kwargs.setdefault("det_path", model_paths["det"])
-        if "rec" in model_paths:
-            kwargs.setdefault("rec_path", model_paths["rec"])
-        if "cls" in model_paths:
-            kwargs.setdefault("cls_path", model_paths["cls"])
-        reader = RapidOCROrt(**kwargs)  # type: ignore
-        logger.info(f"[RapidOCR-ORT] created with providers={providers} (+paths if supported)")
-    except TypeError:
-        reader = RapidOCROrt()  # type: ignore
-        logger.warning("[RapidOCR-ORT] providers/paths not supported by this version; using defaults")
-    except Exception as e:
-        logger.exception(f"[RapidOCR-ORT] init failed: {e}")
-        raise
-
-    # Warmup (and force sessions init internally)
-    try:
-        import numpy as _np
-        _ = reader(_np.zeros((8, 8, 3), dtype=_np.uint8))
-        logger.info("[RapidOCR-ORT] warmup executed")
-    except Exception as e:
-        logger.warning(f"[RapidOCR-ORT] warmup failed (ignored): {e}")
-
-    return reader
-
-
 # ====================================
 # Reader factory (choose actual backend)
 # ====================================
 def _new_reader_instance() -> Any:
-    global _USE_PADDLE, _USE_ORT  # <-- ต้องประกาศก่อน assign เสมอ
-
     logger.info(
         f"[rapid_ocr] sys.executable={sys.executable} backend_pref={_BACKEND_FORCED} "
         f"(paddle_err={_paddle_import_err}, ort_err={_ort_import_err})"
@@ -487,6 +485,7 @@ def _new_reader_instance() -> Any:
             else:
                 try:
                     reader = _new_reader_paddle()
+                    global _USE_PADDLE, _USE_ORT
                     _USE_PADDLE, _USE_ORT = True, False
                     logger.info("[rapid_ocr] using Paddle backend ✅")
                     return reader
@@ -501,6 +500,7 @@ def _new_reader_instance() -> Any:
             else:
                 try:
                     reader = _new_reader_ort()
+                    global _USE_PADDLE, _USE_ORT
                     _USE_PADDLE, _USE_ORT = False, True
                     logger.info("[rapid_ocr] using ONNXRuntime backend ✅")
                     return reader
