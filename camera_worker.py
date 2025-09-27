@@ -56,7 +56,7 @@ class CameraWorker:
         backend: str = "opencv",
         # === ตัวเลือก robust ===
         robust: bool = True,        # เปิด watchdog + fallback transport
-        low_latency: bool = False,  # โหมดหน่วงต่ำ (ยอม jitter/เฟรมเสียได้มากขึ้น)
+        low_latency: bool | None = None,  # โหมดหน่วงต่ำ (ยอม jitter/เฟรมเสียได้มากขึ้น)
         loglevel: str = "error",    # ลดสแปม log จาก ffmpeg
         # === พารามิเตอร์ watchdog ===
         err_window_secs: float = 5.0,
@@ -70,7 +70,7 @@ class CameraWorker:
         self.backend = backend
 
         self.robust = robust
-        self.low_latency = low_latency
+        self.low_latency = self._resolve_low_latency(low_latency)
         self._loglevel = loglevel
 
         self._cap = None
@@ -171,6 +171,24 @@ class CameraWorker:
 
         else:
             raise ValueError(f"Unknown backend: {backend}")
+
+    @staticmethod
+    def _resolve_low_latency(value: bool | None) -> bool:
+        """ตัดสินค่าดีฟอลต์ของโหมด low-latency จาก ENV หรืออาร์กิวเมนต์"""
+
+        if value is not None:
+            return bool(value)
+
+        env_val = os.getenv("CAMERA_FFMPEG_LOW_LATENCY")
+        if env_val is None:
+            return True
+
+        env_val = env_val.strip().lower()
+        if env_val in {"1", "true", "yes", "on"}:
+            return True
+        if env_val in {"0", "false", "no", "off"}:
+            return False
+        return True
 
     def _maybe_image_path(self, src) -> Path | None:
         if isinstance(src, (str, os.PathLike)):

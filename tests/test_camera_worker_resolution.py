@@ -36,3 +36,19 @@ def test_camera_worker_sets_resolution():
         app.cv2.VideoCapture = orig_vc
         app.cv2.CAP_PROP_FRAME_WIDTH = orig_w
         app.cv2.CAP_PROP_FRAME_HEIGHT = orig_h
+
+
+def test_camera_worker_low_latency_env(monkeypatch):
+    import camera_worker
+
+    monkeypatch.delenv("CAMERA_FFMPEG_LOW_LATENCY", raising=False)
+    assert camera_worker.CameraWorker._resolve_low_latency(None) is True
+
+    monkeypatch.setenv("CAMERA_FFMPEG_LOW_LATENCY", "0")
+    assert camera_worker.CameraWorker._resolve_low_latency(None) is False
+
+    monkeypatch.setenv("CAMERA_FFMPEG_LOW_LATENCY", "yes")
+    assert camera_worker.CameraWorker._resolve_low_latency(None) is True
+
+    assert camera_worker.CameraWorker._resolve_low_latency(False) is False
+    assert camera_worker.CameraWorker._resolve_low_latency(True) is True

@@ -17,7 +17,8 @@ import os
 import re
 import sys
 import argparse
-from collections import defaultdict
+from collections import defaultdict, deque
+from dataclasses import dataclass
 from types import ModuleType
 from pathlib import Path
 import contextlib
@@ -47,9 +48,9 @@ camera_sources: dict[str, int | str] = {}
 camera_resolutions: dict[str, tuple[int | None, int | None]] = {}
 camera_backends: dict[str, str] = {}
 camera_locks: dict[str, asyncio.Lock] = {}
-frame_queues: dict[str, asyncio.Queue[bytes]] = {}
+frame_queues: dict[str, asyncio.Queue["FramePacket | None"]] = {}
 inference_tasks: dict[str, asyncio.Task | None] = {}
-roi_frame_queues: dict[str, asyncio.Queue[bytes | None]] = {}
+roi_frame_queues: dict[str, asyncio.Queue["FramePacket | None"]] = {}
 roi_result_queues: dict[str, asyncio.Queue[str | None]] = {}
 roi_tasks: dict[str, asyncio.Task | None] = {}
 inference_rois: dict[str, list[dict]] = {}
@@ -1395,11 +1396,11 @@ def load_custom_module(name: str) -> ModuleType | None:
 # =========================
 # Queues getters
 # =========================
-def get_frame_queue(cam_id: str) -> asyncio.Queue[bytes]:
+def get_frame_queue(cam_id: str) -> asyncio.Queue['FramePacket | None']:
     return frame_queues.setdefault(cam_id, asyncio.Queue(maxsize=1))
 
 
-def get_roi_frame_queue(cam_id: str) -> asyncio.Queue[bytes | None]:
+def get_roi_frame_queue(cam_id: str) -> asyncio.Queue['FramePacket | None']:
     return roi_frame_queues.setdefault(cam_id, asyncio.Queue(maxsize=1))
 
 
@@ -1419,8 +1420,17 @@ def _drain_queue(queue: asyncio.Queue[Any] | None) -> None:
 # =========================
 # Frame readers
 # =========================
+@dataclass(slots=True)
+class FramePacket:
+    payload: bytes
+    created_at: float
+    frame_time: float | None = None
+
+
 async def read_and_queue_frame(
-    cam_id: str, queue: asyncio.Queue[bytes], frame_processor=None
+    cam_id: str,
+    queue: asyncio.Queue['FramePacket | None'],
+    frame_processor=None,
 ) -> None:
     worker = camera_workers.get(cam_id)
     if worker is None:
@@ -1433,8 +1443,17 @@ async def read_and_queue_frame(
     if np is not None and hasattr(frame, "size") and frame.size == 0:
         await asyncio.sleep(0.01)
         return
+    frame_time = time.time()
     if frame_processor:
-        frame = await frame_processor(frame)
+        processed = await frame_processor(frame, frame_time)
+        if isinstance(processed, tuple):
+            frame, maybe_ts = processed
+            if frame is None:
+                return
+            if isinstance(maybe_ts, (int, float)):
+                frame_time = float(maybe_ts)
+        else:
+            frame = processed
         if frame is None:
             return
     try:
@@ -1453,7 +1472,8 @@ async def read_and_queue_frame(
             queue.get_nowait()
         except asyncio.QueueEmpty:
             pass
-    await queue.put(frame_bytes)
+    packet = FramePacket(payload=frame_bytes, created_at=time.monotonic(), frame_time=frame_time)
+    await queue.put(packet)
     await asyncio.sleep(0)
 
 
@@ -1625,7 +1645,7 @@ async def run_inference_loop(cam_id: str):
         except Exception:
             pass
 
-    async def process_frame(frame):
+    async def process_frame(frame, frame_timestamp):
         cleanup_pending_results()
         rois = inference_rois.get(cam_id, [])
         forced_group = inference_groups.get(cam_id)
@@ -1635,13 +1655,17 @@ async def run_inference_loop(cam_id: str):
         source_name = active_sources.get(cam_id, '')
         draw_page_boxes = inference_draw_page_boxes.get(cam_id, True)
         if not rois:
-            return cv2.resize(frame, (0, 0), fx=0.5, fy=0.5)
+            return cv2.resize(frame, (0, 0), fx=0.5, fy=0.5), frame_timestamp
         now = time.time()
         interval = inference_intervals.get(cam_id, 1.0)
         meets_interval = now - last_inference_times.get(cam_id, 0.0) >= interval
 
         save_flag = bool(save_roi_flags.get(cam_id))
-        frame_time = time.time()
+        frame_time = (
+            float(frame_timestamp)
+            if isinstance(frame_timestamp, (int, float))
+            else time.time()
+        )
         best_score = -1.0
         scores: list[dict[str, float | str]] = []
         has_page = False
@@ -2017,7 +2041,7 @@ async def run_inference_loop(cam_id: str):
                 cv2.LINE_AA,
             )
 
-        return cv2.resize(frame, (0, 0), fx=0.5, fy=0.5)
+        return cv2.resize(frame, (0, 0), fx=0.5, fy=0.5), frame_time
 
     queue = get_frame_queue(cam_id)
     try:
@@ -2094,7 +2118,7 @@ async def start_camera_task(
 async def stop_camera_task(
     cam_id: str,
     task_dict: dict[str, asyncio.Task | None],
-    queue_dict: dict[str, asyncio.Queue[bytes | None]] | None = None,
+    queue_dict: dict[str, asyncio.Queue['FramePacket | None']] | None = None,
 ):
     async with get_cam_lock(cam_id):
         task = task_dict.pop(cam_id, None)
@@ -2144,16 +2168,66 @@ async def stop_camera_task(
 # =========================
 # WebSockets
 # =========================
+STREAM_MAX_FRAME_DELAY = float(os.getenv("STREAM_MAX_FRAME_DELAY", "1.5") or 1.5)
+
+
 async def _stream_queue_over_websocket(
-    queue: asyncio.Queue[bytes | str | None],
+    queue: asyncio.Queue[FramePacket | bytes | str | None],
     ws: Any = websocket,
 ) -> None:
-    """Relay items from *queue* to the active websocket connection."""
+    """Relay items from *queue* to the active websocket connection.
+
+    ถ้าเครือข่ายช้า เฟรมภาพจะต่อคิวจนเกิดดีเลย์สะสมเรื่อย ๆ
+    จึงดึงเฉพาะเฟรมล่าสุดและทิ้งเฟรมภาพเก่าที่รอคิวอยู่ทันที
+    (เฉพาะข้อมูลประเภทไบต์) ขณะที่ข้อมูลชนิดอื่นยังถูกส่งครบถ้วน
+    """
     with contextlib.suppress(RuntimeError):
         await ws.accept()
     try:
+        pending: deque[FramePacket | bytes | str | None] = deque()
         while True:
-            item = await queue.get()
+            if pending:
+                item = pending.popleft()
+            else:
+                item = await queue.get()
+            latest_packet: FramePacket | bytes | str | None
+            if isinstance(item, FramePacket):
+                latest_packet = item
+            elif isinstance(item, (bytes, bytearray, memoryview)):
+                payload = bytes(item) if not isinstance(item, bytes) else item
+                latest_packet = FramePacket(payload=payload, created_at=time.monotonic())
+            else:
+                latest_packet = item
+
+            if isinstance(latest_packet, FramePacket):
+                packet = latest_packet
+                while not queue.empty():
+                    try:
+                        maybe_next = queue.get_nowait()
+                    except asyncio.QueueEmpty:
+                        break
+                    if maybe_next is None:
+                        packet = None
+                        break
+                    if isinstance(maybe_next, FramePacket):
+                        packet = maybe_next
+                        continue
+                    if isinstance(maybe_next, (bytes, bytearray, memoryview)):
+                        payload = bytes(maybe_next) if not isinstance(maybe_next, bytes) else maybe_next
+                        packet = FramePacket(payload=payload, created_at=time.monotonic())
+                        continue
+                    pending.append(maybe_next)
+                if packet is None:
+                    item = None
+                else:
+                    if STREAM_MAX_FRAME_DELAY > 0:
+                        age = time.monotonic() - packet.created_at
+                        if age > STREAM_MAX_FRAME_DELAY:
+                            # เฟรมเก่าเกินกำหนด ทิ้งแล้วขอเฟรมใหม่
+                            continue
+                    item = packet.payload
+            else:
+                item = latest_packet
             if item is None:
                 await ws.close(code=1000)
                 break
@@ -2227,8 +2301,6 @@ async def apply_camera_settings(cam_id: str, data: dict) -> bool:
                 read_interval=0.0,       # ถ้าอยากเว้นจังหวะอ่านใส่เพิ่มได้
                 backend=backend,         # ใช้ "ffmpeg" เพื่อโหมด robust
                 robust=True,             # เปิด fallback/วอทช์ด็อก
-                low_latency=False,       # ถ้าจะเน้นหน่วงต่ำค่อยสลับ True
-                use_hw_decode=True,      # h264_v4l2m2m ถ้ามีใน ffmpeg build
                 loglevel="error",        # ลดสแปม log swscale
             )
 
