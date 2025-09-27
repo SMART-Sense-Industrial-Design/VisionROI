@@ -1638,9 +1638,7 @@ async def run_inference_loop(cam_id: str):
             return cv2.resize(frame, (0, 0), fx=0.5, fy=0.5)
         now = time.time()
         interval = inference_intervals.get(cam_id, 1.0)
-        should_infer = now - last_inference_times.get(cam_id, 0.0) >= interval
-        if should_infer:
-            last_inference_times[cam_id] = now
+        meets_interval = now - last_inference_times.get(cam_id, 0.0) >= interval
 
         save_flag = bool(save_roi_flags.get(cam_id))
         frame_time = time.time()
@@ -1649,103 +1647,80 @@ async def run_inference_loop(cam_id: str):
         has_page = False
         output = last_inference_outputs.get(cam_id, selected_group or '')
 
-        if should_infer:
-            for i, r in enumerate(rois):
-                if np is None or r.get('type') != 'page':
-                    continue
-                has_page = True
-                pts = r.get('points', [])
-                if len(pts) != 4:
-                    continue
-                src = np.array([[p['x'], p['y']] for p in pts], dtype=np.float32)
-                color = (0, 255, 0)
-                width_a = np.linalg.norm(src[0] - src[1])
-                width_b = np.linalg.norm(src[2] - src[3])
-                max_w = int(max(width_a, width_b))
-                height_a = np.linalg.norm(src[0] - src[3])
-                height_b = np.linalg.norm(src[1] - src[2])
-                max_h = int(max(height_a, height_b))
-                dst = np.array([[0, 0], [max_w - 1, 0], [max_w - 1, max_h - 1], [0, max_h - 1]], dtype=np.float32)
-                matrix = cv2.getPerspectiveTransform(src, dst)
-                roi = await asyncio.to_thread(cv2.warpPerspective, frame, matrix, (max_w, max_h))
-                template = r.get('_template')
-                if template is not None:
-                    try:
-                        roi_gray = await asyncio.to_thread(cv2.cvtColor, roi, cv2.COLOR_BGR2GRAY)
-                    except Exception:
-                        roi_gray = None
-                    if roi_gray is not None:
-                        if roi_gray.shape != template.shape:
-                            roi_gray = await asyncio.to_thread(cv2.resize, roi_gray, (template.shape[1], template.shape[0]))
-                        try:
-                            res = await asyncio.to_thread(cv2.matchTemplate, roi_gray, template, cv2.TM_CCOEFF_NORMED)
-                            score = float(res[0][0])
-                            scores.append({'page': r.get('page', ''), 'score': score})
-                            if score > best_score:
-                                best_score = score
-                                output = r.get('page', '')
-                        except Exception:
-                            pass
-                if draw_page_boxes:
-                    cv2.polylines(frame, [src.astype(int)], True, color, 2)
-                    label_pt = src[0].astype(int)
-                    cv2.putText(
-                        frame,
-                        str(r.get('id', i + 1)),
-                        (int(label_pt[0]), max(0, int(label_pt[1]) - 5)),
-                        cv2.FONT_HERSHEY_SIMPLEX,
-                        0.5,
-                        color,
-                        1,
-                        cv2.LINE_AA,
-                    )
-
-            if not has_page:
-                output = forced_group or ''
-            elif best_score <= PAGE_SCORE_THRESHOLD:
-                output = ''
-
-            if forced_group and forced_group != 'all':
-                selected_group = forced_group
-            else:
-                selected_group = output
-
-            scores.sort(key=lambda x: x['score'], reverse=True)
-
-            active_group = selected_group or ''
-            if active_group or scores:
+        for i, r in enumerate(rois):
+            if np is None or r.get('type') != 'page':
+                continue
+            has_page = True
+            pts = r.get('points', [])
+            if len(pts) != 4:
+                continue
+            src = np.array([[p['x'], p['y']] for p in pts], dtype=np.float32)
+            color = (0, 255, 0)
+            width_a = np.linalg.norm(src[0] - src[1])
+            width_b = np.linalg.norm(src[2] - src[3])
+            max_w = int(max(width_a, width_b))
+            height_a = np.linalg.norm(src[0] - src[3])
+            height_b = np.linalg.norm(src[1] - src[2])
+            max_h = int(max(height_a, height_b))
+            dst = np.array([[0, 0], [max_w - 1, 0], [max_w - 1, max_h - 1], [0, max_h - 1]], dtype=np.float32)
+            matrix = cv2.getPerspectiveTransform(src, dst)
+            roi = await asyncio.to_thread(cv2.warpPerspective, frame, matrix, (max_w, max_h))
+            template = r.get('_template')
+            if template is not None:
                 try:
-                    q = get_roi_result_queue(cam_id)
-                    payload = json.dumps({'group': active_group, 'scores': scores})
-                    if q.full():
-                        q.get_nowait()
-                    await q.put(payload)
+                    roi_gray = await asyncio.to_thread(cv2.cvtColor, roi, cv2.COLOR_BGR2GRAY)
                 except Exception:
-                    pass
-
-            last_inference_outputs[cam_id] = active_group
-        else:
+                    roi_gray = None
+                if roi_gray is not None:
+                    if roi_gray.shape != template.shape:
+                        roi_gray = await asyncio.to_thread(cv2.resize, roi_gray, (template.shape[1], template.shape[0]))
+                    try:
+                        res = await asyncio.to_thread(cv2.matchTemplate, roi_gray, template, cv2.TM_CCOEFF_NORMED)
+                        score = float(res[0][0])
+                        scores.append({'page': r.get('page', ''), 'score': score})
+                        if score > best_score:
+                            best_score = score
+                            output = r.get('page', '')
+                    except Exception:
+                        pass
             if draw_page_boxes:
-                for i, r in enumerate(rois):
-                    if np is None or r.get('type') != 'page':
-                        continue
-                    pts = r.get('points', [])
-                    if len(pts) != 4:
-                        continue
-                    src = np.array([[p['x'], p['y']] for p in pts], dtype=np.float32)
-                    color = (0, 255, 0)
-                    cv2.polylines(frame, [src.astype(int)], True, color, 2)
-                    label_pt = src[0].astype(int)
-                    cv2.putText(
-                        frame,
-                        str(r.get('id', i + 1)),
-                        (int(label_pt[0]), max(0, int(label_pt[1]) - 5)),
-                        cv2.FONT_HERSHEY_SIMPLEX,
-                        0.5,
-                        color,
-                        1,
-                        cv2.LINE_AA,
-                    )
+                cv2.polylines(frame, [src.astype(int)], True, color, 2)
+                label_pt = src[0].astype(int)
+                cv2.putText(
+                    frame,
+                    str(r.get('id', i + 1)),
+                    (int(label_pt[0]), max(0, int(label_pt[1]) - 5)),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.5,
+                    color,
+                    1,
+                    cv2.LINE_AA,
+                )
+
+        if not has_page:
+            output = forced_group or ''
+        elif best_score <= PAGE_SCORE_THRESHOLD:
+            output = ''
+
+        if forced_group and forced_group != 'all':
+            selected_group = forced_group
+        else:
+            selected_group = output
+
+        scores.sort(key=lambda x: x['score'], reverse=True)
+
+        active_group = selected_group or ''
+        if active_group or scores:
+            try:
+                q = get_roi_result_queue(cam_id)
+                payload = json.dumps({'group': active_group, 'scores': scores})
+                if q.full():
+                    q.get_nowait()
+                await q.put(payload)
+            except Exception:
+                pass
+
+        last_inference_outputs[cam_id] = active_group
 
         if selected_group is None:
             if forced_group and forced_group != 'all':
@@ -1762,7 +1737,7 @@ async def run_inference_loop(cam_id: str):
                 return roi_group == selected_group
             return False
 
-        loop = asyncio.get_running_loop() if should_infer else None
+        loop = asyncio.get_running_loop() if meets_interval else None
         scheduled_any = False
         for i, r in enumerate(rois):
             if r.get('type') != 'roi':
@@ -1779,7 +1754,7 @@ async def run_inference_loop(cam_id: str):
 
             src = np.array([[p['x'], p['y']] for p in pts], dtype=np.float32)
 
-            if should_infer and r.get('module'):
+            if meets_interval and r.get('module'):
                 mod_name = r.get('module')
                 module_entry = module_cache.get(mod_name)
                 if module_entry is None:
@@ -1995,10 +1970,11 @@ async def run_inference_loop(cam_id: str):
                                     )
 
                         fut.add_done_callback(_on_done)
-            elif should_infer and not r.get('module'):
+            elif meets_interval and not r.get('module'):
                 print(f"module missing for ROI {r.get('id', i)}")
 
         if scheduled_any:
+            last_inference_times[cam_id] = now
             pending_key = (cam_id, frame_time)
             pending_ready.add(pending_key)
             if pending_key not in pending_context:
