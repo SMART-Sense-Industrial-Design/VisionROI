@@ -48,3 +48,17 @@ def test_rapid_ocr_accepts_object_with_txts(monkeypatch):
     frame = np.zeros((10, 10, 3), dtype=np.uint8)
     ocr.process(frame, roi_id='3', save=False, source='', interval=0)
     assert ocr.last_ocr_results['3'] == '329'
+
+
+def test_rapid_ocr_removes_scores(monkeypatch):
+    ocr = RapidOCR()
+    ocr.last_ocr_results.clear()
+
+    class DummyReader:
+        def __call__(self, frame):
+            return [[("TEXT123", 0.987), ("XYZ", 0.12)]]
+
+    monkeypatch.setattr(ocr, '_get_reader', lambda: DummyReader())
+    frame = np.zeros((10, 10, 3), dtype=np.uint8)
+    ocr.process(frame, roi_id='4', save=False, source='', interval=0)
+    assert ocr.last_ocr_results['4'] == 'TEXT123 XYZ'

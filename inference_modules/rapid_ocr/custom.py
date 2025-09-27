@@ -12,6 +12,7 @@ from datetime import datetime
 import threading
 from pathlib import Path
 import gc
+from numbers import Number
 from src.utils.logger import get_logger
 from src.utils.image import save_image_async
 
@@ -340,6 +341,8 @@ def _new_reader_instance() -> Any:
             kwargs.setdefault("rec_model_path", model_paths["rec"])
         if "cls" in model_paths:
             kwargs.setdefault("cls_model_path", model_paths["cls"])
+        kwargs.setdefault("use_det", False)
+        kwargs.setdefault("use_cls", False)
         reader = RapidOCRLib(**kwargs)  # type: ignore
         logger.warning("[RapidOCR-ORT] RapidOCRLib created with providers(+model_paths) ✅")
     except TypeError:
@@ -419,8 +422,10 @@ def _append_text_value(value: Any, pieces: list[str], queue: deque[Any]) -> bool
     if isinstance(value, dict):
         queue.append(value)
         return True
-    if isinstance(value, Iterable) and not isinstance(value, (bytes, bytearray)):
+    if isinstance(value, Iterable) and not isinstance(value, (bytes, bytearray, str)):
         queue.extend(item for item in value if item is not None)
+        return True
+    if isinstance(value, Number):
         return True
     pieces.append(str(value))
     return True
@@ -457,13 +462,20 @@ def _extract_text(ocr_result: Any) -> str:
                 break
         else:
             if isinstance(current, (list, tuple)):
-                if len(current) > 1 and not isinstance(current[1], (list, tuple, dict)):
-                    text_candidate = current[1]
-                    if text_candidate is not None:
-                        pieces.append(str(text_candidate))
+                if len(current) == 2:
+                    first, second = current
+                    if isinstance(first, str) and isinstance(second, Number):
+                        if first:
+                            pieces.append(first)
+                        continue
+                str_items = [item for item in current if isinstance(item, str) and item]
+                if str_items:
+                    pieces.extend(str_items)
                 else:
-                    queue.extend(current)
+                    queue.extend(item for item in current if item is not None)
             else:
+                if isinstance(current, Number):
+                    continue
                 pieces.append(str(current))
     return " ".join(pieces)
 
@@ -518,9 +530,16 @@ class RapidOCR(BaseOCR):
 
     def _run_ocr(self, frame, roi_id, save: bool, source: str) -> str:
         text = ""
-        if RapidOCRLib is not None:
+        try:
+            reader = self._get_reader()
+        except Exception as e:
+            self.logger.exception(
+                f"roi_id={roi_id} {self.MODULE_NAME} OCR init error: {e}"
+            )
+            reader = None
+
+        if reader is not None:
             try:
-                reader = self._get_reader()
                 result = _normalise_reader_output(reader(frame))
                 text = _extract_text(result)
             except Exception as e:
