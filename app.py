@@ -19,6 +19,7 @@ import sys
 import argparse
 from collections import defaultdict, deque
 from dataclasses import dataclass
+
 from types import ModuleType
 from pathlib import Path
 import contextlib
@@ -2185,6 +2186,7 @@ async def _stream_queue_over_websocket(
         await ws.accept()
     try:
         pending: deque[FramePacket | bytes | str | None] = deque()
+
         while True:
             if pending:
                 item = pending.popleft()
@@ -2201,6 +2203,7 @@ async def _stream_queue_over_websocket(
 
             if isinstance(latest_packet, FramePacket):
                 packet = latest_packet
+
                 while not queue.empty():
                     try:
                         maybe_next = queue.get_nowait()
@@ -2228,6 +2231,7 @@ async def _stream_queue_over_websocket(
                     item = packet.payload
             else:
                 item = latest_packet
+
             if item is None:
                 await ws.close(code=1000)
                 break
