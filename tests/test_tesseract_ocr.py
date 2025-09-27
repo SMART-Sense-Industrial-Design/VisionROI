@@ -12,9 +12,10 @@ def _install_stubs():
 
     pytesseract_stub = types.ModuleType("pytesseract")
 
-    calls = {}
+    calls = {"count": 0}
 
     def _image_to_string(image, lang=None, config=None):
+        calls["count"] += 1
         calls["args"] = (image, lang, config)
         return " result "
 
@@ -47,3 +48,38 @@ def test_tesseract_ocr_process_returns_text(monkeypatch, tmp_path):
     assert ocr.last_ocr_results["roi"] == "result"
     assert calls["args"][1] == "eng"
     assert calls["args"][2] == "--psm 6"
+
+
+def test_tesseract_ocr_returns_cached_text_when_interval_not_elapsed(
+    monkeypatch, tmp_path
+):
+    calls = _install_stubs()
+
+    module_name = "inference_modules.tesseract_ocr.custom"
+    sys.modules.pop(module_name, None)
+    parent_name = "inference_modules.tesseract_ocr"
+    sys.modules.pop(parent_name, None)
+
+    custom = importlib.import_module(module_name)
+    ocr = custom.TesseractOCR(lang="eng", config="--psm 6")
+    monkeypatch.setattr(ocr, "_data_sources_root", tmp_path)
+
+    from src.utils import logger as logger_utils
+
+    monkeypatch.setattr(logger_utils, "_DATA_SOURCES_ROOT", tmp_path)
+    logger_utils._loggers.clear()
+
+    from inference_modules import base_ocr
+
+    monkeypatch.setattr(base_ocr.time, "monotonic", lambda: 0)
+
+    frame = np.zeros((4, 4, 3), dtype=np.uint8)
+
+    first_text = ocr.process(frame, roi_id="roi", save=False, source="source")
+    assert first_text == "result"
+    assert calls["count"] == 1
+
+    second_text = ocr.process(frame, roi_id="roi", save=False, source="source")
+
+    assert second_text == "result"
+    assert calls["count"] == 1

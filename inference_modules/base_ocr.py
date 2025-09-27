@@ -102,7 +102,10 @@ class BaseOCR:
             with self._last_ocr_lock:
                 self.last_ocr_results[roi_id] = text
             return text
-        return None
+
+        with self._last_ocr_lock:
+            cached_text = self.last_ocr_results.get(roi_id)
+        return cached_text
 
     def stop(self, roi_id) -> None:
         with self._last_ocr_lock:
