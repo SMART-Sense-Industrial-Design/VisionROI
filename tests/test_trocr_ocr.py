@@ -23,6 +23,31 @@ def test_trocr_process_accepts_numpy_frame(monkeypatch):
     assert calls == {"mode": "RGB", "size": (5, 4)}
 
 
+def test_trocr_returns_cached_text_when_interval_not_elapsed(monkeypatch):
+    ocr = TrOCROCR()
+    calls = {"count": 0}
+
+    def fake_generate(image):
+        calls["count"] += 1
+        return "cached"
+
+    monkeypatch.setattr(ocr, "_generate_text", fake_generate)
+
+    from inference_modules import base_ocr
+
+    monkeypatch.setattr(base_ocr.time, "monotonic", lambda: 0)
+
+    frame = np.zeros((2, 2, 3), dtype=np.uint8)
+
+    first_text = ocr.process(frame, roi_id="roi", save=False, source="src")
+    assert first_text == "cached"
+    assert calls["count"] == 1
+
+    second_text = ocr.process(frame, roi_id="roi", save=False, source="src")
+    assert second_text == "cached"
+    assert calls["count"] == 1
+
+
 def test_trocr_process_handles_generate_error(monkeypatch):
     ocr = TrOCROCR()
 
