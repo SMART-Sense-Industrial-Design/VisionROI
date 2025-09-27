@@ -31,7 +31,7 @@ try:
 except Exception:
     ort = None  # type: ignore
 
-MODULE_NAME = "rapid_ocr_rec_only"
+MODULE_NAME = "rapid_ocr"
 logger = logging.getLogger(MODULE_NAME)
 logger.setLevel(logging.INFO)
 
@@ -265,13 +265,22 @@ def _new_reader_instance() -> Any:
         kwargs: dict[str, Any] = {"providers": providers}
         if rec_model_path:
             kwargs["rec_model_path"] = rec_model_path
-        # อย่า warmup ด้วยการ call ทั้ง pipeline; เราจะใช้ rec() โดยตรง
+
+        # รองรับการกำหนดขนาดอินพุตของ rec โมเดลผ่าน ENV เช่น "3,48,320"
+        rec_img_shape_env = os.getenv("RAPIDOCR_REC_IMG_SHAPE")
+        if rec_img_shape_env:
+            try:
+                chans, h, w = [int(x.strip()) for x in rec_img_shape_env.split(",")]
+                kwargs["rec_img_shape"] = [chans, h, w]  # บางเวอร์ชันรองรับพารามิเตอร์นี้
+            except Exception:
+                logger.warning("[REC] invalid RAPIDOCR_REC_IMG_SHAPE; expect '3,48,320'")
+
         reader = RapidOCRLib(**kwargs)  # type: ignore
         logger.info("[REC] RapidOCRLib created with providers(+rec_model_path) ✅")
     except TypeError:
-        # บางเวอร์ชันอาจไม่รองรับ kwargs; ลอง init แบบว่างๆ แล้วค่อย rebind rec_sess
+        # บางเวอร์ชันอาจไม่รองรับ kwargs บางตัว; ลอง init แบบว่างๆ แล้วค่อย rebind rec_sess
         reader = RapidOCRLib()  # type: ignore
-        logger.info("[REC] RapidOCRLib ignored providers/paths (fallback) ❌")
+        logger.info("[REC] RapidOCRLib ignored some kwargs (fallback) ❌")
     except Exception as e:
         logger.exception(f"[REC] RapidOCRLib init failed: {e}")
         raise
@@ -303,8 +312,15 @@ def _get_global_reader():
 # ======================
 def _normalise_reader_output(result: Any) -> Any:
     """
-    รองรับรูปแบบผลลัพธ์หลายทรง แต่ในโหมด rec() ปกติมักคืนเป็น list/tuple ของ [[text, score]] หรือใกล้เคียง
+    รูปผลลัพธ์ที่พบได้:
+    - (result, elapsed) → เลือก result
+    - [[text, score], ...] (rec-only)
+    - [(box, text, score), ...] (full pipeline; เผื่อ fallback)
     """
+    # กรณี (res, elapsed)
+    if isinstance(result, tuple) and len(result) == 2 and not isinstance(result[0], (int, float)):
+        return result[0]
+    # เดิม: [(something), scalar] → เลือกตัวแรก
     if (
         isinstance(result, (list, tuple))
         and len(result) == 2
@@ -333,8 +349,41 @@ def _append_text_value(value: Any, pieces: list[str], queue: deque[Any]) -> bool
 
 
 def _extract_text(ocr_result: Any) -> str:
+    """
+    รองรับรูปทรง:
+    - list/tuple ของ (text, score)
+    - tuple เดี่ยว (text, score)
+    - list ของ dict ที่มี key 'text'
+    - รูปแบบ pipeline [(box, text, score), ...]
+    """
     if ocr_result is None:
         return ""
+
+    # 1) list ของ (text, score)
+    if isinstance(ocr_result, list) and ocr_result and isinstance(ocr_result[0], (list, tuple)):
+        if len(ocr_result[0]) >= 1 and isinstance(ocr_result[0][0], str):
+            texts: list[str] = []
+            for item in ocr_result:
+                if isinstance(item, (list, tuple)) and item and isinstance(item[0], str):
+                    texts.append(item[0])
+                elif isinstance(item, dict) and "text" in item:
+                    texts.append(str(item.get("text") or ""))
+            if texts:
+                return " ".join(t for t in texts if t)
+    # 2) tuple เดี่ยว (text, score)
+    if isinstance(ocr_result, (list, tuple)) and len(ocr_result) == 2 and isinstance(ocr_result[0], str):
+        return ocr_result[0]
+
+    # 3) pipeline [(box, text, score), ...]
+    try:
+        if isinstance(ocr_result, list) and ocr_result and len(ocr_result[0]) == 3:
+            # ปกติจะเป็น (box, text, score)
+            texts = [it[1] for it in ocr_result if isinstance(it, (list, tuple)) and len(it) == 3]
+            return " ".join(str(t) for t in texts if t)
+    except Exception:
+        pass
+
+    # 4) ฟอลแบ็กแบบ BFS เดิม (ครอบคลุม dict/texts/txts)
     pieces: list[str] = []
     queue: deque[Any] = deque([ocr_result])
     while queue:
@@ -363,25 +412,65 @@ def _extract_text(ocr_result: Any) -> str:
                 break
         else:
             if isinstance(current, (list, tuple)):
-                if not current:
-                    continue
-
-                # กรณี rapidocr.rec() => [["text", score]] ต้องเลือกตัวอักษร ไม่ใช่คะแนน
-                flat_values: list[str] = []
                 for item in current:
                     if isinstance(item, (list, tuple, dict)):
                         queue.append(item)
                     elif isinstance(item, str) and item:
-                        flat_values.append(item)
-                if flat_values:
-                    pieces.extend(flat_values)
-                else:
-                    for item in current:
-                        if item is not None and not isinstance(item, (list, tuple, dict)):
-                            pieces.append(str(item))
+                        pieces.append(item)
+                    elif item is not None:
+                        pieces.append(str(item))
             else:
                 pieces.append(str(current))
     return " ".join(pieces)
+
+
+# ===========
+# Internal helpers
+# ===========
+def _ensure_bgr_uint8(frame):
+    """แปลง frame ให้เป็น BGR uint8 ตามที่ rec คาดหวัง"""
+    if frame is None:
+        return frame
+    try:
+        import numpy as _np
+        if isinstance(frame, PILImage):
+            frame = cv2.cvtColor(_np.array(frame), cv2.COLOR_RGB2BGR)
+        elif isinstance(frame, _np.ndarray):
+            if frame.dtype != _np.uint8:
+                frame = frame.astype(_np.uint8, copy=False)
+            if frame.ndim == 2:  # gray → BGR
+                frame = cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR)
+        return frame
+    except Exception:
+        return frame
+
+
+def _call_rec(reader: Any, frame, text_score: float = 0.1):
+    """
+    พยายามเรียกแบบทางการ: __call__(use_det=False, use_cls=False, use_rec=True, text_score=...)
+    ถ้า lib/เวอร์ชันไม่รองรับ ให้ fallback ไปใช้ .rec(frame) หรือ __call__(frame) ธรรมดา
+    """
+    # 1) เรียก __call__ แบบระบุแฟล็ก (only rec)
+    try:
+        return reader(frame, use_det=False, use_cls=False, use_rec=True, text_score=text_score)
+    except TypeError:
+        pass
+    except Exception:
+        # บาง lib อาจยก Exception อื่น ๆ ถ้า args ไม่ตรง
+        pass
+
+    # 2) fallback → rec()
+    if hasattr(reader, "rec"):
+        try:
+            return reader.rec(frame)  # type: ignore[attr-defined]
+        except Exception:
+            pass
+
+    # 3) fallback → __call__ ปกติ
+    if callable(reader):
+        return reader(frame)
+
+    raise AttributeError("RapidOCR reader has no 'rec' and is not callable")
 
 
 # ===========
@@ -391,15 +480,16 @@ def _run_rec_only_async(frame, roi_id, save, source) -> str:
     """
     รับ frame ที่ถูก crop แล้ว และทำเฉพาะ rec()
     """
+    print(f'**** test ****')
     try:
         reader = _get_global_reader()
-        # เรียกเฉพาะ rec — ไม่วิ่ง det/cls
-        if hasattr(reader, "rec"):
-            result = reader.rec(frame)  # type: ignore[attr-defined]
-        elif callable(reader):
-            result = reader(frame)
-        else:
-            raise AttributeError("RapidOCR reader has no 'rec' method and is not callable")
+        frame = _ensure_bgr_uint8(frame)
+        print(type(frame))
+
+        # อนุญาตกำหนด TEXT_SCORE ผ่าน ENV (เช่น 0.05 เพื่อกันหลุด)
+        text_score = float(os.getenv("RAPIDOCR_TEXT_SCORE", "0.1"))
+
+        result = _call_rec(reader, frame, text_score=text_score)
         result = _normalise_reader_output(result)
         text = _extract_text(result)
 
@@ -433,7 +523,7 @@ class RapidOCR(BaseOCR):
     - ไม่โหลด/ไม่เรียก det/cls
     - พยายามใช้ GPU EP (TensorRT/CUDA) สำหรับ rec model ถ้ามี
     """
-    MODULE_NAME = "rapid_ocr_rec_only"
+    MODULE_NAME = "rapid_ocr"
 
     def __init__(self) -> None:
         super().__init__()
@@ -452,15 +542,10 @@ class RapidOCR(BaseOCR):
         text = ""
         try:
             reader = self._get_reader()
-            # เรียกเฉพาะ rec()
-            if hasattr(reader, "rec"):
-                result = reader.rec(frame)  # type: ignore[attr-defined]
-            elif callable(reader):
-                result = reader(frame)
-            else:
-                raise AttributeError(
-                    "RapidOCR reader has no 'rec' method and is not callable"
-                )
+            frame = _ensure_bgr_uint8(frame)
+
+            text_score = float(os.getenv("RAPIDOCR_TEXT_SCORE", "0.1"))
+            result = _call_rec(reader, frame, text_score=text_score)
             result = _normalise_reader_output(result)
             text = _extract_text(result)
         except RuntimeError:
@@ -502,7 +587,7 @@ def process(
     save: bool = False,
     source: str = "",
     cam_id: int | None = None,
-    interval: float | None = None,
+    interval: float | None = None,  # คง signature เดิม (ไม่ใช้ throttle)
 ):
     """
     ส่ง frame ที่ถูก crop มาจาก upstream (เช่น VisionROI) เพื่อทำ 'rec เท่านั้น'
