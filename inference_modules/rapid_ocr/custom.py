@@ -349,13 +349,23 @@ def _extract_text(ocr_result: Any) -> str:
             text_value = current.get("text")
             if text_value is not None:
                 _append_text_value(text_value, pieces, queue)
+                continue
+
+            # บางเวอร์ชันของ RapidOCR คืนผลในคีย์อื่น เช่น 'res' หรือ 'result'
+            for key in ("texts", "txts", "res", "result", "results", "data", "value", "values"):
+                if key in current and current[key] is not None:
+                    _append_text_value(current[key], pieces, queue)
+                    break
+            else:
+                # เมื่อไม่พบคีย์ที่รู้จัก ให้ต่อคิวค่าที่ไม่เป็น None เพื่อพยายามแยกข้อความต่อไป
+                queue.extend(v for v in current.values() if v is not None)
             continue
         text_attr = getattr(current, "text", None)
         if text_attr is not None:
             handled = _append_text_value(text_attr, pieces, queue)
             if handled:
                 continue
-        for attr_name in ("texts", "txts"):
+        for attr_name in ("texts", "txts", "res", "result", "results", "data", "value", "values"):
             if hasattr(current, attr_name):
                 attr_value = getattr(current, attr_name)
                 if attr_value is not None:
