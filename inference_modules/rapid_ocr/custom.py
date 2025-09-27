@@ -1,6 +1,4 @@
 from __future__ import annotations
-
-import time
 from collections import deque
 from collections.abc import Iterable
 from typing import Any
@@ -43,7 +41,6 @@ _data_sources_root = Path(__file__).resolve().parents[2] / "data_sources"
 _reader = None
 _reader_lock = threading.Lock()
 
-last_ocr_times: dict = {}
 last_ocr_results: dict = {}
 _last_ocr_lock = threading.Lock()
 
@@ -397,7 +394,12 @@ def _run_rec_only_async(frame, roi_id, save, source) -> str:
     try:
         reader = _get_global_reader()
         # เรียกเฉพาะ rec — ไม่วิ่ง det/cls
-        result = reader.rec(frame)  # type: ignore[attr-defined]
+        if hasattr(reader, "rec"):
+            result = reader.rec(frame)  # type: ignore[attr-defined]
+        elif callable(reader):
+            result = reader(frame)
+        else:
+            raise AttributeError("RapidOCR reader has no 'rec' method and is not callable")
         result = _normalise_reader_output(result)
         text = _extract_text(result)
 
@@ -448,15 +450,28 @@ class RapidOCR(BaseOCR):
 
     def _run_ocr(self, frame, roi_id, save: bool, source: str) -> str:
         text = ""
-        if RapidOCRLib is not None:
-            try:
-                reader = self._get_reader()
-                # เรียกเฉพาะ rec()
+        try:
+            reader = self._get_reader()
+            # เรียกเฉพาะ rec()
+            if hasattr(reader, "rec"):
                 result = reader.rec(frame)  # type: ignore[attr-defined]
-                result = _normalise_reader_output(result)
-                text = _extract_text(result)
-            except Exception as e:
-                self.logger.exception(f"roi_id={roi_id} {self.MODULE_NAME} rec OCR error: {e}")
+            elif callable(reader):
+                result = reader(frame)
+            else:
+                raise AttributeError(
+                    "RapidOCR reader has no 'rec' method and is not callable"
+                )
+            result = _normalise_reader_output(result)
+            text = _extract_text(result)
+        except RuntimeError:
+            # rapidocr_onnxruntime ไม่พร้อมใช้งาน
+            self.logger.warning(
+                "%s reader is unavailable; skipping OCR", self.MODULE_NAME
+            )
+        except Exception as e:
+            self.logger.exception(
+                f"roi_id={roi_id} {self.MODULE_NAME} rec OCR error: {e}"
+            )
 
         if text:
             self.logger.info(
@@ -475,7 +490,6 @@ class RapidOCR(BaseOCR):
         with _reader_lock:
             _reader = None
         with _last_ocr_lock:
-            last_ocr_times.clear()
             last_ocr_results.clear()
 
 
@@ -488,7 +502,7 @@ def process(
     save: bool = False,
     source: str = "",
     cam_id: int | None = None,
-    interval: float = 3.0,
+    interval: float | None = None,
 ):
     """
     ส่ง frame ที่ถูก crop มาจาก upstream (เช่น VisionROI) เพื่อทำ 'rec เท่านั้น'
@@ -505,20 +519,7 @@ def process(
     if isinstance(frame, PILImage) and np is not None:
         frame = cv2.cvtColor(np.array(frame), cv2.COLOR_RGB2BGR)
 
-    current_time = time.monotonic()
-    with _last_ocr_lock:
-        last_time = last_ocr_times.get(roi_id)
-
-    diff_time = 0 if last_time is None else current_time - last_time
-    should_ocr = last_time is None or diff_time >= interval
-
-    if should_ocr:
-        with _last_ocr_lock:
-            last_ocr_times[roi_id] = current_time
-        return _run_rec_only_async(frame, roi_id, save, source)
-
-    with _last_ocr_lock:
-        return last_ocr_results.get(roi_id)
+    return _run_rec_only_async(frame, roi_id, save, source)
 
 
 def cleanup() -> None:
@@ -526,6 +527,5 @@ def cleanup() -> None:
     with _reader_lock:
         _reader = None
     with _last_ocr_lock:
-        last_ocr_times.clear()
         last_ocr_results.clear()
     gc.collect()

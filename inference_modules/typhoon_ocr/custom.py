@@ -24,8 +24,6 @@ _data_sources_root = Path(__file__).resolve().parents[2] / "data_sources"
 # โหลดโมเดล (ถ้ามี)
 # model = YOLOv8("data_sources/<your_source>/model.onnx")
 
-# ตัวแปรควบคุมเวลาเรียก OCR แยกตาม roi พร้อมตัวล็อกป้องกันการเข้าถึงพร้อมกัน
-last_ocr_times = {}
 last_ocr_results = {}
 _last_ocr_lock = threading.Lock()
 
@@ -37,7 +35,7 @@ def process(
     source="",
     cam_id: int | None = None,
 ):
-    """ประมวลผล ROI และเรียก OCR เมื่อเวลาห่างจากครั้งก่อน >= 2 วินาที
+    """ประมวลผล ROI และเรียก OCR ทุกเฟรม
     บันทึกรูปภาพแบบไม่บล็อกเมื่อระบุให้บันทึก"""
     logger = get_logger(MODULE_NAME, source)
 

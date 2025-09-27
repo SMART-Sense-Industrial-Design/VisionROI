@@ -30,7 +30,6 @@ def test_cleanup_resets_state_and_allows_reuse(monkeypatch):
 
     custom.cleanup()
     assert custom._reader is None
-    assert custom.last_ocr_times == {}
     assert custom.last_ocr_results == {}
 
     custom.process([], roi_id="r2", source="src")
