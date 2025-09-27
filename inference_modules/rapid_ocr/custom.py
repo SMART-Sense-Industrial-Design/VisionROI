@@ -366,12 +366,22 @@ def _extract_text(ocr_result: Any) -> str:
                 break
         else:
             if isinstance(current, (list, tuple)):
-                if len(current) > 1 and not isinstance(current[1], (list, tuple, dict)):
-                    text_candidate = current[1]
-                    if text_candidate is not None:
-                        pieces.append(str(text_candidate))
+                if not current:
+                    continue
+
+                # กรณี rapidocr.rec() => [["text", score]] ต้องเลือกตัวอักษร ไม่ใช่คะแนน
+                flat_values: list[str] = []
+                for item in current:
+                    if isinstance(item, (list, tuple, dict)):
+                        queue.append(item)
+                    elif isinstance(item, str) and item:
+                        flat_values.append(item)
+                if flat_values:
+                    pieces.extend(flat_values)
                 else:
-                    queue.extend(current)
+                    for item in current:
+                        if item is not None and not isinstance(item, (list, tuple, dict)):
+                            pieces.append(str(item))
             else:
                 pieces.append(str(current))
     return " ".join(pieces)
