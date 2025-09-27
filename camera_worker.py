@@ -105,6 +105,12 @@ class CameraWorker:
         # วน fallback: transport (tcp <-> udp) ถ้า build รองรับ
         self._rtsp_transport_cycle = ["tcp", "udp"] if robust else ["tcp"]
         self._rtsp_transport_idx = 0
+        if self.low_latency and "udp" in self._rtsp_transport_cycle:
+            # โหมดหน่วงต่ำพยายามเริ่มที่ UDP ก่อนเพื่อลดบัฟเฟอร์ของกล้อง/เครือข่าย
+            try:
+                self._rtsp_transport_idx = self._rtsp_transport_cycle.index("udp")
+            except ValueError:
+                self._rtsp_transport_idx = 0
 
         # cache capability probes (ตรวจครั้งเดียว)
         self._ff_caps_checked = False
@@ -240,13 +246,18 @@ class CameraWorker:
             elif "timeout" in self._ff_rtsp_opts:
                 cmd += ["-timeout", "5000000"]
 
-        # วิเคราะห์สตรีมพอประมาณ
-        cmd += ["-probesize", "16M", "-analyzeduration", "2M"]
-
-        # โปรไฟล์ robust/low_latency
         if self.low_latency:
-            cmd += ["-fflags", "+discardcorrupt+nobuffer", "-flags", "low_delay", "-fflags", "nobuffer"]
+            # ลดเวลาวิเคราะห์และปิดบัฟเฟอร์ภายในให้ ffmpeg ดึงเฟรมล่าสุดเสมอ
+            cmd += ["-probesize", "256k", "-analyzeduration", "0"]
+            cmd += ["-fflags", "+discardcorrupt+nobuffer"]
+            cmd += ["-flags", "low_delay"]
+            cmd += ["-avioflags", "direct"]
+            cmd += ["-reorder_queue_size", "0"]
+            cmd += ["-max_delay", "0"]
+            cmd += ["-use_wallclock_as_timestamps", "1"]
         else:
+            # วิเคราะห์สตรีมมากขึ้นเพื่อความเสถียรและกัน jitter ระดับกลาง
+            cmd += ["-probesize", "16M", "-analyzeduration", "2M"]
             cmd += ["-fflags", "+discardcorrupt+genpts"]
             cmd += ["-max_delay", "500000"]  # 500ms
             cmd += ["-use_wallclock_as_timestamps", "1"]
