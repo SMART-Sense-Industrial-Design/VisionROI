@@ -27,7 +27,7 @@ import inspect
 import gc
 import time
 from datetime import datetime
-from typing import Callable, Awaitable, Any
+from typing import Callable, Awaitable, Any, TypeVar
 from concurrent.futures import ThreadPoolExecutor
 from queue import Queue, Empty
 from src.utils.logger import get_logger
@@ -1418,6 +1418,26 @@ def _drain_queue(queue: asyncio.Queue[Any] | None) -> None:
             queue.get_nowait()
 
 
+T = TypeVar("T")
+
+
+def _replace_with_latest(
+    queue: asyncio.Queue[T] | None,
+    item: T,
+) -> None:
+    """Drop every pending entry in *queue* before inserting *item*.
+
+    ใช้สำหรับ queue ที่ส่งข้อมูลสตรีมไปยัง WebSocket เพื่อให้ผู้ใช้ได้รับ
+    เฉพาะข้อมูลล่าสุด ลดปัญหา backlog เมื่อเครือข่ายช้า
+    """
+    if queue is None:
+        return
+    with contextlib.suppress(asyncio.QueueEmpty):
+        while True:
+            queue.get_nowait()
+    queue.put_nowait(item)
+
+
 # =========================
 # Frame readers
 # =========================
@@ -1640,9 +1660,7 @@ async def run_inference_loop(cam_id: str):
         try:
             q = get_roi_result_queue(key[0])
             payload = json.dumps(payload_dict)
-            if q.full():
-                q.get_nowait()
-            q.put_nowait(payload)
+            _replace_with_latest(q, payload)
         except Exception:
             pass
 
@@ -1739,9 +1757,7 @@ async def run_inference_loop(cam_id: str):
             try:
                 q = get_roi_result_queue(cam_id)
                 payload = json.dumps({'group': active_group, 'scores': scores})
-                if q.full():
-                    q.get_nowait()
-                await q.put(payload)
+                _replace_with_latest(q, payload)
             except Exception:
                 pass
 
