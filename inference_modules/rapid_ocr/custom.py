@@ -396,11 +396,12 @@ def _run_rec_only_async(frame, roi_id, save, source) -> str:
             if roi_id is not None
             else f"rec OCR result: {text}"
         )
-        with _last_ocr_lock:
-            last_ocr_results[roi_id] = text
     except Exception as e:
         logger.exception(f"roi_id={roi_id} rec OCR error: {e}")
         text = ""
+
+    with _last_ocr_lock:
+        last_ocr_results[roi_id] = text
 
     if save:
         base_dir = _data_sources_root / source if source else Path(__file__).resolve().parent
@@ -506,7 +507,8 @@ def process(
             last_ocr_times[roi_id] = current_time
         return _run_rec_only_async(frame, roi_id, save, source)
 
-    return None
+    with _last_ocr_lock:
+        return last_ocr_results.get(roi_id)
 
 
 def cleanup() -> None:
