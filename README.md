@@ -130,6 +130,7 @@ VisionROI/
 - `Pillow`
 - `easyocr`
 - `rapidocr`
+- `rapidocr_onnxruntime`
 - `pytesseract`
 - `paho-mqtt`
 - `requests`
