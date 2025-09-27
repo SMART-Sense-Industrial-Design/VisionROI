@@ -396,9 +396,9 @@ tg.start_send_text("สวัสดี")
 
 - **GET `/roi_stream_status/<cam_id>`** – ตรวจสอบว่างาน ROI stream กำลังทำงานอยู่หรือไม่ (ตอบกลับประกอบด้วย `running`, `cam_id` และ `source` ล่าสุดของสตรีมนั้น)
 
-- **GET `/inference_status/<cam_id>`** – ตรวจสอบว่างาน inference กำลังทำงานอยู่หรือไม่ (ตอบกลับประกอบด้วย `running` และ `cam_id`)
+- **GET `/inference_status/<cam_id>`** – ตรวจสอบสถานะของงาน inference ที่ระบุ โดยจะตอบกลับ `running`, `cam_id`, `source` ปัจจุบัน และ `group` ที่กำลังประมวลผล (ถ้าไม่ได้ล็อกกลุ่มไว้จะเป็นสตริงว่าง)
   ```json
-  {"running": true, "cam_id": "inf_cam1"}
+  {"running": true, "cam_id": "inf_cam1", "source": "demo_image", "group": "p1"}
   ```
 
 - **POST `/save_roi`** – บันทึก ROI ลงไฟล์ของ source หรือพาธที่กำหนด
@@ -490,7 +490,7 @@ tg.start_send_text("สวัสดี")
     }
     ```
 
-  แต่ละข้อความอาจมี `image` เป็น Base64 JPEG (หากตั้งให้บันทึก ROI), ระยะเวลา `duration` ที่โมดูลใช้ประมวลผล และชื่อคอนฟิก MQTT หากมีการเผยแพร่ผลลัพธ์ไปยัง broker เดียวกัน ขณะที่ไฟล์ `custom.log` จะเก็บข้อมูลแบบย่อภายใต้ prefix `AGGREGATED_ROI` โดยคงไว้เฉพาะฟิลด์สำคัญ เช่น `id`, `name`, `text`, `module` และ `duration` เพื่อให้ log มีขนาดเหมาะสม
+  แต่ละข้อความอาจมี `image` เป็น Base64 JPEG (หากตั้งให้บันทึก ROI), ระยะเวลา `duration` ที่โมดูลใช้ประมวลผล, ค่ารวม `frame_duration` ของเฟรมทั้งภาพ และชื่อคอนฟิก MQTT หากมีการเผยแพร่ผลลัพธ์ไปยัง broker เดียวกัน ขณะที่ไฟล์ `custom.log` จะเก็บข้อมูลแบบย่อภายใต้ prefix `AGGREGATED_ROI` โดยคงไว้เฉพาะฟิลด์สำคัญ เช่น `id`, `name`, `text`, `module`, `duration` และ `frame_duration` (ถ้ามี) เพื่อให้ log มีขนาดเหมาะสม
 
 
 ## การพัฒนาและการทดสอบ
