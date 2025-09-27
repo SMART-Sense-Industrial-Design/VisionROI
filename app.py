@@ -2186,6 +2186,8 @@ async def stop_camera_task(
 # WebSockets
 # =========================
 STREAM_MAX_FRAME_DELAY = float(os.getenv("STREAM_MAX_FRAME_DELAY", "1.5") or 1.5)
+STREAM_SEND_TIMEOUT = float(os.getenv("STREAM_SEND_TIMEOUT", "0.6") or 0.6)
+_STREAM_LOGGER = get_logger("websocket_stream")
 
 
 async def _stream_queue_over_websocket(
@@ -2251,7 +2253,18 @@ async def _stream_queue_over_websocket(
             if item is None:
                 await ws.close(code=1000)
                 break
-            await ws.send(item)
+            try:
+                if STREAM_SEND_TIMEOUT > 0:
+                    await asyncio.wait_for(ws.send(item), timeout=STREAM_SEND_TIMEOUT)
+                else:
+                    await ws.send(item)
+            except asyncio.TimeoutError:
+                _STREAM_LOGGER.warning(
+                    "websocket send timeout (%.2fs); closing stream", STREAM_SEND_TIMEOUT
+                )
+                with contextlib.suppress(Exception):
+                    await ws.close(code=1011, reason="send_timeout")
+                break
     except ConnectionClosed:
         pass
     finally:
