@@ -17,7 +17,7 @@ import os
 import re
 import sys
 import argparse
-from collections import defaultdict
+from collections import defaultdict, deque
 from types import ModuleType
 from pathlib import Path
 import contextlib
@@ -2148,12 +2148,37 @@ async def _stream_queue_over_websocket(
     queue: asyncio.Queue[bytes | str | None],
     ws: Any = websocket,
 ) -> None:
-    """Relay items from *queue* to the active websocket connection."""
+    """Relay items from *queue* to the active websocket connection.
+
+    ถ้าเครือข่ายช้า เฟรมภาพจะต่อคิวจนเกิดดีเลย์สะสมเรื่อย ๆ
+    จึงดึงเฉพาะเฟรมล่าสุดและทิ้งเฟรมภาพเก่าที่รอคิวอยู่ทันที
+    (เฉพาะข้อมูลประเภทไบต์) ขณะที่ข้อมูลชนิดอื่นยังถูกส่งครบถ้วน
+    """
     with contextlib.suppress(RuntimeError):
         await ws.accept()
     try:
+        pending: deque[bytes | str | None] = deque()
         while True:
-            item = await queue.get()
+            if pending:
+                item = pending.popleft()
+            else:
+                item = await queue.get()
+            if isinstance(item, (bytes, bytearray, memoryview)):
+                latest = item
+                while not queue.empty():
+                    try:
+                        maybe_next = queue.get_nowait()
+                    except asyncio.QueueEmpty:
+                        break
+                    if maybe_next is None:
+                        latest = None
+                        break
+                    if isinstance(maybe_next, (bytes, bytearray, memoryview)):
+                        latest = maybe_next
+                    else:
+                        pending.append(maybe_next)
+                        break
+                item = latest
             if item is None:
                 await ws.close(code=1000)
                 break
