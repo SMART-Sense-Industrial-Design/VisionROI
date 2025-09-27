@@ -2102,6 +2102,8 @@ async def start_camera_task(
     cam_id: str,
     task_dict: dict[str, asyncio.Task | None],
     loop_func: Callable[[str], Awaitable[Any]],
+    *,
+    low_latency: bool | None = None,
 ):
     async with get_cam_lock(cam_id):
         task = task_dict.get(cam_id)
@@ -2109,12 +2111,27 @@ async def start_camera_task(
             return task, {"status": "already_running", "cam_id": cam_id}, 200
 
         worker = camera_workers.get(cam_id)
+        if (
+            worker is not None
+            and low_latency is not None
+            and getattr(worker, "backend", "") == "ffmpeg"
+            and bool(getattr(worker, "low_latency", False)) != bool(low_latency)
+        ):
+            await worker.stop()
+            camera_workers.pop(cam_id, None)
+            worker = None
         if worker is None:
             src = camera_sources.get(cam_id, 0)
             width, height = camera_resolutions.get(cam_id, (None, None))
             backend = camera_backends.get(cam_id, "opencv")
+            worker_low_latency = bool(low_latency) if low_latency is not None else False
             worker = CameraWorker(
-                src, asyncio.get_running_loop(), width, height, backend=backend
+                src,
+                asyncio.get_running_loop(),
+                width,
+                height,
+                backend=backend,
+                low_latency=worker_low_latency,
             )
             if not worker.start():
                 await worker.stop()
@@ -2326,6 +2343,8 @@ async def apply_camera_settings(cam_id: str, data: dict) -> bool:
             or (roi_tasks.get(cam_id) and not roi_tasks[cam_id].done())
         ):
             width, height = camera_resolutions.get(cam_id, (None, None))
+            roi_task = roi_tasks.get(cam_id)
+            roi_running = roi_task is not None and not roi_task.done()
             worker = CameraWorker(
                 src=camera_sources[cam_id],
                 loop=asyncio.get_running_loop(),
@@ -2334,8 +2353,7 @@ async def apply_camera_settings(cam_id: str, data: dict) -> bool:
                 read_interval=0.0,       # ถ้าอยากเว้นจังหวะอ่านใส่เพิ่มได้
                 backend=backend,         # ใช้ "ffmpeg" เพื่อโหมด robust
                 robust=True,             # เปิด fallback/วอทช์ด็อก
-                low_latency=False,       # ถ้าจะเน้นหน่วงต่ำค่อยสลับ True
-                use_hw_decode=True,      # h264_v4l2m2m ถ้ามีใน ffmpeg build
+                low_latency=bool(roi_running),  # ROI mode ต้องการหน่วงต่ำ
                 loglevel="error",        # ลดสแปม log swscale
             )
 
@@ -2926,7 +2944,12 @@ async def start_roi_stream(cam_id: str):
         if not cfg_ok:
             return jsonify({"status": "error", "cam_id": cam_id}), 400
     _drain_queue(get_roi_frame_queue(cam_id))
-    _, resp, status = await start_camera_task(cam_id, roi_tasks, run_roi_loop)
+    _, resp, status = await start_camera_task(
+        cam_id,
+        roi_tasks,
+        run_roi_loop,
+        low_latency=True,
+    )
     return jsonify(resp), status
 
 
