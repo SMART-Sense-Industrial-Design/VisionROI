@@ -24,7 +24,7 @@ def test_read_and_queue_frame_skip_on_none():
 
     app.cv2.imencode = fake_imencode
 
-    async def processor(frame):
+    async def processor(frame, frame_time):
         return None
 
     asyncio.run(app.read_and_queue_frame("0", q, processor))
