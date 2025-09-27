@@ -2144,35 +2144,40 @@ async def stop_camera_task(
 # =========================
 # WebSockets
 # =========================
-async def _stream_queue_over_websocket(queue: asyncio.Queue[bytes | str | None]) -> None:
+async def _stream_queue_over_websocket(
+    queue: asyncio.Queue[bytes | str | None],
+    ws: Any = websocket,
+) -> None:
     """Relay items from *queue* to the active websocket connection."""
+    with contextlib.suppress(RuntimeError):
+        await ws.accept()
     try:
         while True:
             item = await queue.get()
             if item is None:
-                await websocket.close(code=1000)
+                await ws.close(code=1000)
                 break
-            await websocket.send(item)
+            await ws.send(item)
     except ConnectionClosed:
         pass
     finally:
         with contextlib.suppress(Exception):
-            await websocket.close()
+            await ws.close()
 
 
 @app.websocket('/ws/<string:cam_id>')
 async def ws(cam_id: str):
-    await _stream_queue_over_websocket(get_frame_queue(cam_id))
+    await _stream_queue_over_websocket(get_frame_queue(cam_id), websocket)
 
 
 @app.websocket('/ws_roi/<string:cam_id>')
 async def ws_roi(cam_id: str):
-    await _stream_queue_over_websocket(get_roi_frame_queue(cam_id))
+    await _stream_queue_over_websocket(get_roi_frame_queue(cam_id), websocket)
 
 
 @app.websocket('/ws_roi_result/<string:cam_id>')
 async def ws_roi_result(cam_id: str):
-    await _stream_queue_over_websocket(get_roi_result_queue(cam_id))
+    await _stream_queue_over_websocket(get_roi_result_queue(cam_id), websocket)
 
 
 # =========================
