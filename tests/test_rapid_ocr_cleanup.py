@@ -10,7 +10,6 @@ from inference_modules import base_ocr
 def test_cleanup_resets_state_and_calls_gc(monkeypatch):
     ocr = RapidOCR()
     custom._reader = object()
-    custom.last_ocr_times["roi"] = 1
     custom.last_ocr_results["roi"] = "text"
 
     called = False
@@ -25,7 +24,6 @@ def test_cleanup_resets_state_and_calls_gc(monkeypatch):
     ocr.cleanup()
 
     assert custom._reader is None
-    assert custom.last_ocr_times == {}
     assert custom.last_ocr_results == {}
 
     assert called

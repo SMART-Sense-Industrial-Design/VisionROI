@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import time
 from PIL import Image
 import cv2
 import logging
@@ -40,8 +39,6 @@ def _get_reader() -> easyocr.Reader:
         return _reader
 
 
-# ตัวแปรควบคุมเวลาเรียก OCR แยกตาม roi พร้อมตัวล็อกป้องกันการเข้าถึงพร้อมกัน
-last_ocr_times: dict = {}
 last_ocr_results: dict = {}
 _last_ocr_lock = threading.Lock()
 
@@ -52,10 +49,10 @@ def process(
     save: bool = False,
     source: str = "",
     cam_id: int | None = None,
-    interval: float = 1.0,
+    interval: float | None = None,
 ):
-    """ประมวลผล ROI และเรียก OCR เมื่อเวลาห่างจากครั้งก่อน >= interval วินาที
-    (ค่าเริ่มต้น 3 วินาที) บันทึกรูปภาพแบบไม่บล็อกเมื่อระบุให้บันทึก"""
+    """ประมวลผล ROI และเรียก OCR ทุกเฟรม
+    บันทึกรูปภาพแบบไม่บล็อกเมื่อระบุให้บันทึก"""
     logger = get_logger(MODULE_NAME, source)
 
     if cam_id is not None:
@@ -68,44 +65,34 @@ def process(
     if isinstance(frame, Image.Image) and np is not None:
         frame = cv2.cvtColor(np.array(frame), cv2.COLOR_RGB2BGR)
 
-    current_time = time.monotonic()
-
-    with _last_ocr_lock:
-        last_time = last_ocr_times.get(roi_id)
-    diff_time = 0 if last_time is None else current_time - last_time
-    should_ocr = last_time is None or diff_time >= interval
-
-    if should_ocr:
+    try:
+        reader = _get_reader()
+        with _reader_infer_lock:
+            ocr_result = reader.readtext(frame, detail=0)
+        text = " ".join(ocr_result)
+        logger.info(
+            f"roi_id={roi_id} {MODULE_NAME} OCR result: {text}"
+            if roi_id is not None
+            else f"{MODULE_NAME} OCR result: {text}"
+        )
         with _last_ocr_lock:
-            last_ocr_times[roi_id] = current_time
-        try:
-            reader = _get_reader()
-            with _reader_infer_lock:
-                ocr_result = reader.readtext(frame, detail=0)
-            text = " ".join(ocr_result)
-            logger.info(
-                f"roi_id={roi_id} {MODULE_NAME} OCR result: {text}"
-                if roi_id is not None
-                else f"{MODULE_NAME} OCR result: {text}"
-            )
-            with _last_ocr_lock:
-                last_ocr_results[roi_id] = text
-        except Exception as e:  # pragma: no cover - log any OCR error
-            logger.exception(f"roi_id={roi_id} {MODULE_NAME} OCR error: {e}")
-            text = ""
-        if save:
-            base_dir = (
-                _data_sources_root / source
-                if source
-                else Path(__file__).resolve().parent
-            )
-            roi_folder = f"{roi_id}" if roi_id is not None else "roi"
-            save_dir = base_dir / "images" / roi_folder
-            os.makedirs(save_dir, exist_ok=True)
-            filename = datetime.now().strftime("%Y%m%d%H%M%S%f") + ".jpg"
-            path = save_dir / filename
-            save_image_async(str(path), frame)
-        return text
+            last_ocr_results[roi_id] = text
+    except Exception as e:  # pragma: no cover - log any OCR error
+        logger.exception(f"roi_id={roi_id} {MODULE_NAME} OCR error: {e}")
+        text = ""
+    if save:
+        base_dir = (
+            _data_sources_root / source
+            if source
+            else Path(__file__).resolve().parent
+        )
+        roi_folder = f"{roi_id}" if roi_id is not None else "roi"
+        save_dir = base_dir / "images" / roi_folder
+        os.makedirs(save_dir, exist_ok=True)
+        filename = datetime.now().strftime("%Y%m%d%H%M%S%f") + ".jpg"
+        path = save_dir / filename
+        save_image_async(str(path), frame)
+    return text
 
 
 class EasyOCR(BaseOCR):
@@ -155,7 +142,6 @@ def cleanup() -> None:
         _reader = None
     # ไม่มีการทำความสะอาดล็อกเรียกใช้งานเพราะใช้ร่วมกันได้
     with _last_ocr_lock:
-        last_ocr_times.clear()
         last_ocr_results.clear()
     gc.collect()
 

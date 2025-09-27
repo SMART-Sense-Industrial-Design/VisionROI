@@ -1,6 +1,4 @@
 from __future__ import annotations
-
-import time
 from logging import Logger
 from PIL import Image
 import cv2
@@ -29,7 +27,6 @@ class BaseOCR:
         # base_ocr อยู่ในโฟลเดอร์ inference_modules ดังนั้น parents[1] คือ root
         self._data_sources_root = Path(__file__).resolve().parents[1] / "data_sources"
 
-        self.last_ocr_times: dict = {}
         self.last_ocr_results: dict = {}
         self._last_ocr_lock = threading.Lock()
         self._imwrite_lock = threading.Lock()
@@ -80,33 +77,22 @@ class BaseOCR:
         save: bool = False,
         source: str = "",
         cam_id: int | None = None,
-        interval: float = 1.0,
+        interval: float | None = None,
     ):
-        """ประมวลผล ROI และเรียก OCR เมื่อถึงเวลา"""
+        """ประมวลผล ROI และเรียก OCR ทุกเฟรม"""
         self.get_logger(source)
         self._update_save_flag(cam_id)
 
         if isinstance(frame, Image.Image) and np is not None:
             frame = cv2.cvtColor(np.array(frame), cv2.COLOR_RGB2BGR)
 
-        current_time = time.monotonic()
+        text = self._run_ocr(frame, roi_id, save, source)
         with self._last_ocr_lock:
-            last_time = self.last_ocr_times.get(roi_id)
-        diff_time = 0 if last_time is None else current_time - last_time
-        should_ocr = last_time is None or diff_time >= interval
-
-        if should_ocr:
-            with self._last_ocr_lock:
-                self.last_ocr_times[roi_id] = current_time
-            text = self._run_ocr(frame, roi_id, save, source)
-            with self._last_ocr_lock:
-                self.last_ocr_results[roi_id] = text
-            return text
-        return None
+            self.last_ocr_results[roi_id] = text
+        return text
 
     def stop(self, roi_id) -> None:
         with self._last_ocr_lock:
-            self.last_ocr_times.pop(roi_id, None)
             self.last_ocr_results.pop(roi_id, None)
 
     def _cleanup_extra(self) -> None:
@@ -115,7 +101,6 @@ class BaseOCR:
 
     def cleanup(self) -> None:
         with self._last_ocr_lock:
-            self.last_ocr_times.clear()
             self.last_ocr_results.clear()
         self._cleanup_extra()
         gc.collect()
