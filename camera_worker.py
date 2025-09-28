@@ -16,6 +16,8 @@ from queue import Queue, Empty
 from contextlib import contextmanager
 from collections import deque
 
+from src.utils.memory import malloc_trim
+
 try:
     import numpy as np
 except Exception:
@@ -28,18 +30,6 @@ def silent():
         yield
     except Exception:
         pass
-
-
-def _malloc_trim() -> None:
-    """คืนพื้นที่ heap ให้ OS ถ้าเป็นไปได้ (Linux/glibc)."""
-    try:
-        import ctypes
-        libc = ctypes.CDLL("libc.so.6")
-        libc.malloc_trim(0)
-    except Exception:
-        pass
-
-
 class CameraWorker:
     """
     backend='opencv' : ใช้ cv2.VideoCapture
@@ -855,7 +845,7 @@ class CameraWorker:
                 break
 
         gc.collect()
-        _malloc_trim()
+        malloc_trim()
 
     # -------- diagnostics (ถ้าต้องการ) --------
     def last_ffmpeg_stderr(self) -> str:
