@@ -31,6 +31,7 @@ from typing import Callable, Awaitable, Any, TypeVar
 from concurrent.futures import ThreadPoolExecutor
 from queue import Queue, Empty
 from src.utils.logger import get_logger
+from src.utils.memory import malloc_trim
 try:
     from websockets.exceptions import ConnectionClosed
 except Exception:
@@ -147,19 +148,6 @@ def _stop_inference_workers() -> None:
 _start_inference_workers()
 
 
-# =========================
-# Memory helpers (free & trim)
-# =========================
-def _malloc_trim():
-    """Try to return free heap pages back to the OS (Linux/glibc)."""
-    try:
-        import ctypes
-        libc = ctypes.CDLL("libc.so.6")
-        libc.malloc_trim(0)
-    except Exception:
-        pass
-
-
 def _free_cam_state(cam_id: str):
     """Drop all references for this camera to allow GC to reclaim big buffers."""
     # Drop conf/state that may hold refs
@@ -184,7 +172,7 @@ def _free_cam_state(cam_id: str):
 
     # GC & trim
     gc.collect()
-    _malloc_trim()
+    malloc_trim()
 
 
 # =========================
@@ -1323,7 +1311,7 @@ if hasattr(app, "after_serving"):
                 await q.put(None)
             roi_result_queues.pop(cam_id, None)
         gc.collect()
-        _malloc_trim()  # trim heap after shutdown cleanup
+        malloc_trim()  # trim heap after shutdown cleanup
 
 
 # =========================
@@ -2191,7 +2179,7 @@ async def stop_camera_task(
 
             del worker
             gc.collect()
-            _malloc_trim()
+            malloc_trim()
 
         if not inference_tasks:
             _stop_inference_workers()
@@ -2872,7 +2860,7 @@ async def perform_stop_inference(cam_id: str, save_state: bool = True):
     inference_draw_page_boxes.pop(cam_id, None)
     _free_cam_state(cam_id)
     gc.collect()
-    _malloc_trim()
+    malloc_trim()
     if save_state:
         save_service_state()
     return resp, status
@@ -2960,7 +2948,7 @@ async def stop_roi_stream(cam_id: str):
     # NEW: free state & trim for ROI-only mode too
     _free_cam_state(cam_id)
     gc.collect()
-    _malloc_trim()
+    malloc_trim()
 
     return jsonify(resp), status
 
