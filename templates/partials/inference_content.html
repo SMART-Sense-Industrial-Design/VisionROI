@@ -84,17 +84,36 @@
         ['source', 'interval', 'group'].forEach(key => migrateLegacyKey(key));
         const getEl = suffix => document.getElementById(`${cellId}-${suffix}`);
         const video = getEl('video');
-        const bitmapRendererCtx = video && typeof video.getContext === 'function'
+        const canvasSupportsContext = video && typeof video.getContext === 'function';
+        const bitmapRendererCtx = canvasSupportsContext
           ? video.getContext('bitmaprenderer')
           : null;
         const canUseBitmapRenderer = Boolean(
           bitmapRendererCtx && typeof bitmapRendererCtx.transferFromImageBitmap === 'function'
         );
+        const createCanvas2dContext = () => {
+          if (!canvasSupportsContext) {
+            return null;
+          }
+          const contextOptions = { alpha: false, desynchronized: true };
+          let ctx = null;
+          try {
+            ctx = video.getContext('2d', contextOptions);
+          } catch (err) {
+            ctx = null;
+          }
+          if (!ctx) {
+            try {
+              ctx = video.getContext('2d');
+            } catch (err) {
+              ctx = null;
+            }
+          }
+          return ctx;
+        };
         const videoCtx = canUseBitmapRenderer
           ? bitmapRendererCtx
-          : (video && typeof video.getContext === 'function'
-            ? video.getContext('2d')
-            : null);
+          : createCanvas2dContext();
         const startButton = getEl('startButton');
         const stopButton = getEl('stopButton');
         const statusEl = getEl('status');
@@ -124,7 +143,29 @@
             return () => {};
           }
           let pendingFrame = null;
+          let pendingSeq = 0;
+          let latestSeq = 0;
           let isRendering = false;
+
+          const drawBitmap = bitmap => {
+            if (!bitmap) {
+              return;
+            }
+            const width = bitmap.width || 0;
+            const height = bitmap.height || 0;
+            if (video && (video.width !== width || video.height !== height)) {
+              video.width = width;
+              video.height = height;
+            }
+            if (canUseBitmapRenderer && typeof videoCtx.transferFromImageBitmap === 'function') {
+              videoCtx.transferFromImageBitmap(bitmap);
+            } else if (
+              typeof videoCtx.clearRect === 'function' && typeof videoCtx.drawImage === 'function'
+            ) {
+              videoCtx.clearRect(0, 0, video.width || 0, video.height || 0);
+              videoCtx.drawImage(bitmap, 0, 0);
+            }
+          };
 
           const processNext = async () => {
             if (!pendingFrame) {
@@ -133,6 +174,7 @@
             }
             isRendering = true;
             const blob = pendingFrame;
+            const seq = pendingSeq;
             pendingFrame = null;
             let bitmap;
             try {
@@ -140,19 +182,17 @@
               if (!bitmap) {
                 return;
               }
-              const width = bitmap.width || 0;
-              const height = bitmap.height || 0;
-              if (video && (video.width !== width || video.height !== height)) {
-                video.width = width;
-                video.height = height;
+              if (seq !== latestSeq) {
+                return;
               }
-              if (canUseBitmapRenderer && typeof videoCtx.transferFromImageBitmap === 'function') {
-                videoCtx.transferFromImageBitmap(bitmap);
-              } else if (
-                typeof videoCtx.clearRect === 'function' && typeof videoCtx.drawImage === 'function'
-              ) {
-                videoCtx.clearRect(0, 0, video.width || 0, video.height || 0);
-                videoCtx.drawImage(bitmap, 0, 0);
+              const scheduleDraw = typeof window !== 'undefined'
+                && typeof window.requestAnimationFrame === 'function'
+                ? window.requestAnimationFrame
+                : null;
+              if (scheduleDraw) {
+                scheduleDraw(() => drawBitmap(bitmap));
+              } else {
+                drawBitmap(bitmap);
               }
             } catch (err) {
               console.error('Failed to render frame', err);
@@ -173,6 +213,8 @@
               pendingFrame = null;
               return;
             }
+            latestSeq += 1;
+            pendingSeq = latestSeq;
             pendingFrame = blob;
             if (!isRendering) {
               processNext();
