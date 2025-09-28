@@ -1595,8 +1595,19 @@ button.delete {
   box-shadow: var(--shadow-card);
 }
 
-.stream-video {
+.video-wrapper {
   width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.5rem;
+  background: rgba(15, 23, 42, 0.04);
+  border-radius: var(--radius-md);
+}
+
+.stream-video {
+  max-width: 100%;
+  height: auto;
   border-radius: var(--radius-md);
   overflow: hidden;
   box-shadow: 0 20px 40px -30px rgba(15, 23, 42, 0.6);
