@@ -83,7 +83,6 @@ class CameraWorker:
         self._stop_evt = threading.Event()
         self._thread: Optional[threading.Thread] = None
         self._q: Queue = Queue(maxsize=1)
-        self._last_frame = None
         self._fail_count = 0
         self._ffmpeg_cmd = None
         self._ffmpeg_pix_fmt: str | None = None
@@ -784,7 +783,6 @@ class CameraWorker:
             self._fail_count = 0
             self._last_returncode_logged = None
             self._restart_backoff = 0.0
-            self._last_frame = frame
             frame_copy = frame
             if self._q.full():
                 with silent():
