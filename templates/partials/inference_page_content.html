@@ -82,6 +82,7 @@
       ['source', 'interval'].forEach(migrateLegacyKey);
       const getEl = suffix => document.getElementById(`${cellId}-${suffix}`);
       const video = getEl('video');
+      const videoWrapper = video ? video.closest('.video-wrapper') : null;
       const bitmapRendererCtx = video && typeof video.getContext === 'function'
         ? video.getContext('bitmaprenderer')
         : null;
@@ -126,6 +127,47 @@
         let pendingFrame = null;
         let isRendering = false;
 
+        const getDisplaySize = (width, height) => {
+          if (!video) {
+            return { width, height };
+          }
+
+          const wrapperRect = videoWrapper && typeof videoWrapper.getBoundingClientRect === 'function'
+            ? videoWrapper.getBoundingClientRect()
+            : null;
+          const containerWidth = wrapperRect && wrapperRect.width ? wrapperRect.width : (video.parentElement?.clientWidth || 0);
+          const widthLimit = containerWidth > 0 ? containerWidth : Math.min(width, 1280);
+          const viewportLimit = typeof window !== 'undefined' && window.innerHeight
+            ? Math.max(320, window.innerHeight * 0.6)
+            : height;
+          const heightLimit = Math.min(height, viewportLimit);
+          const scale = Math.min(1,
+            widthLimit > 0 ? widthLimit / width : 1,
+            heightLimit > 0 ? heightLimit / height : 1,
+          );
+          const targetWidth = Math.max(1, Math.round(width * scale));
+          const targetHeight = Math.max(1, Math.round(height * scale));
+          return { width: targetWidth, height: targetHeight };
+        };
+
+        const applyDisplaySize = (targetWidth, targetHeight) => {
+          if (!video) {
+            return;
+          }
+          if (video.width !== targetWidth) {
+            video.width = targetWidth;
+          }
+          if (video.height !== targetHeight) {
+            video.height = targetHeight;
+          }
+          if (video.style.width !== `${targetWidth}px`) {
+            video.style.width = `${targetWidth}px`;
+          }
+          if (video.style.height !== `${targetHeight}px`) {
+            video.style.height = `${targetHeight}px`;
+          }
+        };
+
         const processNext = async () => {
           if (!pendingFrame) {
             isRendering = false;
@@ -142,17 +184,15 @@
             }
             const width = bitmap.width || 0;
             const height = bitmap.height || 0;
-            if (video && (video.width !== width || video.height !== height)) {
-              video.width = width;
-              video.height = height;
-            }
+            const { width: targetWidth, height: targetHeight } = getDisplaySize(width, height);
+            applyDisplaySize(targetWidth, targetHeight);
             if (canUseBitmapRenderer && typeof videoCtx.transferFromImageBitmap === 'function') {
               videoCtx.transferFromImageBitmap(bitmap);
             } else if (
               typeof videoCtx.clearRect === 'function' && typeof videoCtx.drawImage === 'function'
             ) {
-              videoCtx.clearRect(0, 0, video.width || 0, video.height || 0);
-              videoCtx.drawImage(bitmap, 0, 0);
+              videoCtx.clearRect(0, 0, targetWidth, targetHeight);
+              videoCtx.drawImage(bitmap, 0, 0, targetWidth, targetHeight);
             }
           } catch (err) {
             console.error('Failed to render frame', err);
