@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from src.utils.logger import get_logger
+from src.utils.image import save_image_async
 
 try:  # pragma: no cover - optional dependencies
     import cv2
@@ -68,7 +69,7 @@ def _prepare_frame(frame: Any) -> Any:
 
 
 def _save_image(frame: Any, roi_id: Any, source: str) -> None:
-    cv2_lib = _ensure_cv2()
+    _ensure_cv2()
     base_dir = (
         _DATA_SOURCES_ROOT / source if source else Path(__file__).resolve().parent
     )
@@ -77,10 +78,7 @@ def _save_image(frame: Any, roi_id: Any, source: str) -> None:
     os.makedirs(save_dir, exist_ok=True)
     filename = datetime.now().strftime("%Y%m%d%H%M%S%f") + ".jpg"
     path = save_dir / filename
-    try:
-        cv2_lib.imwrite(str(path), frame)
-    except Exception:  # pragma: no cover - logging best effort
-        logger.exception("failed to save light_button frame to %s", path)
+    save_image_async(str(path), frame, logger=logger)
 
 
 def process(

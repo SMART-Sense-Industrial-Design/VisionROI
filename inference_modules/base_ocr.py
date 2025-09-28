@@ -8,6 +8,8 @@ import threading
 from pathlib import Path
 import gc
 
+from src.utils.image import save_image_async
+
 try:
     import numpy as np
 except Exception:  # pragma: no cover - fallback when numpy missing
@@ -29,7 +31,6 @@ class BaseOCR:
 
         self.last_ocr_results: dict = {}
         self._last_ocr_lock = threading.Lock()
-        self._imwrite_lock = threading.Lock()
 
     # ------------------------- logging -------------------------
     def get_logger(self, source: str | None) -> Logger:
@@ -38,13 +39,6 @@ class BaseOCR:
         return self.logger
 
     # ------------------------- image saving -------------------------
-    def _save_image_async(self, path: str, image) -> None:
-        try:
-            with self._imwrite_lock:
-                cv2.imwrite(path, image)
-        except Exception as e:  # pragma: no cover
-            self.logger.exception(f"Failed to save image {path}: {e}")
-
     def _save_image(self, frame, roi_id, source: str) -> None:
         base_dir = (
             self._data_sources_root / source
@@ -56,9 +50,7 @@ class BaseOCR:
         os.makedirs(save_dir, exist_ok=True)
         filename = datetime.now().strftime("%Y%m%d%H%M%S%f") + ".jpg"
         path = save_dir / filename
-        threading.Thread(
-            target=self._save_image_async, args=(str(path), frame), daemon=True
-        ).start()
+        save_image_async(str(path), frame, logger=self.logger)
 
     # ------------------------- hooks -------------------------
     def _run_ocr(self, frame, roi_id, save: bool, source: str) -> str:
