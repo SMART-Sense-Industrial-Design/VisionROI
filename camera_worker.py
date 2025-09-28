@@ -1,5 +1,28 @@
 # camera_worker.py
-import cv2
+try:
+    import cv2
+except Exception:  # pragma: no cover - บางสภาพแวดล้อมไม่มี libGL
+    import sys
+    from types import ModuleType
+
+    def _missing_cv2_call(*args, **kwargs):
+        raise RuntimeError("OpenCV is not available on this system") from None
+
+    cv2_stub = ModuleType("cv2")
+    cv2_stub.VideoCapture = _missing_cv2_call
+    cv2_stub.CAP_PROP_FRAME_WIDTH = 3
+    cv2_stub.CAP_PROP_FRAME_HEIGHT = 4
+    cv2_stub.CAP_PROP_BUFFERSIZE = 38
+    cv2_stub.IMREAD_COLOR = 1
+    cv2_stub.FONT_HERSHEY_SIMPLEX = 0
+    cv2_stub.IMWRITE_JPEG_QUALITY = 1
+    cv2_stub.imread = _missing_cv2_call
+    cv2_stub.resize = _missing_cv2_call
+    cv2_stub.putText = _missing_cv2_call
+    cv2_stub.polylines = _missing_cv2_call
+
+    sys.modules.setdefault("cv2", cv2_stub)
+    cv2 = cv2_stub
 import time
 import threading
 import asyncio
@@ -56,7 +79,7 @@ class CameraWorker:
         backend: str = "opencv",
         # === ตัวเลือก robust ===
         robust: bool = True,        # เปิด watchdog + fallback transport
-        low_latency: bool = False,  # โหมดหน่วงต่ำ (ยอม jitter/เฟรมเสียได้มากขึ้น)
+        low_latency: bool = True,  # โหมดหน่วงต่ำ (ยอม jitter/เฟรมเสียได้มากขึ้น)
         loglevel: str = "error",    # ลดสแปม log จาก ffmpeg
         # === พารามิเตอร์ watchdog ===
         err_window_secs: float = 5.0,
@@ -89,7 +112,7 @@ class CameraWorker:
         self._ffmpeg_pix_fmt: str | None = None
         self._stdout_fd: int | None = None
         self._last_returncode_logged: int | None = None
-        self._read_timeout = 4.0  # ทน jitter/collection ช้าบ้าง
+        self._read_timeout = 1.5 if self.low_latency else 4.0  # ทน jitter/collection ช้าบ้าง
         self._next_resolution_probe = 0.0
         self._image_path: Path | None = None
         self._image_frame = None
@@ -135,27 +158,11 @@ class CameraWorker:
             cmd = self._build_ffmpeg_cmd(str(src))
             self._ffmpeg_cmd = cmd
             with silent():
-                self._proc = subprocess.Popen(
-                    self._ffmpeg_cmd,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    bufsize=10**8,
-                    preexec_fn=os.setsid,  # Linux: แยก process group
-                )
-                if self._proc and self._proc.stderr:
-                    self._stderr_thread = threading.Thread(
-                        target=self._drain_stderr, daemon=True
-                    )
-                    self._stderr_thread.start()
-                if self._proc and self._proc.stdout:
-                    try:
-                        self._stdout_fd = self._proc.stdout.fileno()
-                    except Exception as exc:
-                        self._logger.warning(
-                            "%s failed to obtain stdout fd: %s", self._log_prefix, exc
-                        )
+                self._spawn_ffmpeg_process()
 
         elif backend == "opencv":
+            if cv2 is None:
+                raise RuntimeError("OpenCV backend is unavailable on this system")
             self._image_path = self._maybe_image_path(src)
             if self._image_path is not None:
                 self._image_frame = cv2.imread(str(self._image_path), cv2.IMREAD_COLOR)
@@ -248,25 +255,28 @@ class CameraWorker:
 
         if self.low_latency:
             # ลดเวลาวิเคราะห์และปิดบัฟเฟอร์ภายในให้ ffmpeg ดึงเฟรมล่าสุดเสมอ
-            cmd += ["-probesize", "256k", "-analyzeduration", "0"]
-            cmd += ["-fflags", "+discardcorrupt+nobuffer"]
-            cmd += ["-flags", "low_delay"]
+            cmd += ["-probesize", "256k", "-analyzeduration", "0", "-fpsprobesize", "0"]
+            cmd += ["-fflags", "+discardcorrupt+nobuffer+flush_packets+genpts"]
+            cmd += ["-flags", "low_delay", "-flags2", "+fast"]
             cmd += ["-avioflags", "direct"]
             cmd += ["-reorder_queue_size", "0"]
             cmd += ["-max_delay", "0"]
             cmd += ["-use_wallclock_as_timestamps", "1"]
+            cmd += ["-rtbufsize", "0"]
+            cmd += ["-threads", "1"]
         else:
             # วิเคราะห์สตรีมมากขึ้นเพื่อความเสถียรและกัน jitter ระดับกลาง
             cmd += ["-probesize", "16M", "-analyzeduration", "2M"]
             cmd += ["-fflags", "+discardcorrupt+genpts"]
             cmd += ["-max_delay", "500000"]  # 500ms
             cmd += ["-use_wallclock_as_timestamps", "1"]
+            cmd += ["-threads", "1"]
 
         # *** สำคัญ: input option ต้องมาก่อน -i ***
-        cmd += ["-thread_queue_size", "512"]
+        cmd += ["-thread_queue_size", "512", "-noautorotate"]
 
         # เปิด input
-        cmd += ["-i", src, "-map", "0:v:0", "-an"]
+        cmd += ["-i", src, "-map", "0:v:0", "-an", "-dn"]
 
         # สเกล/สี (ให้ ffmpeg แปลงเป็น bgr24 ออกมา)
         filters: list[str] = []
@@ -283,6 +293,41 @@ class CameraWorker:
         self._ffmpeg_pix_fmt = "bgr24"
         self._logger.info("%s ffmpeg cmd: %s", self._log_prefix, " ".join(cmd))
         return cmd
+
+    def _spawn_ffmpeg_process(self) -> None:
+        """สร้างและเริ่มโปรเซส ffmpeg ด้วยการตั้งค่าที่ลดบัฟเฟอร์/หน่วง."""
+        if self._ffmpeg_cmd is None:
+            return
+
+        self._proc = subprocess.Popen(
+            self._ffmpeg_cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            stdin=subprocess.DEVNULL,
+            bufsize=0,
+            start_new_session=True,
+        )
+
+        if self._proc and self._proc.stderr:
+            self._stderr_thread = threading.Thread(
+                target=self._drain_stderr, daemon=True
+            )
+            self._stderr_thread.start()
+
+        if self._proc and self._proc.stdout:
+            try:
+                fd = self._proc.stdout.fileno()
+                try:
+                    os.set_blocking(fd, False)
+                except Exception:
+                    pass
+                self._stdout_fd = fd
+            except Exception as exc:
+                self._logger.warning(
+                    "%s failed to obtain stdout fd: %s",
+                    self._log_prefix,
+                    exc,
+                )
 
     # ---------- helpers ----------
 
@@ -499,28 +544,13 @@ class CameraWorker:
                         )
                         # สร้างคำสั่งใหม่ (เผื่อมีการสลับ transport)
                         self._ffmpeg_cmd = self._build_ffmpeg_cmd(str(self.src))
-                        self._proc = subprocess.Popen(
-                            self._ffmpeg_cmd,
-                            stdout=subprocess.PIPE,
-                            stderr=subprocess.PIPE,
-                            bufsize=10**8,
-                            preexec_fn=os.setsid,
-                        )
-                        if self._proc and self._proc.stderr:
-                            self._stderr_thread = threading.Thread(
-                                target=self._drain_stderr, daemon=True
-                            )
-                            self._stderr_thread.start()
-                        if self._proc and self._proc.stdout:
-                            try:
-                                self._stdout_fd = self._proc.stdout.fileno()
-                            except Exception as exc:
-                                self._logger.warning(
-                                    "%s failed to obtain stdout fd on restart: %s",
-                                    self._log_prefix,
-                                    exc,
-                                )
+                        self._spawn_ffmpeg_process()
                 elif self.backend == "opencv":
+                    if cv2 is None:
+                        self._logger.error(
+                            "%s OpenCV backend requested but cv2 is unavailable", self._log_prefix
+                        )
+                        return
                     if self._image_path is not None:
                         self._image_frame = cv2.imread(str(self._image_path), cv2.IMREAD_COLOR)
                         if self._image_frame is None:

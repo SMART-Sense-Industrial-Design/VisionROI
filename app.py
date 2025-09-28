@@ -3,8 +3,7 @@ faulthandler.enable()
 
 from quart import Quart, render_template, websocket, request, jsonify, redirect, Response
 import asyncio
-import cv2
-from camera_worker import CameraWorker
+from camera_worker import CameraWorker, cv2
 try:
     import numpy as np
 except Exception:
@@ -2124,7 +2123,7 @@ async def start_camera_task(
             src = camera_sources.get(cam_id, 0)
             width, height = camera_resolutions.get(cam_id, (None, None))
             backend = camera_backends.get(cam_id, "opencv")
-            worker_low_latency = bool(low_latency) if low_latency is not None else False
+            worker_low_latency = bool(low_latency) if low_latency is not None else True
             worker = CameraWorker(
                 src,
                 asyncio.get_running_loop(),
