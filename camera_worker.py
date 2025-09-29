@@ -85,6 +85,7 @@ class CameraWorker:
         self._restart_lock = threading.Lock()
         self._no_video_data_since: float | None = None
         self._last_no_video_log = 0.0
+        self._last_frame_ts = 0.0
 
         # robust state
         self._err_window = deque(maxlen=300)
@@ -566,6 +567,7 @@ class CameraWorker:
                                 self._cap.set(cv2.CAP_PROP_FRAME_WIDTH, int(self.width))
                             if self.height:
                                 self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, int(self.height))
+            self._last_frame_ts = 0.0
         self._fail_count = 0
         self._err_window.clear()
         self._last_returncode_logged = None
@@ -821,6 +823,7 @@ class CameraWorker:
             self._fail_count = 0
             self._last_returncode_logged = None
             self._restart_backoff = 0.0
+            self._last_frame_ts = time.monotonic()
             frame_copy = frame
             if self._q.full():
                 with silent():
@@ -942,6 +945,21 @@ class CameraWorker:
             while self._err_window and (now - self._err_window[0]) > self._err_window_secs:
                 self._err_window.popleft()
             if len(self._err_window) >= self._err_threshold:
+                last_frame_ts = self._last_frame_ts
+                recent_frame_age = (
+                    now - last_frame_ts if last_frame_ts > 0 else float("inf")
+                )
+                if (
+                    recent_frame_age < max(1.0, self._read_timeout)
+                    and self._fail_count < max(5, self._err_threshold // 2)
+                ):
+                    self._logger.debug(
+                        "%s burst errors detected but frames still arriving (age=%.2fs); skipping restart",
+                        self._log_prefix,
+                        recent_frame_age,
+                    )
+                    self._err_window.clear()
+                    return
                 self._logger.warning(
                     "%s burst errors=%d within %.1fs; last stderr: %s",
                     self._log_prefix, len(self._err_window), self._err_window_secs, self.last_ffmpeg_stderr()
