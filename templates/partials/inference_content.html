@@ -48,6 +48,17 @@
       function createCameraController(cellId, options = {}) {
         let socket;
         let roiSocket;
+        let socketReconnectTimer;
+        let roiSocketReconnectTimer;
+        let socketReconnectAttempts = 0;
+        let roiSocketReconnectAttempts = 0;
+        const INITIAL_RECONNECT_DELAY = 500;
+        const MAX_RECONNECT_DELAY = 10000;
+        const computeReconnectDelay = attempt => {
+          const step = Math.max(1, attempt);
+          const delay = INITIAL_RECONNECT_DELAY * Math.pow(2, step - 1);
+          return Math.min(MAX_RECONNECT_DELAY, delay);
+        };
         let rois = [];
         let allRois = [];
         let running = false;
@@ -85,7 +96,9 @@
         const getEl = suffix => document.getElementById(`${cellId}-${suffix}`);
         const video = getEl('video');
         const videoWrapper = video ? video.closest('.video-wrapper') : null;
-        const bitmapRendererCtx = video && typeof video.getContext === 'function'
+        const supportsImageBitmap = typeof window !== 'undefined'
+          && typeof createImageBitmap === 'function';
+        const bitmapRendererCtx = supportsImageBitmap && video && typeof video.getContext === 'function'
           ? video.getContext('bitmaprenderer')
           : null;
         const canUseBitmapRenderer = Boolean(
@@ -96,6 +109,9 @@
           : (video && typeof video.getContext === 'function'
             ? video.getContext('2d')
             : null);
+        let allowBitmapDecoding = supportsImageBitmap;
+        let fallbackImgEl;
+        let fallbackObjectUrl;
         const startButton = getEl('startButton');
         const stopButton = getEl('stopButton');
         const statusEl = getEl('status');
@@ -108,7 +124,31 @@
         const logRoiSelect = getEl('logRoiSelect');
         const intervalInput = getEl('intervalInput');
         let logTimer;
+        const clearTimeoutSafe = timer => {
+          if (typeof timer === 'number') {
+            clearTimeout(timer);
+          }
+        };
+        const revokeFallbackUrl = () => {
+          if (fallbackObjectUrl) {
+            URL.revokeObjectURL(fallbackObjectUrl);
+            fallbackObjectUrl = null;
+          }
+        };
+
+        const hideFallbackImage = () => {
+          if (fallbackImgEl) {
+            fallbackImgEl.style.display = 'none';
+            fallbackImgEl.removeAttribute('src');
+          }
+          if (video) {
+            video.style.display = '';
+          }
+          revokeFallbackUrl();
+        };
+
         const clearCanvas = () => {
+          hideFallbackImage();
           if (!video) {
             return;
           }
@@ -171,6 +211,50 @@
             }
           };
 
+          const ensureFallbackImage = () => {
+            if (fallbackImgEl) {
+              return fallbackImgEl;
+            }
+            if (!videoWrapper) {
+              return null;
+            }
+            const img = document.createElement('img');
+            img.id = `${cellId}-video-fallback`;
+            img.className = video ? video.className : 'stream-video';
+            img.alt = 'Stream preview';
+            img.style.display = 'none';
+            videoWrapper.appendChild(img);
+            fallbackImgEl = img;
+            return fallbackImgEl;
+          };
+
+          const renderWithFallbackImage = async blob => {
+            const imgEl = ensureFallbackImage();
+            if (!imgEl) {
+              return;
+            }
+            if (video) {
+              video.style.display = 'none';
+            }
+            imgEl.style.display = '';
+            revokeFallbackUrl();
+            await new Promise((resolve, reject) => {
+              const objectUrl = URL.createObjectURL(blob);
+              fallbackObjectUrl = objectUrl;
+              imgEl.onload = () => {
+                URL.revokeObjectURL(objectUrl);
+                fallbackObjectUrl = null;
+                resolve();
+              };
+              imgEl.onerror = err => {
+                URL.revokeObjectURL(objectUrl);
+                fallbackObjectUrl = null;
+                reject(err);
+              };
+              imgEl.src = objectUrl;
+            });
+          };
+
           const processNext = async () => {
             if (!pendingFrame) {
               isRendering = false;
@@ -181,24 +265,39 @@
             pendingFrame = null;
             let bitmap;
             try {
-              bitmap = await createImageBitmap(blob);
-              if (!bitmap) {
-                return;
-              }
-              const width = bitmap.width || 0;
-              const height = bitmap.height || 0;
-              const { width: targetWidth, height: targetHeight } = getDisplaySize(width, height);
-              applyDisplaySize(targetWidth, targetHeight);
-              if (canUseBitmapRenderer && typeof videoCtx.transferFromImageBitmap === 'function') {
-                videoCtx.transferFromImageBitmap(bitmap);
-              } else if (
-                typeof videoCtx.clearRect === 'function' && typeof videoCtx.drawImage === 'function'
-              ) {
-                videoCtx.clearRect(0, 0, targetWidth, targetHeight);
-                videoCtx.drawImage(bitmap, 0, 0, targetWidth, targetHeight);
+              if (allowBitmapDecoding && typeof createImageBitmap === 'function') {
+                hideFallbackImage();
+                bitmap = await createImageBitmap(blob);
+                if (!bitmap) {
+                  throw new Error('empty_bitmap');
+                }
+                const width = bitmap.width || 0;
+                const height = bitmap.height || 0;
+                const { width: targetWidth, height: targetHeight } = getDisplaySize(width, height);
+                applyDisplaySize(targetWidth, targetHeight);
+                if (canUseBitmapRenderer && typeof videoCtx.transferFromImageBitmap === 'function') {
+                  videoCtx.transferFromImageBitmap(bitmap);
+                } else if (
+                  videoCtx
+                  && typeof videoCtx.clearRect === 'function'
+                  && typeof videoCtx.drawImage === 'function'
+                ) {
+                  videoCtx.clearRect(0, 0, targetWidth, targetHeight);
+                  videoCtx.drawImage(bitmap, 0, 0, targetWidth, targetHeight);
+                }
+              } else {
+                await renderWithFallbackImage(blob);
               }
             } catch (err) {
               console.error('Failed to render frame', err);
+              if (allowBitmapDecoding) {
+                allowBitmapDecoding = false;
+                try {
+                  await renderWithFallbackImage(blob);
+                } catch (fallbackErr) {
+                  console.error('Fallback render failed', fallbackErr);
+                }
+              }
             } finally {
               if (bitmap && typeof bitmap.close === 'function') {
                 bitmap.close();
@@ -214,6 +313,7 @@
           return blob => {
             if (!blob) {
               pendingFrame = null;
+              hideFallbackImage();
               return;
             }
             pendingFrame = blob;
@@ -699,6 +799,49 @@
             setRunningUI();
         }
 
+        const resetSocketReconnect = () => {
+            socketReconnectAttempts = 0;
+            clearTimeoutSafe(socketReconnectTimer);
+            socketReconnectTimer = undefined;
+        };
+
+        const resetRoiSocketReconnect = () => {
+            roiSocketReconnectAttempts = 0;
+            clearTimeoutSafe(roiSocketReconnectTimer);
+            roiSocketReconnectTimer = undefined;
+        };
+
+        const scheduleSocketReconnect = () => {
+            if (!running) {
+                return;
+            }
+            socketReconnectAttempts += 1;
+            const delay = computeReconnectDelay(socketReconnectAttempts);
+            clearTimeoutSafe(socketReconnectTimer);
+            statusEl.innerText = 'เชื่อมต่อภาพใหม่...';
+            socketReconnectTimer = setTimeout(() => {
+                if (!running) {
+                    return;
+                }
+                openSocket();
+            }, delay);
+        };
+
+        const scheduleRoiSocketReconnect = () => {
+            if (!running) {
+                return;
+            }
+            roiSocketReconnectAttempts += 1;
+            const delay = computeReconnectDelay(roiSocketReconnectAttempts);
+            clearTimeoutSafe(roiSocketReconnectTimer);
+            roiSocketReconnectTimer = setTimeout(() => {
+                if (!running) {
+                    return;
+                }
+                openRoiSocket();
+            }, delay);
+        };
+
         async function stopInference(options = {}) {
             const opts = options && typeof options === 'object' ? options : {};
             const forceStop = Boolean(opts.force);
@@ -710,6 +853,8 @@
             }
             const wasRunning = running;
             running = false;
+            resetSocketReconnect();
+            resetRoiSocketReconnect();
             try {
                 if (wasRunning || forceStop) {
                     await fetchWithStatus(`/stop_inference/${cam}`, { method: 'POST' });
@@ -752,18 +897,65 @@
         function openSocket() {
             const wsScheme = location.protocol === 'https:' ? 'wss' : 'ws';
             const wsBase = `${wsScheme}://${location.host}`;
-            socket = new WebSocket(`${wsBase}/ws/${cam}`);
-            socket.binaryType = 'blob';
-            socket.onmessage = function(event) {
+            clearTimeoutSafe(socketReconnectTimer);
+            socketReconnectTimer = undefined;
+            const ws = new WebSocket(`${wsBase}/ws/${cam}`);
+            ws.binaryType = 'blob';
+            ws.onopen = () => {
+                if (!running) {
+                    try { ws.close(); } catch (e) { /* noop */ }
+                    return;
+                }
+                if (socket && socket !== ws) {
+                    try { ws.close(); } catch (e) { /* noop */ }
+                    return;
+                }
+                socketReconnectAttempts = 0;
+                statusEl.innerText = 'กำลังรับสตรีมภาพ...';
+            };
+            ws.onmessage = event => {
                 queueFrameForRender(event.data);
             };
+            ws.onerror = () => {
+                if (socket === ws) {
+                    try { ws.close(); } catch (e) { /* noop */ }
+                }
+            };
+            ws.onclose = event => {
+                if (socket === ws) {
+                    socket = null;
+                }
+                if (!running) {
+                    return;
+                }
+                const normalClose = event && (event.code === 1000 || event.code === 1001);
+                if (normalClose) {
+                    statusEl.innerText = 'สตรีมหยุด';
+                    return;
+                }
+                scheduleSocketReconnect();
+            };
+            socket = ws;
         }
 
         function openRoiSocket() {
             const wsScheme = location.protocol === 'https:' ? 'wss' : 'ws';
             const wsBase = `${wsScheme}://${location.host}`;
-            roiSocket = new WebSocket(`${wsBase}/ws_roi_result/${cam}`);
-            roiSocket.onmessage = function(event) {
+            clearTimeoutSafe(roiSocketReconnectTimer);
+            roiSocketReconnectTimer = undefined;
+            const ws = new WebSocket(`${wsBase}/ws_roi_result/${cam}`);
+            ws.onopen = () => {
+                if (!running) {
+                    try { ws.close(); } catch (e) { /* noop */ }
+                    return;
+                }
+                if (roiSocket && roiSocket !== ws) {
+                    try { ws.close(); } catch (e) { /* noop */ }
+                    return;
+                }
+                roiSocketReconnectAttempts = 0;
+            };
+            ws.onmessage = function(event) {
                 try {
                     const data = JSON.parse(event.data);
                     if (Array.isArray(data.results)) {
@@ -781,6 +973,25 @@
                     console.error('ROI message error', e);
                 }
             };
+            ws.onerror = () => {
+                if (roiSocket === ws) {
+                    try { ws.close(); } catch (e) { /* noop */ }
+                }
+            };
+            ws.onclose = event => {
+                if (roiSocket === ws) {
+                    roiSocket = null;
+                }
+                if (!running) {
+                    return;
+                }
+                const normalClose = event && (event.code === 1000 || event.code === 1001);
+                if (normalClose) {
+                    return;
+                }
+                scheduleRoiSocketReconnect();
+            };
+            roiSocket = ws;
         }
 
         async function checkStatus() {
