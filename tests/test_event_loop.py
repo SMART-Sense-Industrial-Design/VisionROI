@@ -5,6 +5,7 @@ import shutil
 import time
 import uuid
 import threading
+import re
 from types import SimpleNamespace
 from queue import Queue
 from pathlib import Path
@@ -431,10 +432,55 @@ def test_aggregated_roi_logs_separate_files_per_source():
                 for handler in list(active_logger.handlers):
                     handler.close()
                     active_logger.removeHandler(handler)
-            logger_utils._loggers.pop(("aggregated_roi", src_name or ""), None)
+            keys_to_remove = [
+                key
+                for key in list(logger_utils._loggers)
+                if key[0] == "aggregated_roi" and key[1] == (src_name or "")
+            ]
+            for key in keys_to_remove:
+                logger_utils._loggers.pop(key, None)
             log_dir = log_file.parent
             if log_dir.exists():
                 shutil.rmtree(log_dir, ignore_errors=True)
+
+
+def test_mqtt_logs_written_per_source_roi():
+    from src.utils import logger as logger_utils
+
+    source_name = f"mqtt-source-{uuid.uuid4().hex}"
+    roi_name = "ทดสอบ MQTT ROI/001"
+    log_dir = Path("data_sources") / source_name
+
+    if log_dir.exists():
+        shutil.rmtree(log_dir)
+
+    logger_instance = None
+    try:
+        logger_instance = logger_utils.get_logger("mqtt", source_name, roi_name)
+        message = "ทดสอบการบันทึก MQTT"
+        logger_instance.info(message)
+        for handler in logger_instance.handlers:
+            handler.flush()
+
+        expected_name = re.sub(r"[^\w.-]+", "_", roi_name.strip()).strip("._")
+        if not expected_name:
+            expected_name = "custom"
+        if not expected_name.lower().endswith(".log"):
+            expected_name = f"{expected_name}.log"
+
+        log_file = log_dir / expected_name
+        assert log_file.exists(), "ควรสร้างไฟล์ log ตามชื่อ ROI"
+        content = log_file.read_text(encoding="utf-8")
+        assert message in content
+    finally:
+        if logger_instance is not None:
+            for handler in list(logger_instance.handlers):
+                handler.flush()
+                logger_instance.removeHandler(handler)
+                handler.close()
+        logger_utils._loggers.clear()
+        if log_dir.exists():
+            shutil.rmtree(log_dir)
 
 
 def test_multiple_inference_loops_do_not_block_or_leak():
