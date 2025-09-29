@@ -451,6 +451,7 @@ class CameraWorker:
             gc.collect()
             malloc_trim()
 
+
         if sleep_after:
             time.sleep(min(max(self._restart_backoff or 0.2, 0.2), 2.0))
 
