@@ -48,6 +48,17 @@
       function createCameraController(cellId, options = {}) {
         let socket;
         let roiSocket;
+        let socketReconnectTimer;
+        let roiSocketReconnectTimer;
+        let socketReconnectAttempts = 0;
+        let roiSocketReconnectAttempts = 0;
+        const INITIAL_RECONNECT_DELAY = 500;
+        const MAX_RECONNECT_DELAY = 10000;
+        const computeReconnectDelay = attempt => {
+          const step = Math.max(1, attempt);
+          const delay = INITIAL_RECONNECT_DELAY * Math.pow(2, step - 1);
+          return Math.min(MAX_RECONNECT_DELAY, delay);
+        };
         let rois = [];
         let allRois = [];
         let running = false;
@@ -108,6 +119,11 @@
         const logRoiSelect = getEl('logRoiSelect');
         const intervalInput = getEl('intervalInput');
         let logTimer;
+        const clearTimeoutSafe = timer => {
+          if (typeof timer === 'number') {
+            clearTimeout(timer);
+          }
+        };
         const clearCanvas = () => {
           if (!video) {
             return;
@@ -699,6 +715,49 @@
             setRunningUI();
         }
 
+        const resetSocketReconnect = () => {
+            socketReconnectAttempts = 0;
+            clearTimeoutSafe(socketReconnectTimer);
+            socketReconnectTimer = undefined;
+        };
+
+        const resetRoiSocketReconnect = () => {
+            roiSocketReconnectAttempts = 0;
+            clearTimeoutSafe(roiSocketReconnectTimer);
+            roiSocketReconnectTimer = undefined;
+        };
+
+        const scheduleSocketReconnect = () => {
+            if (!running) {
+                return;
+            }
+            socketReconnectAttempts += 1;
+            const delay = computeReconnectDelay(socketReconnectAttempts);
+            clearTimeoutSafe(socketReconnectTimer);
+            statusEl.innerText = 'เชื่อมต่อภาพใหม่...';
+            socketReconnectTimer = setTimeout(() => {
+                if (!running) {
+                    return;
+                }
+                openSocket();
+            }, delay);
+        };
+
+        const scheduleRoiSocketReconnect = () => {
+            if (!running) {
+                return;
+            }
+            roiSocketReconnectAttempts += 1;
+            const delay = computeReconnectDelay(roiSocketReconnectAttempts);
+            clearTimeoutSafe(roiSocketReconnectTimer);
+            roiSocketReconnectTimer = setTimeout(() => {
+                if (!running) {
+                    return;
+                }
+                openRoiSocket();
+            }, delay);
+        };
+
         async function stopInference(options = {}) {
             const opts = options && typeof options === 'object' ? options : {};
             const forceStop = Boolean(opts.force);
@@ -710,6 +769,8 @@
             }
             const wasRunning = running;
             running = false;
+            resetSocketReconnect();
+            resetRoiSocketReconnect();
             try {
                 if (wasRunning || forceStop) {
                     await fetchWithStatus(`/stop_inference/${cam}`, { method: 'POST' });
@@ -752,18 +813,65 @@
         function openSocket() {
             const wsScheme = location.protocol === 'https:' ? 'wss' : 'ws';
             const wsBase = `${wsScheme}://${location.host}`;
-            socket = new WebSocket(`${wsBase}/ws/${cam}`);
-            socket.binaryType = 'blob';
-            socket.onmessage = function(event) {
+            clearTimeoutSafe(socketReconnectTimer);
+            socketReconnectTimer = undefined;
+            const ws = new WebSocket(`${wsBase}/ws/${cam}`);
+            ws.binaryType = 'blob';
+            ws.onopen = () => {
+                if (!running) {
+                    try { ws.close(); } catch (e) { /* noop */ }
+                    return;
+                }
+                if (socket && socket !== ws) {
+                    try { ws.close(); } catch (e) { /* noop */ }
+                    return;
+                }
+                socketReconnectAttempts = 0;
+                statusEl.innerText = 'กำลังรับสตรีมภาพ...';
+            };
+            ws.onmessage = event => {
                 queueFrameForRender(event.data);
             };
+            ws.onerror = () => {
+                if (socket === ws) {
+                    try { ws.close(); } catch (e) { /* noop */ }
+                }
+            };
+            ws.onclose = event => {
+                if (socket === ws) {
+                    socket = null;
+                }
+                if (!running) {
+                    return;
+                }
+                const normalClose = event && (event.code === 1000 || event.code === 1001);
+                if (normalClose) {
+                    statusEl.innerText = 'สตรีมหยุด';
+                    return;
+                }
+                scheduleSocketReconnect();
+            };
+            socket = ws;
         }
 
         function openRoiSocket() {
             const wsScheme = location.protocol === 'https:' ? 'wss' : 'ws';
             const wsBase = `${wsScheme}://${location.host}`;
-            roiSocket = new WebSocket(`${wsBase}/ws_roi_result/${cam}`);
-            roiSocket.onmessage = function(event) {
+            clearTimeoutSafe(roiSocketReconnectTimer);
+            roiSocketReconnectTimer = undefined;
+            const ws = new WebSocket(`${wsBase}/ws_roi_result/${cam}`);
+            ws.onopen = () => {
+                if (!running) {
+                    try { ws.close(); } catch (e) { /* noop */ }
+                    return;
+                }
+                if (roiSocket && roiSocket !== ws) {
+                    try { ws.close(); } catch (e) { /* noop */ }
+                    return;
+                }
+                roiSocketReconnectAttempts = 0;
+            };
+            ws.onmessage = function(event) {
                 try {
                     const data = JSON.parse(event.data);
                     if (Array.isArray(data.results)) {
@@ -781,6 +889,25 @@
                     console.error('ROI message error', e);
                 }
             };
+            ws.onerror = () => {
+                if (roiSocket === ws) {
+                    try { ws.close(); } catch (e) { /* noop */ }
+                }
+            };
+            ws.onclose = event => {
+                if (roiSocket === ws) {
+                    roiSocket = null;
+                }
+                if (!running) {
+                    return;
+                }
+                const normalClose = event && (event.code === 1000 || event.code === 1001);
+                if (normalClose) {
+                    return;
+                }
+                scheduleRoiSocketReconnect();
+            };
+            roiSocket = ws;
         }
 
         async function checkStatus() {
