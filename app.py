@@ -17,6 +17,7 @@ import os
 import re
 import sys
 import argparse
+import logging
 from collections import defaultdict, deque
 from dataclasses import dataclass
 
@@ -272,6 +273,18 @@ def _truthy(value: Any) -> bool:
     return False
 
 
+def _get_mqtt_logger(
+    source_name: str | None = None, roi_name: str | None = None
+) -> logging.Logger:
+    source_value = str(source_name).strip() if source_name is not None else ""
+    roi_value = str(roi_name).strip() if roi_name is not None else ""
+    if source_value and roi_value:
+        return get_logger("mqtt", source_value, roi_value)
+    if source_value:
+        return get_logger("mqtt", source_value)
+    return get_logger("mqtt")
+
+
 def load_mqtt_configs_from_disk() -> dict[str, dict[str, Any]]:
     if not os.path.exists(MQTT_CONFIG_FILE):
         return {}
@@ -414,7 +427,10 @@ async def publish_roi_to_mqtt(
     payload: dict[str, Any],
 ) -> bool:
     global _mqtt_dependency_missing_logged
-    logger = get_logger("mqtt")
+    roi_name_for_log = ""
+    if isinstance(payload, dict):
+        roi_name_for_log = str(payload.get("roi_name") or "").strip()
+    logger = _get_mqtt_logger(source_name, roi_name_for_log or None)
 
     if mqtt is None:
         if not _mqtt_dependency_missing_logged:
@@ -1969,7 +1985,7 @@ async def run_inference_loop(cam_id: str):
                                             )
                                         )
                                     except RuntimeError:
-                                        logger = get_logger('mqtt')
+                                        logger = _get_mqtt_logger(source_name, roi_name)
                                         if logger is not None:
                                             logger.exception(
                                                 "failed to schedule MQTT publish for config '%s'",
