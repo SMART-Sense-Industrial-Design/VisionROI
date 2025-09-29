@@ -92,19 +92,24 @@
       };
       ['source', 'interval'].forEach(migrateLegacyKey);
       const getEl = suffix => document.getElementById(`${cellId}-${suffix}`);
-      const video = getEl('video');
-      const videoWrapper = video ? video.closest('.video-wrapper') : null;
-      const bitmapRendererCtx = video && typeof video.getContext === 'function'
-        ? video.getContext('bitmaprenderer')
-        : null;
-      const canUseBitmapRenderer = Boolean(
-        bitmapRendererCtx && typeof bitmapRendererCtx.transferFromImageBitmap === 'function'
-      );
-      const videoCtx = canUseBitmapRenderer
-        ? bitmapRendererCtx
-        : (video && typeof video.getContext === 'function'
-          ? video.getContext('2d')
-          : null);
+        const video = getEl('video');
+        const videoWrapper = video ? video.closest('.video-wrapper') : null;
+        const supportsImageBitmap = typeof window !== 'undefined'
+          && typeof createImageBitmap === 'function';
+        const bitmapRendererCtx = supportsImageBitmap && video && typeof video.getContext === 'function'
+          ? video.getContext('bitmaprenderer')
+          : null;
+        const canUseBitmapRenderer = Boolean(
+          bitmapRendererCtx && typeof bitmapRendererCtx.transferFromImageBitmap === 'function'
+        );
+        const videoCtx = canUseBitmapRenderer
+          ? bitmapRendererCtx
+          : (video && typeof video.getContext === 'function'
+            ? video.getContext('2d')
+            : null);
+        let allowBitmapDecoding = supportsImageBitmap;
+        let fallbackImgEl;
+        let fallbackObjectUrl;
       const startButton = getEl('startButton');
       const stopButton = getEl('stopButton');
       const statusEl = getEl('status');
@@ -125,17 +130,36 @@
           clearTimeout(timer);
         }
       };
-      const clearCanvas = () => {
-        if (!video) {
-          return;
-        }
-        if (canUseBitmapRenderer) {
-          video.width = 0;
-          video.height = 0;
-        } else if (videoCtx && typeof videoCtx.clearRect === 'function') {
-          videoCtx.clearRect(0, 0, video.width || 0, video.height || 0);
-        }
-      };
+        const revokeFallbackUrl = () => {
+          if (fallbackObjectUrl) {
+            URL.revokeObjectURL(fallbackObjectUrl);
+            fallbackObjectUrl = null;
+          }
+        };
+
+        const hideFallbackImage = () => {
+          if (fallbackImgEl) {
+            fallbackImgEl.style.display = 'none';
+            fallbackImgEl.removeAttribute('src');
+          }
+          if (video) {
+            video.style.display = '';
+          }
+          revokeFallbackUrl();
+        };
+
+        const clearCanvas = () => {
+          hideFallbackImage();
+          if (!video) {
+            return;
+          }
+          if (canUseBitmapRenderer) {
+            video.width = 0;
+            video.height = 0;
+          } else if (videoCtx && typeof videoCtx.clearRect === 'function') {
+            videoCtx.clearRect(0, 0, video.width || 0, video.height || 0);
+          }
+        };
       const queueFrameForRender = (() => {
         if (!videoCtx) {
           return () => {};
@@ -184,38 +208,97 @@
           }
         };
 
-        const processNext = async () => {
-          if (!pendingFrame) {
-            isRendering = false;
-            return;
-          }
-          isRendering = true;
-          const blob = pendingFrame;
-          pendingFrame = null;
-          let bitmap;
-          try {
-            bitmap = await createImageBitmap(blob);
-            if (!bitmap) {
+          const ensureFallbackImage = () => {
+            if (fallbackImgEl) {
+              return fallbackImgEl;
+            }
+            if (!videoWrapper) {
+              return null;
+            }
+            const img = document.createElement('img');
+            img.id = `${cellId}-video-fallback`;
+            img.className = video ? video.className : 'stream-video';
+            img.alt = 'Stream preview';
+            img.style.display = 'none';
+            videoWrapper.appendChild(img);
+            fallbackImgEl = img;
+            return fallbackImgEl;
+          };
+
+          const renderWithFallbackImage = async blob => {
+            const imgEl = ensureFallbackImage();
+            if (!imgEl) {
               return;
             }
-            const width = bitmap.width || 0;
-            const height = bitmap.height || 0;
-            const { width: targetWidth, height: targetHeight } = getDisplaySize(width, height);
-            applyDisplaySize(targetWidth, targetHeight);
-            if (canUseBitmapRenderer && typeof videoCtx.transferFromImageBitmap === 'function') {
-              videoCtx.transferFromImageBitmap(bitmap);
-            } else if (
-              typeof videoCtx.clearRect === 'function' && typeof videoCtx.drawImage === 'function'
-            ) {
-              videoCtx.clearRect(0, 0, targetWidth, targetHeight);
-              videoCtx.drawImage(bitmap, 0, 0, targetWidth, targetHeight);
+            if (video) {
+              video.style.display = 'none';
             }
-          } catch (err) {
-            console.error('Failed to render frame', err);
-          } finally {
-            if (bitmap && typeof bitmap.close === 'function') {
-              bitmap.close();
+            imgEl.style.display = '';
+            revokeFallbackUrl();
+            await new Promise((resolve, reject) => {
+              const objectUrl = URL.createObjectURL(blob);
+              fallbackObjectUrl = objectUrl;
+              imgEl.onload = () => {
+                URL.revokeObjectURL(objectUrl);
+                fallbackObjectUrl = null;
+                resolve();
+              };
+              imgEl.onerror = err => {
+                URL.revokeObjectURL(objectUrl);
+                fallbackObjectUrl = null;
+                reject(err);
+              };
+              imgEl.src = objectUrl;
+            });
+          };
+
+          const processNext = async () => {
+            if (!pendingFrame) {
+              isRendering = false;
+              return;
             }
+            isRendering = true;
+            const blob = pendingFrame;
+            pendingFrame = null;
+            let bitmap;
+            try {
+              if (allowBitmapDecoding && typeof createImageBitmap === 'function') {
+                hideFallbackImage();
+                bitmap = await createImageBitmap(blob);
+                if (!bitmap) {
+                  throw new Error('empty_bitmap');
+                }
+                const width = bitmap.width || 0;
+                const height = bitmap.height || 0;
+                const { width: targetWidth, height: targetHeight } = getDisplaySize(width, height);
+                applyDisplaySize(targetWidth, targetHeight);
+                if (canUseBitmapRenderer && typeof videoCtx.transferFromImageBitmap === 'function') {
+                  videoCtx.transferFromImageBitmap(bitmap);
+                } else if (
+                  videoCtx
+                  && typeof videoCtx.clearRect === 'function'
+                  && typeof videoCtx.drawImage === 'function'
+                ) {
+                  videoCtx.clearRect(0, 0, targetWidth, targetHeight);
+                  videoCtx.drawImage(bitmap, 0, 0, targetWidth, targetHeight);
+                }
+              } else {
+                await renderWithFallbackImage(blob);
+              }
+            } catch (err) {
+              console.error('Failed to render frame', err);
+              if (allowBitmapDecoding) {
+                allowBitmapDecoding = false;
+                try {
+                  await renderWithFallbackImage(blob);
+                } catch (fallbackErr) {
+                  console.error('Fallback render failed', fallbackErr);
+                }
+              }
+            } finally {
+              if (bitmap && typeof bitmap.close === 'function') {
+                bitmap.close();
+              }
             if (pendingFrame) {
               processNext();
             } else {
@@ -224,16 +307,17 @@
           }
         };
 
-        return blob => {
-          if (!blob) {
-            pendingFrame = null;
-            return;
-          }
-          pendingFrame = blob;
-          if (!isRendering) {
-            processNext();
-          }
-        };
+          return blob => {
+            if (!blob) {
+              pendingFrame = null;
+              hideFallbackImage();
+              return;
+            }
+            pendingFrame = blob;
+            if (!isRendering) {
+              processNext();
+            }
+          };
       })();
       let isLogUpdating = false;
       let logSessionId = 0;
