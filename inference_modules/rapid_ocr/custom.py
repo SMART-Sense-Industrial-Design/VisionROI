@@ -295,8 +295,21 @@ def _rebind_internal_sessions_if_cpu_only(reader: Any, providers: list[str], mod
     so = _make_sess_options()
 
     # ลำดับความพยายาม: ยึดตาม providers ที่ถูกเลือกไว้ (เช่นจาก env)
-    try_order_env = [ep for ep in providers if ep in ("CUDAExecutionProvider", "TensorrtExecutionProvider")]
-    try_order = try_order_env if try_order_env else ["CUDAExecutionProvider", "TensorrtExecutionProvider"]
+    gpu_candidates = ["TensorrtExecutionProvider", "CUDAExecutionProvider"]
+    available = set(_available_providers())
+
+    try_order_env = [ep for ep in providers if ep in gpu_candidates]
+    try_order_env = [ep for ep in try_order_env if ep in available]
+
+    default_try_order = [ep for ep in gpu_candidates if ep in available]
+
+    try_order = try_order_env if try_order_env else default_try_order
+
+    if not try_order:
+        logger.warning(
+            "[RapidOCR-ORT] no GPU execution providers available; skip strict rebuild"
+        )
+        return
 
     def _rebuild_one(name: str, sess_attr: str, key_in_paths: str):
         mp = model_paths.get(key_in_paths)
