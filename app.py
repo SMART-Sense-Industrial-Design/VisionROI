@@ -279,10 +279,10 @@ def _get_mqtt_logger(
     source_value = str(source_name).strip() if source_name is not None else ""
     roi_value = str(roi_name).strip() if roi_name is not None else ""
     if source_value and roi_value:
-        return get_logger("mqtt", source_value, roi_value)
+        return get_logger("mqtt", source_value, roi_value, subdir="mqtt")
     if source_value:
-        return get_logger("mqtt", source_value)
-    return get_logger("mqtt")
+        return get_logger("mqtt", source_value, subdir="mqtt")
+    return get_logger("mqtt", subdir="mqtt")
 
 
 def load_mqtt_configs_from_disk() -> dict[str, dict[str, Any]]:
@@ -518,8 +518,12 @@ async def publish_roi_to_mqtt(
     try:
         await asyncio.to_thread(_publish_sync)
         if logger is not None:
-            logger.debug(
-                "Published MQTT message via '%s' to topic '%s'", config_name, topic
+            roi_label = roi_name_for_log or str(roi_id)
+            logger.info(
+                "Published MQTT message via '%s' to topic '%s' for ROI '%s'",
+                config_name,
+                topic,
+                roi_label,
             )
         return True
     except Exception:
