@@ -83,6 +83,8 @@ class CameraWorker:
         self._image_path: Path | None = None
         self._image_frame = None
         self._restart_lock = threading.Lock()
+        self._no_video_data_since: float | None = None
+        self._last_no_video_log = 0.0
 
         # robust state
         self._err_window = deque(maxlen=300)
@@ -421,6 +423,37 @@ class CameraWorker:
             remaining -= len(chunk)
         return remaining <= 0
 
+    def _handle_no_video_data(self, trigger: str, details: str = "", *, sleep_after: bool = False) -> None:
+        """จัดการเหตุการณ์ที่ไม่มีวิดีโอเข้ามา ให้รีสตาร์ทและรอจนกว่ากล้องจะพร้อม"""
+        if self._stop_evt.is_set():
+            return
+        now = time.monotonic()
+        if self._no_video_data_since is None:
+            self._no_video_data_since = now
+        waited = now - self._no_video_data_since
+        if now - self._last_no_video_log > 2.0:
+            extra = f" ({details})" if details else ""
+            self._logger.warning(
+                "%s waiting for camera readiness due to no video data (%s) for %.1fs%s; last stderr: %s",
+                self._log_prefix,
+                trigger,
+                waited,
+                extra,
+                self.last_ffmpeg_stderr(),
+            )
+            self._last_no_video_log = now
+
+        self._restart_backend()
+        self._clear_frame_queue()
+
+        # ถ้ารอเกินสักพัก ให้พยายามคืนหน่วยความจำกลับระบบปฏิบัติการ
+        if waited > 5.0:
+            gc.collect()
+            malloc_trim()
+
+        if sleep_after:
+            time.sleep(min(max(self._restart_backoff or 0.2, 0.2), 2.0))
+
     # ---------- process termination (process group safe) ----------
 
     def _terminate_proc_tree(self, proc: subprocess.Popen, grace: float = 0.8) -> None:
@@ -468,6 +501,7 @@ class CameraWorker:
                                 self._proc.stderr.close()
                         except Exception:
                             pass
+                        self._stdout_fd = None
                         self._terminate_proc_tree(self._proc, grace=0.5)
 
                         if self._stderr_thread and self._stderr_thread.is_alive():
@@ -535,6 +569,14 @@ class CameraWorker:
         self._err_window.clear()
         self._last_returncode_logged = None
         self._next_resolution_probe = 0.0
+
+    def _clear_frame_queue(self) -> None:
+        """ล้างเฟรมค้างเพื่อลดการถือหน่วยความจำไว้โดยไม่จำเป็น"""
+        while True:
+            try:
+                _ = self._q.get_nowait()
+            except Empty:
+                break
 
     # ---------- lifecycle ----------
 
@@ -637,6 +679,7 @@ class CameraWorker:
                 buffer = bytearray()
                 start_wait = time.monotonic()
                 fd = self._stdout_fd or stdout.fileno()
+                no_video_timeout = False
                 while len(buffer) < frame_size and not self._stop_evt.is_set():
                     remaining = frame_size - len(buffer)
                     wait_time = max(0.1, min(0.5, self._read_timeout))
@@ -651,14 +694,7 @@ class CameraWorker:
                         break
                     if not ready:
                         if time.monotonic() - start_wait > self._read_timeout:
-                            self._logger.warning(
-                                "%s no video data for %.1fs (collected %d/%d bytes); last stderr: %s",
-                                self._log_prefix,
-                                self._read_timeout,
-                                len(buffer),
-                                frame_size,
-                                self.last_ffmpeg_stderr(),
-                            )
+                            no_video_timeout = True
                             break
                         continue
                     try:
@@ -679,6 +715,15 @@ class CameraWorker:
                     start_wait = time.monotonic()
 
                 buffer_len = len(buffer)
+
+                if no_video_timeout:
+                    self._fail_count += 1
+                    self._handle_no_video_data(
+                        "stdout timeout",
+                        f"collected {buffer_len}/{frame_size} bytes",
+                        sleep_after=True,
+                    )
+                    continue
 
                 if buffer_len != frame_size:
                     if 0 < buffer_len < frame_size:
@@ -770,6 +815,8 @@ class CameraWorker:
             else:
                 raise ValueError(f"Unknown backend: {self.backend}")
 
+            self._no_video_data_since = None
+            self._last_no_video_log = 0.0
             self._fail_count = 0
             self._last_returncode_logged = None
             self._restart_backoff = 0.0
@@ -874,6 +921,10 @@ class CameraWorker:
             - และถ้า robust เปิดอยู่ ให้ 'สลับ transport' (tcp<->udp) ถ้าบิลด์รองรับ
         """
         now = time.monotonic()
+        lower_line = line.lower()
+        if "no video data" in lower_line:
+            self._handle_no_video_data("ffmpeg stderr", line)
+            return
         bad = (
             "corrupt decoded frame" in line
             or "error while decoding" in line
