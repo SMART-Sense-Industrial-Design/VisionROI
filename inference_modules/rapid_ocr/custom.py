@@ -88,9 +88,17 @@ def _build_provider_priority() -> list[str]:
     preferred = ["TensorrtExecutionProvider", "CUDAExecutionProvider", "CPUExecutionProvider"]
     av = _available_providers()
     if not av:
-        return preferred
+        # หาก onnxruntime ไม่รายงาน provider ใดเลย (เช่นไม่ได้ติดตั้ง GPU EP)
+        # ให้กลับไปใช้ CPU ล้วน เพื่อหลีกเลี่ยง warning จาก ORT ที่พยายามโหลด EP ที่ไม่มี
+        return ["CPUExecutionProvider"]
+
     chosen = [p for p in preferred if p in av]
-    if "CPUExecutionProvider" not in chosen:
+    if not chosen:
+        # กรณีที่รายการ preferred ไม่มีอยู่ใน av (เช่น ใช้ CoreML บน macOS)
+        # ยังต้องแน่ใจว่า CPU อยู่ในลิสต์เพื่อให้ RapidOCR ทำงานได้
+        if "CPUExecutionProvider" in av:
+            chosen.append("CPUExecutionProvider")
+    elif "CPUExecutionProvider" not in chosen:
         chosen.append("CPUExecutionProvider")
     return chosen
 
