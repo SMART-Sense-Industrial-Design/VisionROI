@@ -444,6 +444,13 @@ class CameraWorker:
             self._last_no_video_log = now
 
         self._restart_backend()
+        self._clear_frame_queue()
+
+        # ถ้ารอเกินสักพัก ให้พยายามคืนหน่วยความจำกลับระบบปฏิบัติการ
+        if waited > 5.0:
+            gc.collect()
+            malloc_trim()
+
 
         if sleep_after:
             time.sleep(min(max(self._restart_backoff or 0.2, 0.2), 2.0))
@@ -495,6 +502,7 @@ class CameraWorker:
                                 self._proc.stderr.close()
                         except Exception:
                             pass
+                        self._stdout_fd = None
                         self._terminate_proc_tree(self._proc, grace=0.5)
 
                         if self._stderr_thread and self._stderr_thread.is_alive():
@@ -562,6 +570,14 @@ class CameraWorker:
         self._err_window.clear()
         self._last_returncode_logged = None
         self._next_resolution_probe = 0.0
+
+    def _clear_frame_queue(self) -> None:
+        """ล้างเฟรมค้างเพื่อลดการถือหน่วยความจำไว้โดยไม่จำเป็น"""
+        while True:
+            try:
+                _ = self._q.get_nowait()
+            except Empty:
+                break
 
     # ---------- lifecycle ----------
 
