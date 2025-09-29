@@ -449,14 +449,18 @@ def test_mqtt_logs_written_per_source_roi():
 
     source_name = f"mqtt-source-{uuid.uuid4().hex}"
     roi_name = "ทดสอบ MQTT ROI/001"
-    log_dir = Path("data_sources") / source_name
+    log_dir = Path("data_sources") / source_name / "mqtt"
 
     if log_dir.exists():
         shutil.rmtree(log_dir)
 
+    logger_utils._loggers.clear()
+
     logger_instance = None
     try:
-        logger_instance = logger_utils.get_logger("mqtt", source_name, roi_name)
+        logger_instance = logger_utils.get_logger(
+            "mqtt", source_name, roi_name, subdir="mqtt"
+        )
         message = "ทดสอบการบันทึก MQTT"
         logger_instance.info(message)
         for handler in logger_instance.handlers:
@@ -482,6 +486,110 @@ def test_mqtt_logs_written_per_source_roi():
         if log_dir.exists():
             shutil.rmtree(log_dir)
 
+
+def test_publish_roi_to_mqtt_logs_successful_publish(monkeypatch):
+    from src.utils import logger as logger_utils
+
+    source_name = f"mqtt-source-{uuid.uuid4().hex}"
+    roi_name = "ROI MQTT ทดสอบ/002"
+    config_name = f"cfg-{uuid.uuid4().hex}"
+    log_dir = Path("data_sources") / source_name / "mqtt"
+
+    if log_dir.exists():
+        shutil.rmtree(log_dir)
+
+    logger_utils._loggers.clear()
+
+    class DummyPublishInfo:
+        rc = 0
+
+        def wait_for_publish(self, timeout=None):  # pragma: no cover - trivial
+            return True
+
+    class DummyClient:
+        def __init__(self, *args, **kwargs):
+            self.published = []
+
+        def username_pw_set(self, *_args, **_kwargs):
+            pass
+
+        def tls_set(self, *args, **kwargs):
+            pass
+
+        def connect(self, *_args, **_kwargs):
+            return 0
+
+        def loop_start(self):
+            pass
+
+        def publish(self, topic, message, qos=0, retain=False):
+            self.published.append((topic, message, qos, retain))
+            return DummyPublishInfo()
+
+        def loop_stop(self):
+            pass
+
+        def disconnect(self):
+            pass
+
+    dummy_mqtt = SimpleNamespace(Client=DummyClient, MQTT_ERR_SUCCESS=0)
+    monkeypatch.setattr(app, "mqtt", dummy_mqtt, raising=False)
+
+    payload = {
+        "roi_name": roi_name,
+        "text": "สำเร็จ",
+    }
+
+    monkeypatch.setitem(
+        app.mqtt_configs,
+        config_name,
+        {
+            "name": config_name,
+            "host": "localhost",
+            "port": 1883,
+            "qos": 1,
+            "retain": False,
+            "base_topic": "vision",
+        },
+    )
+
+    async def run_publish():
+        return await app.publish_roi_to_mqtt(
+            config_name,
+            "cam-1",
+            source_name,
+            "group-a",
+            "roi-123",
+            payload,
+        )
+
+    try:
+        result = asyncio.run(run_publish())
+        assert result is True
+
+        logger_instance = app._get_mqtt_logger(source_name, roi_name)
+        for handler in list(logger_instance.handlers):
+            handler.flush()
+            logger_instance.removeHandler(handler)
+            handler.close()
+
+        expected_name = re.sub(r"[^\w.-]+", "_", roi_name.strip()).strip("._")
+        if not expected_name:
+            expected_name = "custom"
+        if not expected_name.lower().endswith(".log"):
+            expected_name = f"{expected_name}.log"
+
+        log_file = log_dir / expected_name
+        assert log_file.exists(), "ควรบันทึก log MQTT ตามชื่อ ROI"
+        content = log_file.read_text(encoding="utf-8")
+        assert "Published MQTT message via" in content
+        assert config_name in content
+        assert "roi-123" in content
+    finally:
+        app.mqtt_configs.pop(config_name, None)
+        logger_utils._loggers.clear()
+        if log_dir.exists():
+            shutil.rmtree(log_dir)
 
 def test_multiple_inference_loops_do_not_block_or_leak():
     async def main():

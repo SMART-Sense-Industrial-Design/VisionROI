@@ -7,7 +7,7 @@ from pathlib import Path
 import threading
 
 _formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
-_loggers: dict[tuple[str, str, str], logging.Logger] = {}
+_loggers: dict[tuple[str, str, str, str], logging.Logger] = {}
 _lock = threading.Lock()
 
 _SUPPRESS_INFO_MODULES = {
@@ -49,12 +49,16 @@ def _normalize_log_filename(name: str | None) -> str:
 
 
 def get_logger(
-    module_name: str, source: str | None = None, log_name: str | None = None
+    module_name: str,
+    source: str | None = None,
+    log_name: str | None = None,
+    subdir: str | None = None,
 ) -> logging.Logger:
     """คืน logger ที่ตั้งค่า handler ตาม module และ source"""
     src = source or ""
     filename = _normalize_log_filename(log_name)
-    key = (module_name, src, filename)
+    normalized_subdir = (subdir or "").strip().strip("/")
+    key = (module_name, src, filename, normalized_subdir)
     logger = _loggers.get(key)
     if logger is not None:
         return logger
@@ -63,6 +67,8 @@ def get_logger(
         if logger is not None:
             return logger
         logger_name = module_name if not src else f"{module_name}:{src}"
+        if normalized_subdir:
+            logger_name = f"{logger_name}:{normalized_subdir}"
         logger = logging.getLogger(logger_name)
         if logger.handlers:
             for existing in list(logger.handlers):
@@ -73,6 +79,8 @@ def get_logger(
             log_dir = _DATA_SOURCES_ROOT / src
         else:
             log_dir = _INFERENCE_ROOT / module_name
+        if normalized_subdir:
+            log_dir = log_dir / normalized_subdir
         log_dir.mkdir(parents=True, exist_ok=True)
         handler = TimedRotatingFileHandler(
             str(log_dir / filename), when="D", interval=1, backupCount=7
