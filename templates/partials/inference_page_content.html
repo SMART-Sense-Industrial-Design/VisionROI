@@ -398,7 +398,7 @@
         rois = list;
         list.forEach(r => {
           if (r && r.id !== undefined && r.id !== null) {
-            ensureRoiItem(r.id);
+            ensureRoiItem(r.id, r);
             updateRoiModuleLabel(r.id);
           }
         });
@@ -546,13 +546,18 @@
         return (data?.type ?? 'roi') === 'roi';
       }
 
-      function ensureRoiItem(id) {
+      function ensureRoiItem(id, roiData = null) {
         if (!activeGroupName) {
           return;
         }
         if (document.getElementById(`${cellId}-roi-${id}`)) return;
-        const r = findRoiDataById(id) || { id };
-        if (!isRoiType(r)) {
+        const key = String(id);
+        const r =
+          roiData
+          || rois.find(entry => String(entry?.id) === key)
+          || findRoiDataById(id)
+          || null;
+        if (!r || !isRoiType(r)) {
           return;
         }
         if (getRoiGroupName(r) !== activeGroupName) {
@@ -589,10 +594,13 @@
         const roiId = result.id;
         if (roiId === undefined || roiId === null) return;
         const roiData = findRoiDataById(roiId);
-        if (roiData && !isRoiType(roiData)) {
+        if (!roiData || !isRoiType(roiData)) {
           return;
         }
-        ensureRoiItem(roiId);
+        if (getRoiGroupName(roiData) !== activeGroupName) {
+          return;
+        }
+        ensureRoiItem(roiId, roiData);
         updateRoiModuleLabel(roiId, result.module);
         const imgEl = document.getElementById(`${cellId}-roi-${roiId}`);
         if (imgEl && Object.prototype.hasOwnProperty.call(result, 'image')) {
