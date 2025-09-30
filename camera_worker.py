@@ -103,6 +103,8 @@ class CameraWorker:
                 self._rtsp_transport_idx = self._rtsp_transport_cycle.index("udp")
             except ValueError:
                 self._rtsp_transport_idx = 0
+        self._rtsp_transport_initial_idx = self._rtsp_transport_idx
+        self._last_transport_switch_ts = 0.0
 
         # cache capability probes (ตรวจครั้งเดียว)
         self._ff_caps_checked = False
@@ -443,6 +445,34 @@ class CameraWorker:
                 self.last_ffmpeg_stderr(),
             )
             self._last_no_video_log = now
+
+        transport_switched = False
+        if (
+            self.robust
+            and "rtsp_transport" in self._ff_rtsp_opts
+            and len(self._rtsp_transport_cycle) > 1
+        ):
+            prefer_idx = self._rtsp_transport_initial_idx
+            prefer_transport = self._rtsp_transport_cycle[prefer_idx]
+            since_switch = (
+                now - self._last_transport_switch_ts
+                if self._last_transport_switch_ts > 0.0
+                else float("inf")
+            )
+            revert_threshold = max(self._read_timeout * 1.5, 6.0)
+            cycle_threshold = max(self._read_timeout * 3.0, 15.0)
+            if waited >= revert_threshold and self._rtsp_transport_idx != prefer_idx:
+                transport_switched = self._switch_rtsp_transport(
+                    to=prefer_transport,
+                    reason="no video data watchdog (revert)",
+                )
+            elif waited >= cycle_threshold and since_switch >= revert_threshold:
+                transport_switched = self._switch_rtsp_transport(
+                    reason="no video data watchdog (cycle)",
+                )
+            if transport_switched:
+                self._restart_backoff = 0.0
+                self._no_video_data_since = now
 
         self._restart_backend()
         self._clear_frame_queue()
@@ -918,6 +948,33 @@ class CameraWorker:
         raise RuntimeError(f"unsupported pix_fmt {self._ffmpeg_pix_fmt}")
 
     # -------- error watchdog / adaptive fallback --------
+    def _switch_rtsp_transport(self, *, to: Optional[str] = None, reason: str = "") -> bool:
+        if not (
+            self.robust
+            and "rtsp_transport" in self._ff_rtsp_opts
+            and len(self._rtsp_transport_cycle) > 1
+        ):
+            return False
+        if to is None:
+            next_idx = (self._rtsp_transport_idx + 1) % len(self._rtsp_transport_cycle)
+        else:
+            try:
+                next_idx = self._rtsp_transport_cycle.index(to)
+            except ValueError:
+                return False
+        if next_idx == self._rtsp_transport_idx:
+            return False
+        self._rtsp_transport_idx = next_idx
+        self._last_transport_switch_ts = time.monotonic()
+        desc = reason or "switch"
+        self._logger.warning(
+            "%s switching RTSP transport -> %s (%s)",
+            self._log_prefix,
+            self._rtsp_transport_cycle[self._rtsp_transport_idx],
+            desc,
+        )
+        return True
+
     def _track_ffmpeg_errors(self, line: str) -> None:
         """
         จับแพตเทิร์น error จาก ffmpeg; ถ้ามี burst ภายในหน้าต่างสั้น ๆ:
@@ -964,13 +1021,7 @@ class CameraWorker:
                     "%s burst errors=%d within %.1fs; last stderr: %s",
                     self._log_prefix, len(self._err_window), self._err_window_secs, self.last_ffmpeg_stderr()
                 )
-                if self.robust and "rtsp_transport" in self._ff_rtsp_opts and len(self._rtsp_transport_cycle) > 1:
-                    next_idx = (self._rtsp_transport_idx + 1) % len(self._rtsp_transport_cycle)
-                    if next_idx != self._rtsp_transport_idx:
-                        self._rtsp_transport_idx = next_idx
-                        self._logger.warning(
-                            "%s switching RTSP transport -> %s",
-                            self._log_prefix, self._rtsp_transport_cycle[self._rtsp_transport_idx]
-                        )
+                if self._switch_rtsp_transport(reason="burst errors watchdog"):
+                    pass
                 self._restart_backend()
                 self._err_window.clear()
