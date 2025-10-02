@@ -86,6 +86,9 @@ class CameraWorker:
         self._no_video_data_since: float | None = None
         self._last_no_video_log = 0.0
         self._last_frame_ts = 0.0
+        self._opencv_restart_fail_threshold = 10
+        self._opencv_restart_time_threshold = 3.0
+        self._opencv_failure_start: float | None = None
 
         # robust state
         self._err_window = deque(maxlen=300)
@@ -598,10 +601,28 @@ class CameraWorker:
                             if self.height:
                                 self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, int(self.height))
             self._last_frame_ts = 0.0
+        self._opencv_failure_start = None
         self._fail_count = 0
         self._err_window.clear()
         self._last_returncode_logged = None
         self._next_resolution_probe = 0.0
+
+    def _note_opencv_failure(self) -> None:
+        self._fail_count += 1
+        if self._opencv_failure_start is None:
+            self._opencv_failure_start = time.monotonic()
+
+    def _should_restart_opencv_backend(self) -> bool:
+        if self._fail_count >= self._opencv_restart_fail_threshold:
+            return True
+        if (
+            self._opencv_failure_start is not None
+            and self._opencv_restart_time_threshold > 0
+            and time.monotonic() - self._opencv_failure_start
+            >= self._opencv_restart_time_threshold
+        ):
+            return True
+        return False
 
     def _clear_frame_queue(self) -> None:
         """ล้างเฟรมค้างเพื่อลดการถือหน่วยความจำไว้โดยไม่จำเป็น"""
@@ -807,41 +828,41 @@ class CameraWorker:
             elif self.backend == "opencv":
                 if self._image_path is not None:
                     if self._image_frame is None:
-                        self._fail_count += 1
+                        self._note_opencv_failure()
                         if self._fail_count in (1, 10) or self._fail_count % 25 == 0:
                             self._logger.warning(
                                 "%s unable to read still image; consecutive failures=%d",
                                 self._log_prefix,
                                 self._fail_count,
                             )
-                        if self._fail_count > 100:
+                        if self._should_restart_opencv_backend():
                             self._restart_backend()
                         time.sleep(0.2)
                         continue
                     frame = self._image_frame.copy()
                 else:
                     if self._cap is None or not self._cap.isOpened():
-                        self._fail_count += 1
+                        self._note_opencv_failure()
                         if self._fail_count in (1, 10) or self._fail_count % 25 == 0:
                             self._logger.warning(
                                 "%s OpenCV capture not opened; consecutive failures=%d",
                                 self._log_prefix,
                                 self._fail_count,
                             )
-                        if self._fail_count > 100:
+                        if self._should_restart_opencv_backend():
                             self._restart_backend()
                         time.sleep(0.05)
                         continue
                     ok, frame = self._cap.read()
                     if not ok or frame is None:
-                        self._fail_count += 1
+                        self._note_opencv_failure()
                         if self._fail_count in (1, 10) or self._fail_count % 25 == 0:
                             self._logger.warning(
                                 "%s OpenCV read returned empty frame; consecutive failures=%d",
                                 self._log_prefix,
                                 self._fail_count,
                             )
-                        if self._fail_count > 100:
+                        if self._should_restart_opencv_backend():
                             self._restart_backend()
                         time.sleep(0.01)
                         continue
@@ -851,6 +872,7 @@ class CameraWorker:
             self._no_video_data_since = None
             self._last_no_video_log = 0.0
             self._fail_count = 0
+            self._opencv_failure_start = None
             self._last_returncode_logged = None
             self._restart_backoff = 0.0
             self._last_frame_ts = time.monotonic()
