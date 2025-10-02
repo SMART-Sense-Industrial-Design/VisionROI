@@ -1035,7 +1035,9 @@
           storeValue('source', statusSource);
           updateHeaderSourceLabel();
         }
-        if (data.running && name) {
+        const shouldBeRunning = Boolean(data.running && name);
+        if (shouldBeRunning) {
+          running = true;
           openSocket();
           const cfgRes = await fetchWithStatus(`/source_config?name=${encodeURIComponent(name)}`);
           const cfg = await cfgRes.json();
@@ -1067,7 +1069,6 @@
           const logSourceName = cfg.name || statusSource || name;
           startLogUpdates(logSourceName);
           setRunningUI();
-          running = true;
         } else {
           statusEl.innerText = 'Idle';
           startButton.innerText = 'Start';
