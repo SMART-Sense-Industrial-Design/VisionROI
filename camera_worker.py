@@ -89,6 +89,10 @@ class CameraWorker:
         self._opencv_restart_fail_threshold = 10
         self._opencv_restart_time_threshold = 3.0
         self._opencv_failure_start: float | None = None
+        self._ffmpeg_restart_fail_threshold = 10
+        self._ffmpeg_restart_time_threshold = 2.0
+        self._ffmpeg_fail_count = 0
+        self._ffmpeg_failure_start: float | None = None
 
         # robust state
         self._err_window = deque(maxlen=300)
@@ -606,6 +610,8 @@ class CameraWorker:
         self._err_window.clear()
         self._last_returncode_logged = None
         self._next_resolution_probe = 0.0
+        self._ffmpeg_fail_count = 0
+        self._ffmpeg_failure_start = None
 
     def _note_opencv_failure(self) -> None:
         self._fail_count += 1
@@ -671,6 +677,9 @@ class CameraWorker:
             if self.backend == "ffmpeg":
                 if self._proc is None or self._proc.poll() is not None:
                     self._fail_count += 1
+                    self._ffmpeg_fail_count += 1
+                    if self._ffmpeg_failure_start is None:
+                        self._ffmpeg_failure_start = time.monotonic()
                     if self._proc is not None:
                         returncode = self._proc.poll()
                         if (
@@ -684,8 +693,24 @@ class CameraWorker:
                                 returncode,
                                 self.last_ffmpeg_stderr(),
                             )
-                    if self._fail_count > 100:
+                    should_restart = False
+                    if (
+                        self._ffmpeg_restart_fail_threshold
+                        and self._ffmpeg_fail_count
+                        >= self._ffmpeg_restart_fail_threshold
+                    ):
+                        should_restart = True
+                    elif (
+                        self._ffmpeg_failure_start is not None
+                        and self._ffmpeg_restart_time_threshold > 0
+                        and time.monotonic() - self._ffmpeg_failure_start
+                        >= self._ffmpeg_restart_time_threshold
+                    ):
+                        should_restart = True
+                    if should_restart:
                         self._restart_backend()
+                        self._ffmpeg_fail_count = 0
+                        self._ffmpeg_failure_start = None
                     time.sleep(0.05)
                     continue
 
@@ -875,6 +900,8 @@ class CameraWorker:
             self._opencv_failure_start = None
             self._last_returncode_logged = None
             self._restart_backoff = 0.0
+            self._ffmpeg_fail_count = 0
+            self._ffmpeg_failure_start = None
             self._last_frame_ts = time.monotonic()
             frame_copy = frame
             if self._q.full():
