@@ -62,6 +62,7 @@
         let rois = [];
         let allRois = [];
         let running = false;
+        let streamActive = false;
         const FRAME_TIMEOUT_MS = 5000;
         let frameWatchdogTimer;
         const {
@@ -153,6 +154,12 @@
             if (!running || socket !== wsInstance) {
               return;
             }
+            streamActive = false;
+            if (statusEl) {
+              statusEl.innerText = 'ไม่พบภาพจากกล้อง กำลังเชื่อมต่อใหม่...';
+            }
+            clearCanvas();
+            queueFrameForRender(null);
             try {
               wsInstance.close(4000, 'frame_timeout');
             } catch (err) {
@@ -339,6 +346,7 @@
             if (!blob) {
               pendingFrame = null;
               hideFallbackImage();
+              streamActive = false;
               return;
             }
             pendingFrame = blob;
@@ -750,6 +758,7 @@
         async function startInference(roisOverride = null, selectedGroup = '') {
             if (running) return;
             running = true;
+            streamActive = false;
             startButton.disabled = true;
             const name = sourceSelect.value;
             if (!name) {
@@ -838,7 +847,9 @@
                 }
                 return;
             }
-            statusEl.innerText = 'สำเร็จ';
+            statusEl.innerText = 'กำลังรับสตรีมภาพ...';
+            clearCanvas();
+            queueFrameForRender(null);
             openSocket();
             if (rois.length > 0) {
                 openRoiSocket();
@@ -870,7 +881,10 @@
             socketReconnectAttempts += 1;
             const delay = computeReconnectDelay(socketReconnectAttempts);
             clearTimeoutSafe(socketReconnectTimer);
+            streamActive = false;
             statusEl.innerText = 'เชื่อมต่อภาพใหม่...';
+            clearCanvas();
+            queueFrameForRender(null);
             socketReconnectTimer = setTimeout(() => {
                 if (!running) {
                     return;
@@ -935,6 +949,7 @@
             rois = [];
             allRois = [];
             roiGrid.innerHTML = '';
+            streamActive = false;
             statusEl.innerText = 'Stopped';
             startButton.innerText = 'Resume';
             startButton.disabled = false;
@@ -964,10 +979,19 @@
                     return;
                 }
                 socketReconnectAttempts = 0;
+                streamActive = false;
                 statusEl.innerText = 'กำลังรับสตรีมภาพ...';
+                clearCanvas();
+                queueFrameForRender(null);
                 scheduleFrameWatchdog(ws);
             };
             ws.onmessage = event => {
+                if (!streamActive) {
+                    streamActive = true;
+                    if (statusEl) {
+                        statusEl.innerText = 'Running';
+                    }
+                }
                 scheduleFrameWatchdog(ws);
                 queueFrameForRender(event.data);
             };
@@ -984,6 +1008,7 @@
                 if (!running) {
                     return;
                 }
+                streamActive = false;
                 const normalClose = event && (event.code === 1000 || event.code === 1001);
                 if (normalClose) {
                     statusEl.innerText = 'สตรีมหยุด';
@@ -1077,6 +1102,10 @@
                 updateHeaderSourceLabel();
             }
             if (data.running && name) {
+                running = true;
+                streamActive = false;
+                clearCanvas();
+                queueFrameForRender(null);
                 openSocket();
                 const cfgRes = await fetchWithStatus(`/source_config?name=${encodeURIComponent(name)}`);
                 const cfg = await cfgRes.json();
@@ -1114,8 +1143,7 @@
                 stopLogUpdates();
                 const logSourceName = cfg.name || statusSource || name;
                 startLogUpdates(logSourceName);
-                setRunningUI();
-                running = true;
+                setRunningUI('กำลังรับสตรีมภาพ...');
             } else {
                 statusEl.innerText = 'Idle';
                 startButton.innerText = 'Start';
@@ -1149,8 +1177,18 @@
             await startInference(hasCachedRois ? filtered : null, selected);
         }
 
-        function setRunningUI() {
-            statusEl.innerText = 'Running';
+        function setRunningUI(message) {
+            if (typeof message === 'string' && message.length > 0) {
+                statusEl.innerText = message;
+                if (!streamActive) {
+                    clearCanvas();
+                    queueFrameForRender(null);
+                }
+            } else if (streamActive) {
+                statusEl.innerText = 'Running';
+            } else {
+                statusEl.innerText = 'กำลังรับสตรีมภาพ...';
+            }
             startButton.disabled = true;
             stopButton.disabled = false;
             startButton.innerText = 'Start';
