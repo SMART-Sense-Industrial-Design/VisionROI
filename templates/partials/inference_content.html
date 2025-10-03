@@ -158,6 +158,9 @@
             if (statusEl) {
               statusEl.innerText = 'ไม่พบภาพจากกล้อง กำลังเชื่อมต่อใหม่...';
             }
+            clearCanvas();
+            queueFrameForRender(null);
+
             try {
               wsInstance.close(4000, 'frame_timeout');
             } catch (err) {
@@ -846,6 +849,9 @@
                 return;
             }
             statusEl.innerText = 'กำลังรับสตรีมภาพ...';
+            clearCanvas();
+            queueFrameForRender(null);
+
             openSocket();
             if (rois.length > 0) {
                 openRoiSocket();
@@ -879,6 +885,8 @@
             clearTimeoutSafe(socketReconnectTimer);
             streamActive = false;
             statusEl.innerText = 'เชื่อมต่อภาพใหม่...';
+            clearCanvas();
+            queueFrameForRender(null);
             socketReconnectTimer = setTimeout(() => {
                 if (!running) {
                     return;
@@ -975,6 +983,8 @@
                 socketReconnectAttempts = 0;
                 streamActive = false;
                 statusEl.innerText = 'กำลังรับสตรีมภาพ...';
+                clearCanvas();
+                queueFrameForRender(null);
                 scheduleFrameWatchdog(ws);
             };
             ws.onmessage = event => {
@@ -1096,6 +1106,8 @@
             if (data.running && name) {
                 running = true;
                 streamActive = false;
+                clearCanvas();
+                queueFrameForRender(null);
 
                 openSocket();
                 const cfgRes = await fetchWithStatus(`/source_config?name=${encodeURIComponent(name)}`);
@@ -1172,6 +1184,11 @@
         function setRunningUI(message) {
             if (typeof message === 'string' && message.length > 0) {
                 statusEl.innerText = message;
+                if (!streamActive) {
+                    clearCanvas();
+                    queueFrameForRender(null);
+                }
+
             } else if (streamActive) {
                 statusEl.innerText = 'Running';
             } else {
