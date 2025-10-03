@@ -1338,27 +1338,49 @@
         if (res.ok) {
           const payload = await res.json();
           const cameras = Array.isArray(payload?.cameras) ? payload.cameras : [];
-          cameras
-            .filter(cam => (
+          const cameraLookup = new Map();
+          cameras.forEach(cam => {
+            if (cam && typeof cam.cam_id === 'string' && cam.cam_id.length > 0) {
+              cameraLookup.set(cam.cam_id, cam);
+            }
+          });
+          const pageJobs = Array.isArray(payload?.page_jobs) ? payload.page_jobs : [];
+          const candidates = pageJobs.filter(job => (
+            typeof job?.cam_id === 'string'
+            && job.cam_id.startsWith('page_')
+            && job.inference_running
+          ));
+          const fallbackCandidates = candidates.length > 0
+            ? []
+            : cameras.filter(cam => (
               typeof cam?.cam_id === 'string'
               && cam.cam_id.startsWith('page_')
               && cam.inference_running
-            ))
-            .forEach(cam => {
-              const camId = cam.cam_id;
-              if (camIdToCell.has(camId)) {
-                return;
-              }
-              const rawCell = camId.replace(/^page_/, '') || camId;
-              const cellId = addInferenceRow({
-                cellId: rawCell,
-                camId,
-                title: cam.name || camId,
-                defaultSource: cam.name || '',
-                defaultInterval: cam.interval,
-              });
-              createdAny = true;
+            ));
+          const jobsToRestore = candidates.length > 0 ? candidates : fallbackCandidates;
+          jobsToRestore.forEach(item => {
+            const camId = item.cam_id;
+            if (camIdToCell.has(camId)) {
+              return;
+            }
+            const detail = cameraLookup.get(camId) || {};
+            const rawCell = camId.replace(/^page_/, '') || camId;
+            const titleText = item.title || detail.name || camId;
+            const defaultSource = typeof detail.name === 'string' && detail.name
+              ? detail.name
+              : '';
+            const defaultInterval = (
+              detail && detail.interval !== undefined && detail.interval !== null
+            ) ? detail.interval : item.interval;
+            addInferenceRow({
+              cellId: rawCell,
+              camId,
+              title: titleText,
+              defaultSource,
+              defaultInterval,
             });
+            createdAny = true;
+          });
         }
       } catch (err) {
         console.warn('ไม่สามารถโหลดงาน Inference ที่มีอยู่ได้', err);
