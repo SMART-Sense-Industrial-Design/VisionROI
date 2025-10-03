@@ -160,6 +160,7 @@
             }
             clearCanvas();
             queueFrameForRender(null);
+
             try {
               wsInstance.close(4000, 'frame_timeout');
             } catch (err) {
@@ -850,6 +851,7 @@
             statusEl.innerText = 'กำลังรับสตรีมภาพ...';
             clearCanvas();
             queueFrameForRender(null);
+
             openSocket();
             if (rois.length > 0) {
                 openRoiSocket();
@@ -1106,6 +1108,7 @@
                 streamActive = false;
                 clearCanvas();
                 queueFrameForRender(null);
+
                 openSocket();
                 const cfgRes = await fetchWithStatus(`/source_config?name=${encodeURIComponent(name)}`);
                 const cfg = await cfgRes.json();
@@ -1144,6 +1147,7 @@
                 const logSourceName = cfg.name || statusSource || name;
                 startLogUpdates(logSourceName);
                 setRunningUI('กำลังรับสตรีมภาพ...');
+
             } else {
                 statusEl.innerText = 'Idle';
                 startButton.innerText = 'Start';
@@ -1184,6 +1188,7 @@
                     clearCanvas();
                     queueFrameForRender(null);
                 }
+
             } else if (streamActive) {
                 statusEl.innerText = 'Running';
             } else {
