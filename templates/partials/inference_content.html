@@ -62,6 +62,8 @@
         let rois = [];
         let allRois = [];
         let running = false;
+        const FRAME_TIMEOUT_MS = 5000;
+        let frameWatchdogTimer;
         const {
           camId: camIdOverride,
           title: providedTitle,
@@ -134,6 +136,29 @@
             URL.revokeObjectURL(fallbackObjectUrl);
             fallbackObjectUrl = null;
           }
+        };
+
+        const clearFrameWatchdog = () => {
+          clearTimeoutSafe(frameWatchdogTimer);
+          frameWatchdogTimer = undefined;
+        };
+
+        const scheduleFrameWatchdog = wsInstance => {
+          if (FRAME_TIMEOUT_MS <= 0 || !running || socket !== wsInstance) {
+            return;
+          }
+          clearFrameWatchdog();
+          frameWatchdogTimer = setTimeout(() => {
+            frameWatchdogTimer = undefined;
+            if (!running || socket !== wsInstance) {
+              return;
+            }
+            try {
+              wsInstance.close(4000, 'frame_timeout');
+            } catch (err) {
+              console.warn('Stream watchdog close failed', err);
+            }
+          }, FRAME_TIMEOUT_MS);
         };
 
         const hideFallbackImage = () => {
@@ -900,6 +925,7 @@
                 roiSocket.close();
                 roiSocket = null;
             }
+            clearFrameWatchdog();
             stopLogUpdates();
             // clear last frame and related data to free memory
             clearCanvas();
@@ -939,8 +965,10 @@
                 }
                 socketReconnectAttempts = 0;
                 statusEl.innerText = 'กำลังรับสตรีมภาพ...';
+                scheduleFrameWatchdog(ws);
             };
             ws.onmessage = event => {
+                scheduleFrameWatchdog(ws);
                 queueFrameForRender(event.data);
             };
             ws.onerror = () => {
@@ -951,6 +979,7 @@
             ws.onclose = event => {
                 if (socket === ws) {
                     socket = null;
+                    clearFrameWatchdog();
                 }
                 if (!running) {
                     return;
