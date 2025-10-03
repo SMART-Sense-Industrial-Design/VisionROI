@@ -183,6 +183,23 @@
             videoCtx.clearRect(0, 0, video.width || 0, video.height || 0);
           }
         };
+      const FRAME_BLOB_MIME = 'image/jpeg';
+      const toFrameBlob = data => {
+        if (!data) {
+          return null;
+        }
+        if (data instanceof Blob) {
+          return data;
+        }
+        if (data instanceof ArrayBuffer) {
+          return new Blob([data], { type: FRAME_BLOB_MIME });
+        }
+        if (ArrayBuffer.isView && ArrayBuffer.isView(data)) {
+          return new Blob([data.buffer], { type: FRAME_BLOB_MIME });
+        }
+        return null;
+      };
+
       const queueFrameForRender = (() => {
         if (!videoCtx) {
           return () => {};
@@ -330,7 +347,8 @@
           }
         };
 
-          return blob => {
+          return input => {
+            const blob = toFrameBlob(input);
             if (!blob) {
               pendingFrame = null;
               hideFallbackImage();
@@ -949,7 +967,11 @@
         };
         ws.onmessage = event => {
           scheduleFrameWatchdog(ws);
-          queueFrameForRender(event.data);
+          const blob = toFrameBlob(event.data);
+          if (!blob) {
+            return;
+          }
+          queueFrameForRender(blob);
         };
         ws.onerror = () => {
           if (socket === ws) {
