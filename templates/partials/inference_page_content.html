@@ -195,7 +195,20 @@
           return new Blob([data], { type: FRAME_BLOB_MIME });
         }
         if (ArrayBuffer.isView && ArrayBuffer.isView(data)) {
-          return new Blob([data.buffer], { type: FRAME_BLOB_MIME });
+          const { buffer, byteOffset = 0, byteLength = 0 } = data;
+          if (buffer instanceof ArrayBuffer) {
+            if (typeof buffer.slice === 'function') {
+              const sliced = buffer.slice(byteOffset, byteOffset + byteLength);
+              return new Blob([sliced], { type: FRAME_BLOB_MIME });
+            }
+            if (typeof data.subarray === 'function') {
+              const clonedView = data.subarray(0, data.length ?? undefined);
+              if (clonedView) {
+                return new Blob([clonedView], { type: FRAME_BLOB_MIME });
+              }
+            }
+            return new Blob([buffer], { type: FRAME_BLOB_MIME });
+          }
         }
         return null;
       };
