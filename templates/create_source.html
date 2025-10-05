@@ -92,7 +92,60 @@
             data.forEach(src => {
                 const tr = document.createElement('tr');
                 const nameTd = document.createElement('td');
-                nameTd.textContent = src.name;
+                const nameInput = document.createElement('input');
+                nameInput.type = 'text';
+                nameInput.className = 'form-control form-control-sm';
+                nameInput.value = src.name ?? '';
+                nameInput.placeholder = 'ระบุชื่อแหล่งสัญญาณ';
+                let originalName = nameInput.value;
+
+                const saveName = async (newValue) => {
+                    const trimmed = newValue.trim();
+                    if (!trimmed) {
+                        showAlert('ต้องระบุชื่อแหล่งสัญญาณ', 'error');
+                        nameInput.value = originalName;
+                        return;
+                    }
+                    if (trimmed === originalName.trim()) {
+                        return;
+                    }
+                    nameInput.disabled = true;
+                    try {
+                        const res = await fetch(`/rename_source/${encodeURIComponent(originalName)}`, {
+                            method: 'PATCH',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ name: trimmed })
+                        });
+                        const data = await res.json();
+                        if (res.ok && (data.status === 'renamed' || data.status === 'unchanged')) {
+                            originalName = trimmed;
+                            showAlert('อัปเดตชื่อแหล่งสัญญาณแล้ว', 'success');
+                            await loadSources();
+                        } else {
+                            nameInput.value = originalName;
+                            showAlert(data.message || 'อัปเดตไม่สำเร็จ', 'error');
+                        }
+                    } catch (err) {
+                        nameInput.value = originalName;
+                        showAlert('อัปเดตไม่สำเร็จ', 'error');
+                    } finally {
+                        nameInput.disabled = false;
+                    }
+                };
+
+                nameInput.addEventListener('blur', (e) => {
+                    void saveName(e.target.value);
+                });
+                nameInput.addEventListener('keydown', (e) => {
+                    if (e.key === 'Enter') {
+                        e.preventDefault();
+                        nameInput.blur();
+                    } else if (e.key === 'Escape') {
+                        nameInput.value = originalName;
+                        nameInput.blur();
+                    }
+                });
+                nameTd.appendChild(nameInput);
                 const sourceTd = document.createElement('td');
                 const sourceInput = document.createElement('input');
                 sourceInput.type = 'text';
