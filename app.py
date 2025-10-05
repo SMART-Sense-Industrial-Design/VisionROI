@@ -2714,6 +2714,74 @@ async def update_source(name: str):
     return jsonify({"status": "updated"})
 
 
+@app.route("/rename_source/<name>", methods=["PATCH"])
+async def rename_source(name: str):
+    old_name = os.path.basename(name.strip())
+    data = await request.get_json()
+    new_name = os.path.basename((data or {}).get("name", "").strip())
+
+    if not old_name or not new_name:
+        return jsonify({"status": "error", "message": "missing name"}), 400
+    if old_name == new_name:
+        return jsonify({"status": "unchanged"})
+
+    old_directory = os.path.realpath(os.path.join(ALLOWED_ROI_DIR, old_name))
+    new_directory = os.path.realpath(os.path.join(ALLOWED_ROI_DIR, new_name))
+
+    if not _safe_in_base(ALLOWED_ROI_DIR, old_directory) or not os.path.exists(old_directory):
+        return jsonify({"status": "error", "message": "not found"}), 404
+    if not _safe_in_base(ALLOWED_ROI_DIR, new_directory):
+        return jsonify({"status": "error", "message": "invalid name"}), 400
+    if os.path.exists(new_directory):
+        return jsonify({"status": "error", "message": "name exists"}), 400
+
+    try:
+        os.rename(old_directory, new_directory)
+        cfg_path = os.path.join(new_directory, "config.json")
+        if os.path.exists(cfg_path):
+            with open(cfg_path, "r") as f:
+                cfg = json.load(f)
+            cfg["name"] = new_name
+            with open(cfg_path, "w") as f:
+                json.dump(cfg, f)
+
+        json_path = "sources.json"
+        if os.path.exists(json_path):
+            try:
+                with open(json_path, "r") as f:
+                    sources_data = json.load(f)
+                if isinstance(sources_data, list):
+                    sources_data = [new_name if s == old_name else s for s in sources_data]
+                elif isinstance(sources_data, dict):
+                    if old_name in sources_data and new_name in sources_data:
+                        raise ValueError("name exists")
+                    if old_name in sources_data:
+                        sources_data[new_name] = sources_data.pop(old_name)
+                    if (
+                        "sources" in sources_data
+                        and isinstance(sources_data["sources"], list)
+                    ):
+                        sources_data["sources"] = [
+                            new_name if s == old_name else s
+                            for s in sources_data["sources"]
+                        ]
+                with open(json_path, "w") as f:
+                    json.dump(sources_data, f, indent=2)
+            except ValueError:
+                raise
+            except Exception:
+                pass
+    except Exception:
+        if os.path.exists(new_directory) and not os.path.exists(old_directory):
+            try:
+                os.rename(new_directory, old_directory)
+            except Exception:
+                pass
+        return jsonify({"status": "error", "message": "rename failed"}), 500
+
+    return jsonify({"status": "renamed", "name": new_name})
+
+
 # =========================
 # ROI save/load (secure)
 # =========================
