@@ -96,6 +96,7 @@ class CameraWorker:
         self._avfoundation_pixel_format = os.environ.get(
             "FFMPEG_AVFOUNDATION_PIXEL_FORMAT", "nv12"
         )
+        self._avfoundation_pix_fmt_attempts: set[str] = set()
 
         # robust state
         self._err_window = deque(maxlen=300)
@@ -224,6 +225,96 @@ class CameraWorker:
 
     # ---------- ffmpeg command builder ----------
 
+    def _maybe_switch_avfoundation_pixel_format(self) -> None:
+        src_val = getattr(self, "src", None)
+        if src_val is None:
+            return
+        if not str(src_val).startswith("avfoundation:"):
+            return
+        last_stderr = getattr(self, "_last_stderr", None)
+        if not last_stderr:
+            return
+
+        lines = list(last_stderr)
+        attempted_fmt: str | None = None
+        supported: list[str] = []
+
+        attempted_re = re.compile(r"Selected pixel format \(([^)]+)\) is not supported")
+        supported_re = re.compile(r"Supported pixel formats:")
+        value_re = re.compile(r"\]\s+([0-9A-Za-z_]+)\s*$")
+
+        for idx, line in enumerate(lines):
+            match_attempted = attempted_re.search(line)
+            if not match_attempted:
+                continue
+            attempted_fmt = match_attempted.group(1).strip()
+            attempted_lower = attempted_fmt.lower()
+            for j in range(idx + 1, len(lines)):
+                if supported_re.search(lines[j]):
+                    k = j + 1
+                    while k < len(lines):
+                        value_match = value_re.search(lines[k])
+                        if not value_match:
+                            break
+                        candidate = value_match.group(1).strip()
+                        if candidate:
+                            supported.append(candidate)
+                        k += 1
+                    break
+            break
+
+        if not attempted_fmt or not supported:
+            return
+
+        preference_env = os.environ.get(
+            "FFMPEG_AVFOUNDATION_PIXEL_FORMAT_FALLBACKS",
+            "nv12,uyvy422,yuyv422,0rgb,bgr0",
+        )
+        preference = [
+            item.strip()
+            for item in preference_env.split(",")
+            if item.strip()
+        ]
+
+        ordered_candidates: list[str] = []
+        seen: set[str] = set()
+
+        supported_lower = {fmt.lower(): fmt for fmt in supported}
+
+        for preferred in preference:
+            lower = preferred.lower()
+            if lower in supported_lower and lower not in seen:
+                ordered_candidates.append(supported_lower[lower])
+                seen.add(lower)
+
+        for fmt in supported:
+            lower = fmt.lower()
+            if lower not in seen:
+                ordered_candidates.append(fmt)
+                seen.add(lower)
+
+        attempted_lower = attempted_fmt.lower()
+        self._avfoundation_pix_fmt_attempts.add(attempted_lower)
+
+        for candidate in ordered_candidates:
+            lower = candidate.lower()
+            if lower == attempted_lower:
+                continue
+            if lower in self._avfoundation_pix_fmt_attempts:
+                continue
+            self._logger.warning(
+                "%s switching avfoundation pixel_format from %s to %s",
+                self._log_prefix,
+                attempted_fmt,
+                candidate,
+            )
+            self._avfoundation_pixel_format = candidate
+            try:
+                last_stderr.clear()
+            except Exception:
+                pass
+            return
+
     def _build_ffmpeg_cmd(self, src: str) -> list[str]:
         """
         สร้างคำสั่ง ffmpeg แบบ robust สำหรับ RTSP (ทุกกล้อง):
@@ -232,6 +323,8 @@ class CameraWorker:
         - timeout (เฉพาะที่รองรับจริง) ป้องกันแฮงก์
         - อ่าน stdout เป็น rawvideo/bgr24
         """
+        self._maybe_switch_avfoundation_pixel_format()
+
         cmd = ["ffmpeg", "-hide_banner", "-loglevel", self._loglevel, "-nostdin"]
 
         transport = self._rtsp_transport_cycle[self._rtsp_transport_idx]
@@ -287,6 +380,7 @@ class CameraWorker:
             cmd += ["-framerate", "30"]
             avf_pix_fmt = (self._avfoundation_pixel_format or "").strip()
             if avf_pix_fmt:
+                self._avfoundation_pix_fmt_attempts.add(avf_pix_fmt.lower())
                 cmd += ["-pixel_format", avf_pix_fmt]
         elif is_v4l2:
             # Linux: v4l2:/dev/video0

@@ -168,6 +168,8 @@ def test_ffmpeg_command_for_avfoundation():
     worker._rtsp_transport_cycle = ["tcp"]
     worker._rtsp_transport_idx = 0
     worker._avfoundation_pixel_format = "nv12"
+    worker._avfoundation_pix_fmt_attempts = set()
+    worker.src = "avfoundation:0:none"
 
     cmd = worker._build_ffmpeg_cmd("avfoundation:0:none")
 
@@ -175,6 +177,53 @@ def test_ffmpeg_command_for_avfoundation():
     pix_idx = cmd.index("-pixel_format")
     assert cmd[pix_idx + 1] == "nv12"
     assert "-reorder_queue_size" not in cmd
+
+    # cleanup patched module for other tests
+    del sys.modules["camera_worker"]
+
+
+def test_ffmpeg_avfoundation_pixel_format_fallback(monkeypatch):
+    import sys
+
+    sys.modules.setdefault("cv2", types.SimpleNamespace())
+
+    import camera_worker
+
+    worker = camera_worker.CameraWorker.__new__(camera_worker.CameraWorker)
+    worker.src = "avfoundation:0:none"
+    worker._loglevel = "error"
+    worker.low_latency = False
+    worker._ff_rtsp_opts = set()
+    worker.width = None
+    worker.height = None
+    worker._logger = types.SimpleNamespace(
+        info=lambda *args, **kwargs: None,
+        debug=lambda *args, **kwargs: None,
+        warning=lambda *args, **kwargs: None,
+        error=lambda *args, **kwargs: None,
+    )
+    worker._log_prefix = "[ffmpeg:test]"
+    worker._rtsp_transport_cycle = ["tcp"]
+    worker._rtsp_transport_idx = 0
+    worker._last_stderr = [
+        "[avfoundation @ 0x0] Selected pixel format (yuv420p) is not supported by the input device.",
+        "[avfoundation @ 0x0] Supported pixel formats:",
+        "[avfoundation @ 0x0]   uyvy422",
+        "[avfoundation @ 0x0]   yuyv422",
+        "[avfoundation @ 0x0]   nv12",
+        "[avfoundation @ 0x0]   0rgb",
+        "[avfoundation @ 0x0]   bgr0",
+    ]
+    worker._avfoundation_pixel_format = "yuv420p"
+    worker._avfoundation_pix_fmt_attempts = set()
+
+    cmd = worker._build_ffmpeg_cmd("avfoundation:0:none")
+
+    assert "-pixel_format" in cmd
+    pix_idx = cmd.index("-pixel_format")
+    assert cmd[pix_idx + 1] == "nv12"
+    assert worker._avfoundation_pixel_format == "nv12"
+    assert worker._last_stderr == []
 
     # cleanup patched module for other tests
     del sys.modules["camera_worker"]
