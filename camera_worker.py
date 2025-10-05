@@ -285,9 +285,7 @@ class CameraWorker:
             # Linux: v4l2:/dev/video0
             cmd += ["-f", "v4l2"]
             input_arg = input_arg.split(":", 1)[1] or "/dev/video0"
-            if self.width and self.height:
-                cmd += ["-video_size", f"{int(self.width)}x{int(self.height)}"]
-            cmd += ["-framerate", "30"]
+            # ปล่อยให้ ffmpeg เลือก native mode แล้วค่อยสเกลด้วย filter chain
         elif is_dshow:
             # Windows: dshow:video=USB Camera
             cmd += ["-f", "dshow"]
