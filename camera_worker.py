@@ -232,7 +232,12 @@ class CameraWorker:
         cmd = ["ffmpeg", "-hide_banner", "-loglevel", self._loglevel, "-nostdin"]
 
         transport = self._rtsp_transport_cycle[self._rtsp_transport_idx]
-        if self._is_rtsp(src):
+        is_rtsp = self._is_rtsp(src)
+        is_avf = str(src).startswith("avfoundation:")
+        is_v4l2 = str(src).startswith("v4l2:")
+        is_dshow = str(src).startswith("dshow:")
+
+        if is_rtsp:
             # transport
             if "rtsp_transport" in self._ff_rtsp_opts:
                 cmd += ["-rtsp_transport", transport]
@@ -266,8 +271,30 @@ class CameraWorker:
         # *** สำคัญ: input option ต้องมาก่อน -i ***
         cmd += ["-thread_queue_size", "512"]
 
+        # เลือกฟอร์แมต/อุปกรณ์ตาม prefix
+        input_arg = str(src)
+        if is_avf:
+            # macOS: avfoundation:0:none
+            cmd += ["-f", "avfoundation"]
+            input_arg = input_arg.split(":", 1)[1] or "0:none"
+            # เฟรมเรต/ขนาดอินพุต (ถ้ารู้) — avfoundation ใช้ -framerate / -video_size
+            if self.width and self.height:
+                cmd += ["-video_size", f"{int(self.width)}x{int(self.height)}"]
+            cmd += ["-framerate", "30"]
+        elif is_v4l2:
+            # Linux: v4l2:/dev/video0
+            cmd += ["-f", "v4l2"]
+            input_arg = input_arg.split(":", 1)[1] or "/dev/video0"
+            if self.width and self.height:
+                cmd += ["-video_size", f"{int(self.width)}x{int(self.height)}"]
+            cmd += ["-framerate", "30"]
+        elif is_dshow:
+            # Windows: dshow:video=USB Camera
+            cmd += ["-f", "dshow"]
+            input_arg = input_arg.split(":", 1)[1]
+
         # เปิด input
-        cmd += ["-i", src, "-map", "0:v:0", "-an"]
+        cmd += ["-i", input_arg, "-map", "0:v:0", "-an"]
 
         # สเกล/สี (ให้ ffmpeg แปลงเป็น bgr24 ออกมา)
         filters: list[str] = []
