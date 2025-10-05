@@ -51,6 +51,7 @@ class CameraWorker:
         # === พารามิเตอร์ watchdog ===
         err_window_secs: float = 5.0,
         err_threshold: int = 25,    # จำนวน error ใน err_window_secs ที่จะทริกเกอร์การรีสตาร์ท/สลับ transport
+        avf_pixel_format: str | None = None,
     ) -> None:
         self.src = src
         self.loop = loop
@@ -62,6 +63,7 @@ class CameraWorker:
         self.robust = robust
         self.low_latency = low_latency
         self._loglevel = loglevel
+        self.avf_pixel_format = avf_pixel_format
 
         self._cap = None
         self._proc: subprocess.Popen | None = None
@@ -293,6 +295,8 @@ class CameraWorker:
             # macOS: avfoundation:0:none
             cmd += ["-f", "avfoundation"]
             input_arg = input_arg.split(":", 1)[1] or "0:none"
+            pixel_format = getattr(self, "avf_pixel_format", None) or "nv12"
+            cmd += ["-pixel_format", pixel_format]
             # เฟรมเรต/ขนาดอินพุต (ถ้ารู้) — avfoundation ใช้ -framerate / -video_size
             if self.width and self.height:
                 cmd += ["-video_size", f"{int(self.width)}x{int(self.height)}"]
