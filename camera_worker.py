@@ -93,6 +93,9 @@ class CameraWorker:
         self._ffmpeg_restart_time_threshold = 2.0
         self._ffmpeg_fail_count = 0
         self._ffmpeg_failure_start: float | None = None
+        self._avfoundation_pixel_format = os.environ.get(
+            "FFMPEG_AVFOUNDATION_PIXEL_FORMAT", "nv12"
+        )
 
         # robust state
         self._err_window = deque(maxlen=300)
@@ -258,7 +261,8 @@ class CameraWorker:
             cmd += ["-fflags", "+discardcorrupt+nobuffer"]
             cmd += ["-flags", "low_delay"]
             cmd += ["-avioflags", "direct"]
-            cmd += ["-reorder_queue_size", "0"]
+            if not (is_avf or is_v4l2 or is_dshow):
+                cmd += ["-reorder_queue_size", "0"]
             cmd += ["-max_delay", "0"]
             cmd += ["-use_wallclock_as_timestamps", "1"]
         else:
@@ -281,6 +285,9 @@ class CameraWorker:
             if self.width and self.height:
                 cmd += ["-video_size", f"{int(self.width)}x{int(self.height)}"]
             cmd += ["-framerate", "30"]
+            avf_pix_fmt = (self._avfoundation_pixel_format or "").strip()
+            if avf_pix_fmt:
+                cmd += ["-pixel_format", avf_pix_fmt]
         elif is_v4l2:
             # Linux: v4l2:/dev/video0
             cmd += ["-f", "v4l2"]

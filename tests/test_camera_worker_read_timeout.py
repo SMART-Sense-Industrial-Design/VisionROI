@@ -143,3 +143,38 @@ def test_camera_worker_restart_ffmpeg_after_poll_failures(monkeypatch):
 
     # cleanup patched module for other tests
     del sys.modules["camera_worker"]
+
+
+def test_ffmpeg_command_for_avfoundation():
+    import sys
+
+    sys.modules.setdefault("cv2", types.SimpleNamespace())
+
+    import camera_worker
+
+    worker = camera_worker.CameraWorker.__new__(camera_worker.CameraWorker)
+    worker._loglevel = "error"
+    worker.low_latency = True
+    worker._ff_rtsp_opts = set()
+    worker.width = None
+    worker.height = None
+    worker._logger = types.SimpleNamespace(
+        info=lambda *args, **kwargs: None,
+        debug=lambda *args, **kwargs: None,
+        warning=lambda *args, **kwargs: None,
+        error=lambda *args, **kwargs: None,
+    )
+    worker._log_prefix = "[ffmpeg:test]"
+    worker._rtsp_transport_cycle = ["tcp"]
+    worker._rtsp_transport_idx = 0
+    worker._avfoundation_pixel_format = "nv12"
+
+    cmd = worker._build_ffmpeg_cmd("avfoundation:0:none")
+
+    assert "-pixel_format" in cmd
+    pix_idx = cmd.index("-pixel_format")
+    assert cmd[pix_idx + 1] == "nv12"
+    assert "-reorder_queue_size" not in cmd
+
+    # cleanup patched module for other tests
+    del sys.modules["camera_worker"]
