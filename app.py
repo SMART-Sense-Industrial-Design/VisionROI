@@ -2686,6 +2686,34 @@ async def update_stream_type(name: str):
     return jsonify({"status": "updated"})
 
 
+@app.route("/update_source/<name>", methods=["PATCH"])
+async def update_source(name: str):
+    name = os.path.basename(name.strip())
+    directory = os.path.realpath(os.path.join(ALLOWED_ROI_DIR, name))
+    if not _safe_in_base(ALLOWED_ROI_DIR, directory):
+        return jsonify({"status": "error", "message": "invalid name"}), 400
+
+    cfg_path = os.path.join(directory, "config.json")
+    if not os.path.exists(cfg_path):
+        return jsonify({"status": "error", "message": "not found"}), 404
+
+    data = await request.get_json()
+    new_source = (data or {}).get("source", "").strip()
+    if not new_source:
+        return jsonify({"status": "error", "message": "missing source"}), 400
+
+    try:
+        with open(cfg_path, "r") as f:
+            cfg = json.load(f)
+        cfg["source"] = new_source
+        with open(cfg_path, "w") as f:
+            json.dump(cfg, f)
+    except Exception:
+        return jsonify({"status": "error", "message": "save failed"}), 500
+
+    return jsonify({"status": "updated"})
+
+
 # =========================
 # ROI save/load (secure)
 # =========================

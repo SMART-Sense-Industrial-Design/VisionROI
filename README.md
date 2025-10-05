@@ -510,6 +510,7 @@ tg.start_send_text("สวัสดี")
 
 - **DELETE `/delete_source/<name>`** – ลบโฟลเดอร์และไฟล์ที่เกี่ยวกับ source นั้น
 - **PATCH `/update_stream_type/<name>`** – ปรับชนิดการสตรีม (`opencv` หรือ `ffmpeg`) ของ source ที่ระบุ
+- **PATCH `/update_source/<name>`** – ปรับค่าแหล่งสัญญาณ (URL หรือพาธ) ของ source ที่ระบุ
 
 - **GET `/_healthz`** – ตรวจสอบสถานะเซิร์ฟเวอร์ (ตอบกลับเป็นข้อความ `"ok"` พร้อม HTTP 200)
 - **POST `/_quit`** – สั่งปิดเซิร์ฟเวอร์อย่างนุ่มนวล (ตอบกลับเป็นข้อความสั้น ๆ เช่น `"shutting down"` พร้อม HTTP 202)

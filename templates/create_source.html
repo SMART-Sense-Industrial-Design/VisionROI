@@ -94,7 +94,61 @@
                 const nameTd = document.createElement('td');
                 nameTd.textContent = src.name;
                 const sourceTd = document.createElement('td');
-                sourceTd.textContent = src.source;
+                const sourceInput = document.createElement('input');
+                sourceInput.type = 'text';
+                sourceInput.className = 'form-control form-control-sm';
+                sourceInput.value = src.source ?? '';
+                sourceInput.placeholder = 'ระบุแหล่งสัญญาณ';
+                let originalSource = sourceInput.value;
+
+                const saveSource = async (newValue) => {
+                    const trimmed = newValue.trim();
+                    if (trimmed === originalSource.trim()) {
+                        return;
+                    }
+                    if (!trimmed) {
+                        showAlert('ต้องระบุแหล่งสัญญาณ', 'error');
+                        sourceInput.value = originalSource;
+                        return;
+                    }
+                    sourceInput.disabled = true;
+                    try {
+                        const res = await fetch(`/update_source/${encodeURIComponent(src.name)}`, {
+                            method: 'PATCH',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ source: trimmed })
+                        });
+                        const data = await res.json();
+                        if (res.ok && data.status === 'updated') {
+                            originalSource = trimmed;
+                            showAlert('อัปเดตแหล่งสัญญาณแล้ว', 'success');
+                            await loadSources();
+                        } else {
+                            sourceInput.value = originalSource;
+                            showAlert(data.message || 'อัปเดตไม่สำเร็จ', 'error');
+                        }
+                    } catch (err) {
+                        sourceInput.value = originalSource;
+                        showAlert('อัปเดตไม่สำเร็จ', 'error');
+                    } finally {
+                        sourceInput.disabled = false;
+                    }
+                };
+
+                sourceInput.addEventListener('blur', (e) => {
+                    void saveSource(e.target.value);
+                });
+                sourceInput.addEventListener('keydown', (e) => {
+                    if (e.key === 'Enter') {
+                        e.preventDefault();
+                        sourceInput.blur();
+                    } else if (e.key === 'Escape') {
+                        sourceInput.value = originalSource;
+                        sourceInput.blur();
+                    }
+                });
+
+                sourceTd.appendChild(sourceInput);
                 const streamTd = document.createElement('td');
                 const streamSelect = document.createElement('select');
                 streamSelect.className = 'form-select form-select-sm';
