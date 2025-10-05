@@ -116,6 +116,7 @@ class CameraWorker:
         # cache capability probes (ตรวจครั้งเดียว)
         self._ff_caps_checked = False
         self._ff_rtsp_opts: set[str] = set()
+        self._ff_global_opts: set[str] = set()
 
         self._logger.info("%s initializing camera worker", self._log_prefix)
 
@@ -214,6 +215,19 @@ class CameraWorker:
         except Exception:
             pass
 
+        try:
+            out = subprocess.run(
+                ["ffmpeg", "-hide_banner", "-h"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            text = (out.stdout or "") + (out.stderr or "")
+            if "-reorder_queue_size" in text:
+                self._ff_global_opts.add("reorder_queue_size")
+        except Exception:
+            pass
+
         self._logger.info(
             "%s ffmpeg caps: rtsp_opts=%s",
             self._log_prefix, sorted(self._ff_rtsp_opts)
@@ -258,7 +272,9 @@ class CameraWorker:
             cmd += ["-fflags", "+discardcorrupt+nobuffer"]
             cmd += ["-flags", "low_delay"]
             cmd += ["-avioflags", "direct"]
-            cmd += ["-reorder_queue_size", "0"]
+            supports_reorder = "reorder_queue_size" in self._ff_global_opts
+            if (is_rtsp or supports_reorder) and not is_avf:
+                cmd += ["-reorder_queue_size", "0"]
             cmd += ["-max_delay", "0"]
             cmd += ["-use_wallclock_as_timestamps", "1"]
         else:
