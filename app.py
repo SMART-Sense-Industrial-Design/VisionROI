@@ -2544,7 +2544,7 @@ async def delete_mqtt_config(name: str):
 @app.route("/source_list", methods=["GET"])
 async def source_list():
     base_dir = Path(ALLOWED_ROI_DIR)
-    result = []
+    entries = []
     try:
         for d in base_dir.iterdir():
             if not d.is_dir():
@@ -2555,20 +2555,25 @@ async def source_list():
             try:
                 with cfg_path.open("r") as f:
                     cfg = json.load(f)
+                cfg_mtime = cfg_path.stat().st_mtime
             except (OSError, json.JSONDecodeError):
                 continue
-            result.append(
-                {
-                    "name": cfg.get("name", d.name),
-                    "source": cfg.get("source", ""),
-                    "width": cfg.get("width"),
-                    "height": cfg.get("height"),
-                    "stream_type": cfg.get("stream_type", "opencv"),
-                }
+            entries.append(
+                (
+                    cfg_mtime,
+                    {
+                        "name": cfg.get("name", d.name),
+                        "source": cfg.get("source", ""),
+                        "width": cfg.get("width"),
+                        "height": cfg.get("height"),
+                        "stream_type": cfg.get("stream_type", "opencv"),
+                    },
+                )
             )
     except FileNotFoundError:
         pass
-    return jsonify(result)
+    entries.sort(key=lambda item: item[0], reverse=True)
+    return jsonify([item[1] for item in entries])
 
 
 @app.route("/source_config")
