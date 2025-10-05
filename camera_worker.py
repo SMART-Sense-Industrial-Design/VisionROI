@@ -123,6 +123,7 @@ class CameraWorker:
         self._logger.info("%s initializing camera worker", self._log_prefix)
 
         if backend == "ffmpeg":
+            self._ensure_default_resolution_for_src(str(src))
             # ถ้ายังไม่รู้ขนาด ลอง probe; ถ้าไม่ได้จะ fallback ไป OpenCV 1 เฟรม
             if self.width is None or self.height is None:
                 w, h = self._probe_resolution(str(src))
@@ -245,6 +246,7 @@ class CameraWorker:
         - timeout (เฉพาะที่รองรับจริง) ป้องกันแฮงก์
         - อ่าน stdout เป็น rawvideo/bgr24
         """
+        self._ensure_default_resolution_for_src(str(src))
         cmd = ["ffmpeg", "-hide_banner", "-loglevel", self._loglevel, "-nostdin"]
 
         transport = self._rtsp_transport_cycle[self._rtsp_transport_idx]
@@ -329,6 +331,24 @@ class CameraWorker:
         self._ffmpeg_pix_fmt = "bgr24"
         self._logger.info("%s ffmpeg cmd: %s", self._log_prefix, " ".join(cmd))
         return cmd
+
+    _DEFAULT_AVFOUNDATION_RESOLUTION = (1280, 720)
+
+    def _ensure_default_resolution_for_src(self, src: str) -> None:
+        """กำหนดค่าเริ่มต้น width/height ให้แหล่ง avfoundation เมื่อยังไม่รู้ขนาด"""
+        if getattr(self, "backend", None) != "ffmpeg":
+            return
+
+        if not str(src).startswith("avfoundation:"):
+            return
+
+        default_w, default_h = self._DEFAULT_AVFOUNDATION_RESOLUTION
+
+        if self.width is None:
+            self.width = default_w
+
+        if self.height is None:
+            self.height = default_h
 
     # ---------- helpers ----------
 

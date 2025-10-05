@@ -20,6 +20,7 @@ def _make_worker(avf_pixel_format=None):
     worker._log_prefix = "[test]"
     worker._ffmpeg_pix_fmt = None
     worker.avf_pixel_format = avf_pixel_format
+    worker.backend = "ffmpeg"
     return worker
 
 
@@ -31,6 +32,9 @@ def test_avfoundation_default_pixel_format():
     pix_idx = cmd.index("-pixel_format")
     assert cmd[pix_idx + 1] == "nv12"
     assert pix_idx < cmd.index("-i")
+    assert "-video_size" in cmd
+    size_idx = cmd.index("-video_size")
+    assert cmd[size_idx + 1] == "1280x720"
 
 
 def test_avfoundation_override_pixel_format():

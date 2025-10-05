@@ -21,6 +21,7 @@ def _make_worker(*, low_latency: bool = True, global_opts: set[str] | None = Non
     worker._log_prefix = "[test]"
     worker.robust = True
     worker._ffmpeg_pix_fmt = None
+    worker.backend = "ffmpeg"
     return worker
 
 
@@ -36,3 +37,8 @@ def test_low_latency_avfoundation_skips_reorder_queue_size():
     worker = _make_worker(global_opts={"reorder_queue_size"})
     cmd = worker._build_ffmpeg_cmd("avfoundation:0:none")
     assert "-reorder_queue_size" not in cmd
+    assert "-video_size" in cmd
+    size_idx = cmd.index("-video_size")
+    assert cmd[size_idx + 1] == "1280x720"
+    vf_idx = cmd.index("-vf")
+    assert "scale=1280:720" in cmd[vf_idx + 1]
