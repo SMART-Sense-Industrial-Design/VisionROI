@@ -318,15 +318,40 @@ class CameraWorker:
         return s.startswith("rtsp://") or s.startswith("rtsps://")
 
     def _probe_resolution(self, src: str) -> Tuple[Optional[int], Optional[int]]:
-        """ใช้ ffprobe หา width/height พร้อม RTSP (ไม่ใช้ timeout option)"""
+        """ใช้ ffprobe หา width/height พร้อม RTSP (ไม่ใช้ timeout option)."""
         cmd = ["ffprobe", "-hide_banner", "-loglevel", "error", "-nostdin"]
         if self._is_rtsp(src):
             cmd += ["-rtsp_transport", "tcp", "-rtsp_flags", "prefer_tcp"]
+
+        src_str = str(src)
+        is_avf = src_str.startswith("avfoundation:")
+        is_v4l2 = src_str.startswith("v4l2:")
+        is_dshow = src_str.startswith("dshow:")
+
+        def _device_arg(value: str, *, default: str | None = None) -> str:
+            parts = value.split(":", 1)
+            if len(parts) == 2 and parts[1]:
+                return parts[1]
+            if default is not None:
+                return default
+            return value
+
+        input_arg = src_str
+        if is_avf:
+            cmd += ["-f", "avfoundation"]
+            input_arg = _device_arg(src_str, default="0:none")
+        elif is_v4l2:
+            cmd += ["-f", "v4l2"]
+            input_arg = _device_arg(src_str, default="/dev/video0")
+        elif is_dshow:
+            cmd += ["-f", "dshow"]
+            input_arg = _device_arg(src_str)
+
         cmd += [
             "-select_streams", "v:0",
             "-show_entries", "stream=width,height",
             "-of", "csv=s=x:p=0",
-            src,
+            "-i", input_arg,
         ]
         try:
             res = subprocess.run(cmd, capture_output=True, text=True, check=True, timeout=8)
