@@ -3048,11 +3048,18 @@ async def start_roi_stream(cam_id: str):
         if not cfg_ok:
             return jsonify({"status": "error", "cam_id": cam_id}), 400
     _drain_queue(get_roi_frame_queue(cam_id))
+    desired_low_latency = True
+    backend = camera_backends.get(cam_id)
+    if backend == "ffmpeg":
+        src_val = camera_sources.get(cam_id)
+        src_str = str(src_val)
+        if src_str.startswith("avfoundation:"):
+            desired_low_latency = False
     _, resp, status = await start_camera_task(
         cam_id,
         roi_tasks,
         run_roi_loop,
-        low_latency=True,
+        low_latency=desired_low_latency,
     )
     return jsonify(resp), status
 
