@@ -3,7 +3,7 @@ faulthandler.enable()
 
 from quart import Quart, render_template, websocket, request, jsonify, redirect, Response
 import asyncio
-import cv2
+from src.utils.cv2_compat import cv2
 from camera_worker import CameraWorker
 try:
     import numpy as np
