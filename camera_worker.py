@@ -1070,6 +1070,18 @@ class CameraWorker:
         """คืนบรรทัด stderr ล่าสุดของ ffmpeg เพื่อช่วยดีบัก"""
         return "\n".join(self._last_stderr)
 
+    def last_frame_timestamp(self) -> float:
+        """คืนค่า timestamp ล่าสุดที่ได้รับเฟรมสำเร็จ (0.0 ถ้ายังไม่เคยได้เฟรม)"""
+        return float(getattr(self, "_last_frame_ts", 0.0) or 0.0)
+
+    def has_recent_frame(self, freshness: float = 0.5) -> bool:
+        """เช็คว่ามีเฟรมเข้ามาเมื่อไม่นานนี้ เพื่อดูว่า backend พร้อมส่งภาพแล้วหรือไม่"""
+        ts = self.last_frame_timestamp()
+        if ts <= 0.0:
+            return False
+        freshness = max(float(freshness), 0.0)
+        return (time.monotonic() - ts) <= freshness
+
     def _expected_frame_size(self) -> Optional[int]:
         if not (self.width and self.height):
             return None
