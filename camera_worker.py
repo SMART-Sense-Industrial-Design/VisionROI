@@ -123,7 +123,6 @@ class CameraWorker:
         self._logger.info("%s initializing camera worker", self._log_prefix)
 
         if backend == "ffmpeg":
-            self._ensure_default_resolution_for_src(str(src))
             # ถ้ายังไม่รู้ขนาด ลอง probe; ถ้าไม่ได้จะ fallback ไป OpenCV 1 เฟรม
             if self.width is None or self.height is None:
                 w, h = self._probe_resolution(str(src))
@@ -133,6 +132,8 @@ class CameraWorker:
                     w2, h2 = self._probe_with_opencv_once(str(src))
                     if w2 and h2:
                         self.width, self.height = w2, h2
+
+            self._ensure_default_resolution_for_src(str(src))
 
             # probe ความสามารถของ ffmpeg ก่อนสร้างคำสั่ง
             self._probe_ffmpeg_caps()
