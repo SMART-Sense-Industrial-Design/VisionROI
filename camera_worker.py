@@ -1,5 +1,5 @@
 # camera_worker.py
-import cv2
+from src.utils.cv2_compat import cv2
 import time
 import threading
 import asyncio
