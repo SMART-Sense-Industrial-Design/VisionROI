@@ -3087,6 +3087,7 @@ async def start_roi_stream(cam_id: str):
     src_str = str(src_val)
     if backend == "ffmpeg" and src_str.startswith("avfoundation:"):
         desired_low_latency = False
+
     _, resp, status = await start_camera_task(
         cam_id,
         roi_tasks,
