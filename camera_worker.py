@@ -524,6 +524,40 @@ class CameraWorker:
             remaining -= len(chunk)
         return remaining <= 0
 
+    def ensure_ffmpeg_gone(self) -> None:
+        """พยายามให้แน่ใจว่าโปรเซส ffmpeg ถูกปิดจริง ๆ ไม่เหลือแขวน"""
+        if self.backend != "ffmpeg":
+            return
+        proc = self._proc
+        if proc is None:
+            return
+        if proc.poll() is None:
+            with silent():
+                try:
+                    proc.wait(timeout=0.2)
+                except Exception:
+                    pass
+        if proc.poll() is None:
+            try:
+                pid = proc.pid
+            except Exception:
+                pid = None
+            if pid:
+                with silent():
+                    try:
+                        pgid = os.getpgid(pid)
+                        os.killpg(pgid, signal.SIGKILL)
+                    except Exception:
+                        proc.kill()
+            with silent():
+                try:
+                    proc.wait(timeout=0.2)
+                except Exception:
+                    pass
+        if self._proc is proc:
+            self._proc = None
+        self._stdout_fd = None
+
     def _handle_no_video_data(self, trigger: str, details: str = "", *, sleep_after: bool = False) -> None:
         """จัดการเหตุการณ์ที่ไม่มีวิดีโอเข้ามา ให้รีสตาร์ทและรอจนกว่ากล้องจะพร้อม"""
         if self._stop_evt.is_set():
@@ -633,6 +667,7 @@ class CameraWorker:
                             pass
                         self._stdout_fd = None
                         self._terminate_proc_tree(self._proc, grace=0.5)
+                        self.ensure_ffmpeg_gone()
 
                         if self._stderr_thread and self._stderr_thread.is_alive():
                             try:
@@ -1039,6 +1074,7 @@ class CameraWorker:
                         pass
                     # ปิดทั้ง process group ให้สะอาด
                     self._terminate_proc_tree(self._proc, grace=0.8)
+                    self.ensure_ffmpeg_gone()
             self._proc = None
 
             with silent():
@@ -1046,6 +1082,8 @@ class CameraWorker:
                     self._stderr_thread.join(timeout=0.2)
             self._stderr_thread = None
             self._stdout_fd = None
+            self._ffmpeg_cmd = None
+            self._ffmpeg_pix_fmt = None
 
         elif self.backend == "opencv":
             with silent():
