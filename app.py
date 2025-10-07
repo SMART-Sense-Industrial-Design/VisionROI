@@ -66,6 +66,10 @@ last_inference_outputs: dict[str, str] = {}
 inference_result_timeouts: dict[str, float] = {}
 inference_draw_page_boxes: dict[str, bool] = {}
 
+STREAM_OUTAGE_GRACE = float(os.getenv("STREAM_OUTAGE_GRACE", "3.5") or 3.5)
+STREAM_OUTAGE_RETRY = float(os.getenv("STREAM_OUTAGE_RETRY", "1.5") or 1.5)
+_stream_disconnect_sent: dict[tuple[str, int], float] = {}
+
 recent_notifications: list[dict[str, Any]] = []
 MAX_RECENT_NOTIFICATIONS = 200
 
@@ -167,6 +171,10 @@ def _free_cam_state(cam_id: str):
     _drain_queue(frame_queues.pop(cam_id, None))
     _drain_queue(roi_frame_queues.pop(cam_id, None))
     _drain_queue(roi_result_queues.pop(cam_id, None))
+
+    # Reset outage tracking for all queues of this camera
+    for key in [k for k in _stream_disconnect_sent if k[0] == cam_id]:
+        _stream_disconnect_sent.pop(key, None)
 
     # Locks
     camera_locks.pop(cam_id, None)
@@ -1275,9 +1283,20 @@ async def _safe_stop(cam_id: str,
             timeout=1.2
         )
     except asyncio.TimeoutError:
-        pass
+        worker = camera_workers.get(cam_id)
+        if isinstance(worker, CameraWorker):
+            with contextlib.suppress(Exception):
+                await asyncio.to_thread(worker.ensure_ffmpeg_gone)
     except Exception:
-        pass
+        worker = camera_workers.get(cam_id)
+        if isinstance(worker, CameraWorker):
+            with contextlib.suppress(Exception):
+                await asyncio.to_thread(worker.ensure_ffmpeg_gone)
+    finally:
+        worker = camera_workers.get(cam_id)
+        if isinstance(worker, CameraWorker):
+            with contextlib.suppress(Exception):
+                await asyncio.to_thread(worker.ensure_ffmpeg_gone)
 
 
 # ========== Graceful shutdown (fast & robust) ==========
@@ -1324,6 +1343,14 @@ if hasattr(app, "after_serving"):
             *[_safe_stop(cid, inference_tasks, frame_queues) for cid in list(inference_tasks.keys())],
             *[_safe_stop(cid, roi_tasks, roi_frame_queues) for cid in list(roi_tasks.keys())],
             return_exceptions=True
+        )
+        await asyncio.gather(
+            *[
+                asyncio.to_thread(worker.ensure_ffmpeg_gone)
+                for worker in list(camera_workers.values())
+                if isinstance(worker, CameraWorker)
+            ],
+            return_exceptions=True,
         )
         _stop_inference_workers()
         for cam_id, q in list(roi_result_queues.items()):
@@ -1458,15 +1485,37 @@ class FramePacket:
 
 async def read_and_queue_frame(
     cam_id: str,
-    queue: asyncio.Queue['FramePacket | None'],
+    queue: asyncio.Queue["FramePacket | None"],
     frame_processor=None,
 ) -> None:
     worker = camera_workers.get(cam_id)
     if worker is None:
         await asyncio.sleep(0.01)
         return
+    queue_key = (cam_id, id(queue))
+    now_monotonic = time.monotonic()
     frame = await worker.read()
     if frame is None:
+        last_frame_ts = (
+            worker.last_frame_timestamp()
+            if hasattr(worker, "last_frame_timestamp")
+            else 0.0
+        )
+        if (
+            STREAM_OUTAGE_GRACE > 0
+            and last_frame_ts > 0.0
+            and now_monotonic - last_frame_ts >= STREAM_OUTAGE_GRACE
+        ):
+            last_signal = _stream_disconnect_sent.get(queue_key, 0.0)
+            retry_after = max(STREAM_OUTAGE_RETRY, 0.5) if STREAM_OUTAGE_RETRY >= 0 else 0.0
+            if last_signal <= 0.0 or now_monotonic - last_signal >= retry_after:
+                try:
+                    _replace_with_latest(queue, None)
+                except Exception:
+                    pass
+                else:
+                    if retry_after > 0:
+                        _stream_disconnect_sent[queue_key] = now_monotonic
         await asyncio.sleep(0.01)
         return
     if np is not None and hasattr(frame, "size") and frame.size == 0:
@@ -1502,6 +1551,7 @@ async def read_and_queue_frame(
         except asyncio.QueueEmpty:
             pass
     packet = FramePacket(payload=frame_bytes, created_at=time.monotonic(), frame_time=frame_time)
+    _stream_disconnect_sent.pop(queue_key, None)
     await queue.put(packet)
     await asyncio.sleep(0)
 
