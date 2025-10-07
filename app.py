@@ -2304,6 +2304,7 @@ async def _stream_queue_over_websocket(
     """
     with contextlib.suppress(RuntimeError):
         await ws.accept()
+    close_sent = False
     try:
         pending: deque[FramePacket | bytes | str | None] = deque()
 
@@ -2353,7 +2354,9 @@ async def _stream_queue_over_websocket(
                 item = latest_packet
 
             if item is None:
-                await ws.close(code=1000)
+                if not close_sent:
+                    await ws.close(code=1000)
+                    close_sent = True
                 break
             try:
                 if STREAM_SEND_TIMEOUT > 0:
@@ -2364,14 +2367,17 @@ async def _stream_queue_over_websocket(
                 _STREAM_LOGGER.warning(
                     "websocket send timeout (%.2fs); closing stream", STREAM_SEND_TIMEOUT
                 )
-                with contextlib.suppress(Exception):
-                    await ws.close(code=1011, reason="send_timeout")
+                if not close_sent:
+                    with contextlib.suppress(Exception):
+                        await ws.close(code=1011, reason="send_timeout")
+                        close_sent = True
                 break
     except ConnectionClosed:
         pass
     finally:
-        with contextlib.suppress(Exception):
-            await ws.close()
+        if not close_sent:
+            with contextlib.suppress(Exception):
+                await ws.close()
 
 
 @app.websocket('/ws/<string:cam_id>')
