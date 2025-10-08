@@ -652,6 +652,16 @@ def build_dashboard_payload() -> dict[str, Any]:
         except (TypeError, ValueError):
             return None
 
+    def _has_valid_points(points: object) -> bool:
+        if not isinstance(points, list) or len(points) != 4:
+            return False
+        for pt in points:
+            if not isinstance(pt, dict):
+                return False
+            if "x" not in pt or "y" not in pt:
+                return False
+        return True
+
     for notif in notifications_snapshot:
         try:
             ts = float(notif.get("timestamp_epoch", 0.0))
@@ -663,12 +673,30 @@ def build_dashboard_payload() -> dict[str, Any]:
         roi_total_duration = 0.0
         frame_duration_val = _safe_float(notif.get("frame_duration"))
         frame_measurements: list[dict[str, Any]] = []
+        processed_roi_count = 0
+        processed_modules: set[str] = set()
+        cam_id_clean = _clean_optional_str(notif.get("cam_id"))
+        source_clean = _clean_optional_str(notif.get("source"))
+        reported_count_raw = notif.get("count")
+        try:
+            reported_roi_count = int(float(reported_count_raw))
+            if reported_roi_count < 0:
+                reported_roi_count = None
+        except (TypeError, ValueError):
+            reported_roi_count = None
         for result in results:
-            module_name = str(result.get("module") or "ไม่ระบุ")
-            try:
-                duration_val = float(result.get("duration"))
-            except (TypeError, ValueError):
-                duration_val = None
+            if not isinstance(result, dict):
+                continue
+            module_raw = result.get("module")
+            module_name = str(module_raw).strip() if module_raw is not None else ""
+            if not module_name:
+                module_name = "ไม่ระบุ"
+            roi_id_clean = _clean_optional_str(result.get("id"))
+            roi_name_clean = _clean_optional_str(result.get("name"))
+            if roi_id_clean:
+                processed_roi_count += 1
+                processed_modules.add(module_name)
+            duration_val = _safe_float(result.get("duration"))
             if duration_val is None:
                 continue
             roi_total_duration += duration_val
@@ -677,10 +705,10 @@ def build_dashboard_payload() -> dict[str, Any]:
                     "name": module_name,
                     "module": module_name,
                     "duration": float(duration_val),
-                    "roi_id": _clean_optional_str(result.get("id")),
-                    "roi_name": _clean_optional_str(result.get("name")),
-                    "cam_id": _clean_optional_str(notif.get("cam_id")),
-                    "source": _clean_optional_str(notif.get("source")),
+                    "roi_id": roi_id_clean,
+                    "roi_name": roi_name_clean,
+                    "cam_id": cam_id_clean,
+                    "source": source_clean,
                 }
             )
             module_entry = module_duration_stats.setdefault(
@@ -749,30 +777,44 @@ def build_dashboard_payload() -> dict[str, Any]:
                 module_entry["slowest_roi_name"] = _clean_optional_str(result.get("name"))
                 module_entry["slowest_source"] = _clean_optional_str(notif.get("source"))
                 module_entry["slowest_cam_id"] = _clean_optional_str(notif.get("cam_id"))
-        cam_id_clean = _clean_optional_str(notif.get("cam_id"))
-        source_clean = _clean_optional_str(notif.get("source"))
+        frame_modules = sorted(
+            processed_modules
+            or {
+                str(item.get("module") or item.get("name") or "").strip()
+                for item in frame_measurements
+                if (item.get("module") or item.get("name"))
+            }
+        )
 
-        if frame_measurements:
+        if (
+            reported_roi_count is not None
+            and reported_roi_count > processed_roi_count
+        ):
+            processed_roi_count = reported_roi_count
+        if processed_roi_count and cam_id_clean:
             frame_timestamp_iso = _to_iso(ts) or (
                 str(notif.get("timestamp")).strip()
                 if isinstance(notif.get("timestamp"), str)
                 and str(notif.get("timestamp")).strip()
                 else None
             )
-            fastest_frame = min(frame_measurements, key=lambda item: item["duration"])
-            slowest_frame = max(frame_measurements, key=lambda item: item["duration"])
-            fastest_entry = dict(fastest_frame)
-            slowest_entry = dict(slowest_frame)
-            if frame_timestamp_iso:
-                fastest_entry["timestamp"] = frame_timestamp_iso
-                slowest_entry["timestamp"] = frame_timestamp_iso
-            latest_frame_snapshot = {
-                "timestamp": frame_timestamp_iso,
-                "cam_id": cam_id_clean,
-                "source": source_clean,
-                "fastest": fastest_entry,
-                "slowest": slowest_entry,
-            }
+            fastest_entry: dict[str, Any] | None = None
+            slowest_entry: dict[str, Any] | None = None
+            if frame_measurements:
+                fastest_frame = min(frame_measurements, key=lambda item: item["duration"])
+                slowest_frame = max(frame_measurements, key=lambda item: item["duration"])
+                fastest_entry = dict(fastest_frame)
+                slowest_entry = dict(slowest_frame)
+                if frame_timestamp_iso:
+                    fastest_entry["timestamp"] = frame_timestamp_iso
+                    slowest_entry["timestamp"] = frame_timestamp_iso
+                latest_frame_snapshot = {
+                    "timestamp": frame_timestamp_iso,
+                    "cam_id": cam_id_clean,
+                    "source": source_clean,
+                    "fastest": fastest_entry,
+                    "slowest": slowest_entry,
+                }
             frame_time_epoch = _safe_float(notif.get("frame_time"))
             result_time_epoch = _safe_float(notif.get("result_time"))
             if frame_duration_val is None and (
@@ -781,35 +823,27 @@ def build_dashboard_payload() -> dict[str, Any]:
                 diff = result_time_epoch - frame_time_epoch
                 if diff >= 0:
                     frame_duration_val = diff
-            if cam_id_clean:
-                frame_modules = sorted(
-                    {
-                        str(item.get("module") or item.get("name") or "").strip()
-                        for item in frame_measurements
-                        if (item.get("module") or item.get("name"))
-                    }
-                )
-                latest_snapshot = latest_source_frames.get(cam_id_clean)
-                should_update = not latest_snapshot or ts >= float(
-                    latest_snapshot.get("timestamp_epoch", 0.0) or 0.0
-                )
-                if should_update:
-                    if frame_duration_val is None and roi_total_duration > 0:
-                        duration_for_frame = roi_total_duration
-                    else:
-                        duration_for_frame = frame_duration_val
-                    latest_source_frames[cam_id_clean] = {
-                        "timestamp": frame_timestamp_iso,
-                        "timestamp_epoch": ts,
-                        "cam_id": cam_id_clean,
-                        "source": source_clean,
-                        "roi_count": len(frame_measurements),
-                        "modules": frame_modules,
-                        "fastest": fastest_entry,
-                        "slowest": slowest_entry,
-                        "frame_duration": duration_for_frame,
-                        "total_duration": roi_total_duration,
-                    }
+            latest_snapshot = latest_source_frames.get(cam_id_clean)
+            should_update = not latest_snapshot or ts >= float(
+                latest_snapshot.get("timestamp_epoch", 0.0) or 0.0
+            )
+            if should_update:
+                if frame_duration_val is None and roi_total_duration > 0:
+                    duration_for_frame = roi_total_duration
+                else:
+                    duration_for_frame = frame_duration_val
+                latest_source_frames[cam_id_clean] = {
+                    "timestamp": frame_timestamp_iso,
+                    "timestamp_epoch": ts,
+                    "cam_id": cam_id_clean,
+                    "source": source_clean,
+                    "roi_count": processed_roi_count,
+                    "modules": frame_modules,
+                    "fastest": fastest_entry,
+                    "slowest": slowest_entry,
+                    "frame_duration": duration_for_frame,
+                    "total_duration": roi_total_duration,
+                }
         if frame_duration_val is None:
             frame_time_epoch = _safe_float(notif.get("frame_time"))
             result_time_epoch = _safe_float(notif.get("result_time"))
@@ -882,7 +916,7 @@ def build_dashboard_payload() -> dict[str, Any]:
             return False
 
         active_rois: list[dict[str, Any]] = []
-        if inference_running:
+        if inference_running and np is not None:
             for roi_entry in rois_for_cam:
                 if not isinstance(roi_entry, dict):
                     continue
@@ -890,13 +924,18 @@ def build_dashboard_payload() -> dict[str, Any]:
                     continue
                 if not _roi_matches_group(roi_entry.get("group")):
                     continue
+                if not _has_valid_points(roi_entry.get("points")):
+                    continue
+                module_name = str(roi_entry.get("module") or "").strip()
+                if not module_name:
+                    continue
                 active_rois.append(roi_entry)
 
         roi_count = len(active_rois)
         roi_total_count += roi_count
         unique_modules: set[str] = set()
         for roi_entry in active_rois:
-            module_name = str(roi_entry.get("module") or "ไม่ระบุ")
+            module_name = str(roi_entry.get("module") or "").strip() or "ไม่ระบุ"
             unique_modules.add(module_name)
             module_entry = module_usage.setdefault(
                 module_name,
