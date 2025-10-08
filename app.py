@@ -652,6 +652,16 @@ def build_dashboard_payload() -> dict[str, Any]:
         except (TypeError, ValueError):
             return None
 
+    def _has_valid_points(points: object) -> bool:
+        if not isinstance(points, list) or len(points) != 4:
+            return False
+        for pt in points:
+            if not isinstance(pt, dict):
+                return False
+            if "x" not in pt or "y" not in pt:
+                return False
+        return True
+
     for notif in notifications_snapshot:
         try:
             ts = float(notif.get("timestamp_epoch", 0.0))
@@ -882,7 +892,7 @@ def build_dashboard_payload() -> dict[str, Any]:
             return False
 
         active_rois: list[dict[str, Any]] = []
-        if inference_running:
+        if inference_running and np is not None:
             for roi_entry in rois_for_cam:
                 if not isinstance(roi_entry, dict):
                     continue
@@ -890,13 +900,18 @@ def build_dashboard_payload() -> dict[str, Any]:
                     continue
                 if not _roi_matches_group(roi_entry.get("group")):
                     continue
+                if not _has_valid_points(roi_entry.get("points")):
+                    continue
+                module_name = str(roi_entry.get("module") or "").strip()
+                if not module_name:
+                    continue
                 active_rois.append(roi_entry)
 
         roi_count = len(active_rois)
         roi_total_count += roi_count
         unique_modules: set[str] = set()
         for roi_entry in active_rois:
-            module_name = str(roi_entry.get("module") or "ไม่ระบุ")
+            module_name = str(roi_entry.get("module") or "").strip() or "ไม่ระบุ"
             unique_modules.add(module_name)
             module_entry = module_usage.setdefault(
                 module_name,
