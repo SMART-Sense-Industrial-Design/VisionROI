@@ -684,6 +684,7 @@ def build_dashboard_payload() -> dict[str, Any]:
                 reported_roi_count = None
         except (TypeError, ValueError):
             reported_roi_count = None
+
         for result in results:
             if not isinstance(result, dict):
                 continue
@@ -791,6 +792,7 @@ def build_dashboard_payload() -> dict[str, Any]:
             and reported_roi_count > processed_roi_count
         ):
             processed_roi_count = reported_roi_count
+
         if processed_roi_count and cam_id_clean:
             frame_timestamp_iso = _to_iso(ts) or (
                 str(notif.get("timestamp")).strip()

@@ -119,3 +119,4 @@ def test_dashboard_latest_runs_uses_reported_roi_count(monkeypatch):
 
     assert runs, "ควรมีข้อมูลเฟรมล่าสุด"
     assert runs[0]["roi_count"] == 12, "ควรใช้ค่าจำนวน ROI ที่รายงานจากการแจ้งเตือนล่าสุด"
+
