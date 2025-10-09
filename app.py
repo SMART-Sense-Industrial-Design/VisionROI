@@ -677,6 +677,14 @@ def build_dashboard_payload() -> dict[str, Any]:
         processed_modules: set[str] = set()
         cam_id_clean = _clean_optional_str(notif.get("cam_id"))
         source_clean = _clean_optional_str(notif.get("source"))
+        reported_count_raw = notif.get("count")
+        try:
+            reported_roi_count = int(float(reported_count_raw))
+            if reported_roi_count < 0:
+                reported_roi_count = None
+        except (TypeError, ValueError):
+            reported_roi_count = None
+
         for result in results:
             if not isinstance(result, dict):
                 continue
@@ -778,6 +786,12 @@ def build_dashboard_payload() -> dict[str, Any]:
                 if (item.get("module") or item.get("name"))
             }
         )
+
+        if (
+            reported_roi_count is not None
+            and reported_roi_count > processed_roi_count
+        ):
+            processed_roi_count = reported_roi_count
 
         if processed_roi_count and cam_id_clean:
             frame_timestamp_iso = _to_iso(ts) or (
