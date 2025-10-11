@@ -3376,9 +3376,43 @@ async def ws_snapshot(cam_id: str):
     worker = camera_workers.get(cam_id)
     if worker is None:
         return "Camera not initialized", 400
-    frame = await worker.read()
+    read_timeout = 1.5
+    freshness = max(read_timeout, 0.5)
+    frame = None
+    latest_frame_fn = getattr(worker, "get_latest_frame", None)
+    has_recent_fn = getattr(worker, "has_recent_frame", None)
+    can_use_cached = False
+    if callable(has_recent_fn):
+        try:
+            can_use_cached = bool(has_recent_fn(freshness=freshness))
+        except Exception:
+            can_use_cached = False
+    if can_use_cached and callable(latest_frame_fn):
+        try:
+            frame = latest_frame_fn()
+        except Exception:
+            frame = None
+    try:
+        if frame is None:
+            frame = await worker.read(timeout=read_timeout)
+    except TypeError:
+        if frame is None:
+            frame = await worker.read()
     if frame is None:
-        return "Camera error", 500
+        has_recent = False
+        if callable(has_recent_fn):
+            try:
+                has_recent = bool(has_recent_fn(freshness=freshness))
+            except Exception:
+                has_recent = False
+        logger = getattr(app, "logger", None)
+        if logger is not None:
+            logger.warning(
+                "ws_snapshot timeout waiting for frame", extra={"cam_id": cam_id}
+            )
+        if not has_recent:
+            return "Camera not ready", 503
+        return "Camera timeout", 503
     ok, buffer = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
     if not ok:
         return "Encode error", 500

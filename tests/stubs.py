@@ -19,8 +19,10 @@ def stub_quart():
         post = route
 
         class DummyResponse:
-            def __init__(self, status_code=200):
-                self.status_code = status_code
+            def __init__(self, *args, **kwargs):
+                self.args = args
+                self.kwargs = kwargs
+                self.status_code = kwargs.get("status", kwargs.get("status_code", 200))
 
         class DummyClient:
             async def get(self, *args, **kwargs):
