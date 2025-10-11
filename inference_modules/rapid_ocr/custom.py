@@ -504,10 +504,47 @@ def _extract_text(ocr_result: Any) -> str:
 # ===========
 # OCR runners
 # ===========
+def _prepare_frame(frame: Any) -> Any:
+    """ปรับรูปแบบ ROI ให้อยู่ในรูปที่ RapidOCR คาดหวัง (BGR uint8)"""
+    if np is None:
+        raise RuntimeError("numpy is required for RapidOCR input preparation")
+
+    if isinstance(frame, Image.Image):
+        frame = frame.convert("RGB")
+        frame = cv2.cvtColor(np.array(frame), cv2.COLOR_RGB2BGR)
+    elif not isinstance(frame, np.ndarray):
+        raise TypeError(
+            "frame must be either a numpy.ndarray or PIL.Image when using RapidOCR"
+        )
+
+    arr = frame
+
+    if arr.ndim == 2:
+        arr = cv2.cvtColor(arr, cv2.COLOR_GRAY2BGR)
+    elif arr.ndim == 3 and arr.shape[2] == 4:
+        arr = cv2.cvtColor(arr, cv2.COLOR_BGRA2BGR)
+
+    if arr.dtype != np.uint8:
+        if np.issubdtype(arr.dtype, np.floating):
+            arr = np.clip(arr, 0.0, 1.0 if arr.max() <= 1.0 else 255.0)
+            if arr.max() <= 1.0:
+                arr = (arr * 255.0).round().astype(np.uint8)
+            else:
+                arr = arr.round().astype(np.uint8)
+        else:
+            arr = np.clip(arr, 0, 255).astype(np.uint8)
+
+    if not arr.flags.c_contiguous:
+        arr = np.ascontiguousarray(arr)
+
+    return arr
+
+
 def _run_ocr_async(frame, roi_id, save, source) -> str:
     try:
+        prepared_frame = _prepare_frame(frame)
         reader = _get_global_reader()
-        result = _normalise_reader_output(reader(frame))
+        result = _normalise_reader_output(reader(prepared_frame))
         text = _extract_text(result)
 
         logger.info(
@@ -520,6 +557,7 @@ def _run_ocr_async(frame, roi_id, save, source) -> str:
     except Exception as e:
         logger.exception(f"roi_id={roi_id} {MODULE_NAME} OCR error: {e}")
         text = ""
+        prepared_frame = None
 
     if save:
         base_dir = _data_sources_root / source if source else Path(__file__).resolve().parent
@@ -528,7 +566,7 @@ def _run_ocr_async(frame, roi_id, save, source) -> str:
         os.makedirs(save_dir, exist_ok=True)
         filename = datetime.now().strftime("%Y%m%d%H%M%S%f") + ".jpg"
         path = save_dir / filename
-        save_image_async(str(path), frame)
+        save_image_async(str(path), prepared_frame if prepared_frame is not None else frame)
 
     return text
 
@@ -551,6 +589,7 @@ class RapidOCR(BaseOCR):
 
     def _run_ocr(self, frame, roi_id, save: bool, source: str) -> str:
         text = ""
+        prepared_frame = None
         try:
             reader = self._get_reader()
         except Exception as e:
@@ -561,7 +600,8 @@ class RapidOCR(BaseOCR):
 
         if reader is not None:
             try:
-                result = _normalise_reader_output(reader(frame))
+                prepared_frame = _prepare_frame(frame)
+                result = _normalise_reader_output(reader(prepared_frame))
                 text = _extract_text(result)
             except Exception as e:
                 self.logger.exception(
@@ -576,7 +616,7 @@ class RapidOCR(BaseOCR):
             )
 
         if save:
-            self._save_image(frame, roi_id, source)
+            self._save_image(prepared_frame if prepared_frame is not None else frame, roi_id, source)
 
         return text
 
