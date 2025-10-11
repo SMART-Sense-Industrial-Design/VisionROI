@@ -155,11 +155,17 @@ class CameraWorker:
                     self._stderr_thread.start()
                 if self._proc and self._proc.stdout:
                     try:
+                        # โปรเซส ffmpeg บางครั้งจะปิด stdout ชั่วคราวระหว่างที่กล้องสะดุด
+                        # ทำให้การเรียก fileno() โยน ValueError/OSError ได้
+                        # จึงเก็บ fd ไว้ตั้งแต่เริ่มต้นและบันทึกเพื่อใช้ซ้ำภายหลัง
                         self._stdout_fd = self._proc.stdout.fileno()
-                    except Exception as exc:
+                    except (OSError, ValueError) as exc:
                         self._logger.warning(
                             "%s failed to obtain stdout fd: %s", self._log_prefix, exc
                         )
+                    except Exception:
+                        # ข้อผิดพลาดอื่น ๆ ให้เด้งออกเพื่อไม่ให้กลบปัญหาใหม่ ๆ ที่ไม่เกี่ยวกับ ffmpeg
+                        raise
 
         elif backend == "opencv":
             self._image_path = self._maybe_image_path(src)
@@ -701,13 +707,17 @@ class CameraWorker:
                             self._stderr_thread.start()
                         if self._proc and self._proc.stdout:
                             try:
+                                # ใช้เหตุผลเดียวกับตอนเริ่มต้น: หากกล้องหรือ ffmpeg มีช่วงสะดุด
+                                # fileno() อาจไม่พร้อมในทันที จึงพยายามเก็บ fd ใหม่
                                 self._stdout_fd = self._proc.stdout.fileno()
-                            except Exception as exc:
+                            except (OSError, ValueError) as exc:
                                 self._logger.warning(
                                     "%s failed to obtain stdout fd on restart: %s",
                                     self._log_prefix,
                                     exc,
                                 )
+                            except Exception:
+                                raise
                 elif self.backend == "opencv":
                     if self._image_path is not None:
                         self._image_frame = cv2.imread(str(self._image_path), cv2.IMREAD_COLOR)
@@ -883,8 +893,20 @@ class CameraWorker:
 
                 buffer = bytearray()
                 start_wait = time.monotonic()
-                fd = self._stdout_fd or stdout.fileno()
+                try:
+                    fd = self._stdout_fd if self._stdout_fd is not None else stdout.fileno()
+                except (OSError, ValueError) as exc:
+                    self._fail_count += 1
+                    self._logger.warning(
+                        "%s unable to obtain ffmpeg stdout fd: %s; restarting backend",
+                        self._log_prefix,
+                        exc,
+                    )
+                    self._restart_backend()
+                    time.sleep(0.05)
+                    continue
                 no_video_timeout = False
+                stream_eof = False
                 while len(buffer) < frame_size and not self._stop_evt.is_set():
                     remaining = frame_size - len(buffer)
                     wait_time = max(0.1, min(0.5, self._read_timeout))
@@ -915,11 +937,26 @@ class CameraWorker:
                             break
                         continue
                     if not chunk:
+                        stream_eof = True
                         break
                     buffer.extend(chunk)
                     start_wait = time.monotonic()
 
                 buffer_len = len(buffer)
+
+                if stream_eof:
+                    self._fail_count += 1
+                    if self._fail_count in (1, 10) or self._fail_count % 25 == 0:
+                        self._logger.warning(
+                            "%s ffmpeg stdout ended unexpectedly; consecutive failures=%d; last stderr: %s",
+                            self._log_prefix,
+                            self._fail_count,
+                            self.last_ffmpeg_stderr(),
+                        )
+                    self._clear_frame_queue()
+                    self._restart_backend()
+                    time.sleep(0.05)
+                    continue
 
                 if no_video_timeout:
                     self._fail_count += 1
