@@ -1067,13 +1067,14 @@ class CameraWorker:
             self._ffmpeg_fail_count = 0
             self._ffmpeg_failure_start = None
             self._last_frame_ts = time.monotonic()
-            frame_copy = frame
-            self._latest_frame = frame_copy
+            # เก็บอ้างอิงเฟรมล่าสุดแบบไม่คัดลอกเพื่อไม่ให้ลูปหลักเสียเวลาเพิ่ม
+            frame_ref = frame
+            self._latest_frame = frame_ref
             if self._q.full():
                 with silent():
                     _ = self._q.get_nowait()
             with silent():
-                self._q.put_nowait(frame_copy)
+                self._q.put_nowait(frame_ref)
 
             if self.read_interval > 0:
                 time.sleep(self.read_interval)
@@ -1094,7 +1095,11 @@ class CameraWorker:
         return None
 
     def get_latest_frame(self):
-        """คืนสำเนาเฟรมล่าสุดถ้ามี โดยไม่ดึงออกจากคิว"""
+        """คืนสำเนาเฟรมล่าสุดถ้ามี โดยไม่ดึงออกจากคิวหลัก
+
+        การ copy เกิดขึ้นเฉพาะตอนที่ endpoint ภายนอกเรียกใช้เมธอดนี้
+        ทำให้ลูปหลักที่อ่านเฟรมและดันเข้า queue สำหรับ inference
+        ไม่ต้องเสียเวลาเพิ่มจากการทำสำเนา"""
         frame = getattr(self, "_latest_frame", None)
         if frame is None:
             return None
