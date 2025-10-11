@@ -30,7 +30,7 @@ import time
 from datetime import datetime
 from typing import Callable, Awaitable, Any, TypeVar
 from concurrent.futures import ThreadPoolExecutor
-from queue import Queue, Empty
+from queue import Queue, Empty, Full
 from src.utils.logger import get_logger
 from src.utils.memory import malloc_trim
 try:
@@ -1613,6 +1613,36 @@ async def run_inference_loop(cam_id: str):
     pending_context: dict[tuple[str, float], dict[str, Any]] = {}
     pending_extensions: dict[tuple[str, float], int] = {}
     pending_roi_start: dict[tuple[str, float], dict[str | int, float]] = {}
+    queue_full_last_log = 0.0
+    queue_full_log_interval = 2.0
+
+    def _log_inference_queue_warning(message: str, *args: Any) -> None:
+        logger = get_logger('inference_queue')
+        if logger is None:
+            return
+        log_fn = getattr(logger, 'warning', None)
+        if callable(log_fn):
+            try:
+                log_fn(message, *args)
+            except Exception:
+                pass
+
+    def _log_inference_queue_exception(message: str, *args: Any) -> None:
+        logger = get_logger('inference_queue')
+        if logger is None:
+            return
+        for attr, kwargs in (
+            ('exception', {}),
+            ('error', {'exc_info': True}),
+            ('warning', {'exc_info': True}),
+        ):
+            log_fn = getattr(logger, attr, None)
+            if callable(log_fn):
+                try:
+                    log_fn(message, *args, **kwargs)
+                except Exception:
+                    pass
+                return
 
     def get_pending_timeout() -> float:
         timeout = inference_result_timeouts.get(cam_id)
@@ -1764,6 +1794,7 @@ async def run_inference_loop(cam_id: str):
             pass
 
     async def process_frame(frame, frame_timestamp):
+        nonlocal queue_full_last_log
         cleanup_pending_results()
         rois = inference_rois.get(cam_id, [])
         forced_group = inference_groups.get(cam_id)
@@ -1939,18 +1970,33 @@ async def run_inference_loop(cam_id: str):
                         fut = loop.create_future()
                         pending_key = (cam_id, frame_time)
                         start_time = time.time()
+                        enqueue_item = (process_fn, tuple(args), fut, loop)
                         try:
-                            await asyncio.to_thread(
-                                _INFERENCE_QUEUE.put,
-                                (process_fn, tuple(args), fut, loop),
+                            await asyncio.wait_for(
+                                asyncio.to_thread(
+                                    _INFERENCE_QUEUE.put,
+                                    enqueue_item,
+                                    True,
+                                    0.05,
+                                ),
+                                timeout=0.06,
                             )
+                        except (Full, asyncio.TimeoutError):
+                            fut.cancel()
+                            now_log = time.time()
+                            if now_log - queue_full_last_log >= queue_full_log_interval:
+                                queue_full_last_log = now_log
+                                _log_inference_queue_warning(
+                                    "inference queue backlog; dropping ROI %s task",
+                                    r.get('id', i),
+                                )
+                            continue
                         except Exception:
                             fut.cancel()
-                            queue_logger = get_logger('inference_queue')
-                            if queue_logger is not None:
-                                queue_logger.exception(
-                                    "failed to enqueue inference task for ROI %s", r.get('id', i)
-                                )
+                            _log_inference_queue_exception(
+                                "failed to enqueue inference task for ROI %s",
+                                r.get('id', i),
+                            )
                             continue
 
                         pending_expected[pending_key] = (
