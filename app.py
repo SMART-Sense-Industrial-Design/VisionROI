@@ -619,7 +619,8 @@ def build_dashboard_payload() -> dict[str, Any]:
     running_count = 0
     online_count = 0
     intervals: list[float] = []
-    fps_values: list[float] = []
+    target_fps_values: list[float] = []
+    actual_fps_values: list[float] = []
     roi_total_count = 0
     module_usage: dict[str, dict[str, Any]] = {}
     source_roi_map: dict[str, dict[str, Any]] = {}
@@ -630,6 +631,27 @@ def build_dashboard_payload() -> dict[str, Any]:
     source_duration_stats: dict[str, dict[str, float | int | None]] = {}
     latest_frame_snapshot: dict[str, Any] | None = None
     latest_source_frames: dict[str, dict[str, Any]] = {}
+    max_actual_samples = 10
+    recent_frame_timestamps: dict[str, deque[float]] = {}
+    actual_fps_cache: dict[str, float | None] = {}
+
+    def _record_frame_timestamp(identifier: str | None, timestamp: float) -> None:
+        if not identifier or timestamp <= 0:
+            return
+        ts_list = recent_frame_timestamps.setdefault(
+            identifier, deque(maxlen=max_actual_samples)
+        )
+        ts_list.append(timestamp)
+
+    def _normalize_cam_id(value: Any) -> str | None:
+        if value is None:
+            return None
+        try:
+            text = str(value)
+        except Exception:
+            return None
+        text = text.strip()
+        return text or None
 
     def _clean_optional_str(value: object) -> str | None:
         if value is None:
@@ -693,7 +715,15 @@ def build_dashboard_payload() -> dict[str, Any]:
         frame_measurements: list[dict[str, Any]] = []
         processed_roi_count = 0
         processed_modules: set[str] = set()
-        cam_id_clean = _clean_optional_str(notif.get("cam_id"))
+        cam_id_raw = notif.get("cam_id")
+        cam_id_clean = _clean_optional_str(cam_id_raw)
+        cam_id_key = _normalize_cam_id(cam_id_raw)
+        if cam_id_key:
+            _record_frame_timestamp(cam_id_key, ts)
+        if cam_id_raw is not None:
+            raw_key = str(cam_id_raw)
+            if raw_key != cam_id_key:
+                _record_frame_timestamp(raw_key, ts)
         source_clean = _clean_optional_str(notif.get("source"))
         reported_count_raw = notif.get("count")
         try:
@@ -904,6 +934,31 @@ def build_dashboard_payload() -> dict[str, Any]:
             if ts >= float(source_entry.get("latest_timestamp", 0.0) or 0.0):
                 source_entry["latest_duration"] = duration_for_source
                 source_entry["latest_timestamp"] = ts
+    def _calculate_actual_fps(identifier: str | None) -> float | None:
+        if not identifier:
+            return None
+        if identifier in actual_fps_cache:
+            return actual_fps_cache[identifier]
+        timestamps = recent_frame_timestamps.get(identifier)
+        if not timestamps:
+            actual_fps_cache[identifier] = None
+            return None
+        valid_ts = [t for t in list(timestamps) if isinstance(t, (int, float)) and t > 0]
+        if len(valid_ts) < 2:
+            actual_fps_cache[identifier] = None
+            return None
+        unique_sorted = sorted(set(valid_ts))
+        if len(unique_sorted) < 2:
+            actual_fps_cache[identifier] = None
+            return None
+        span = unique_sorted[-1] - unique_sorted[0]
+        if span <= 0:
+            fps_value = float(len(unique_sorted))
+        else:
+            fps_value = (len(unique_sorted) - 1) / span
+        actual_fps_cache[identifier] = round(fps_value, 3)
+        return actual_fps_cache[identifier]
+
     for cam_id in sorted(known_ids, key=str):
         task = inference_tasks.get(cam_id)
         inference_running = bool(task and not task.done())
@@ -914,7 +969,11 @@ def build_dashboard_payload() -> dict[str, Any]:
         if interval:
             intervals.append(interval)
             if interval > 0:
-                fps_values.append(round(1.0 / interval, 3))
+                target_fps_values.append(round(1.0 / interval, 3))
+        normalized_cam_id = _normalize_cam_id(cam_id)
+        actual_fps = _calculate_actual_fps(normalized_cam_id)
+        if actual_fps is None and cam_id is not None:
+            actual_fps = _calculate_actual_fps(str(cam_id))
         active_group = inference_groups.get(cam_id) or persisted_entry.get("inference_group")
         rois_for_cam = inference_rois.get(cam_id, []) or []
         forced_group = inference_groups.get(cam_id)
@@ -1015,6 +1074,14 @@ def build_dashboard_payload() -> dict[str, Any]:
         else:
             width = height = None
 
+        target_fps = round(1.0 / interval, 3) if interval and interval > 0 else None
+        display_fps: float | None
+        if actual_fps is not None:
+            display_fps = actual_fps
+            actual_fps_values.append(actual_fps)
+        else:
+            display_fps = target_fps
+
         camera_entry = {
             "cam_id": cam_id,
             "source": camera_sources.get(cam_id, persisted_entry.get("source", "")),
@@ -1022,7 +1089,8 @@ def build_dashboard_payload() -> dict[str, Any]:
             "backend": camera_backends.get(cam_id, persisted_entry.get("backend", "opencv")),
             "group": active_group,
             "interval": interval,
-            "fps": (round(1.0 / interval, 3) if interval and interval > 0 else None),
+            "fps": display_fps,
+            "target_fps": target_fps,
             "status": status,
             "last_output": last_result,
             "last_activity": last_activity_iso,
@@ -1073,6 +1141,7 @@ def build_dashboard_payload() -> dict[str, Any]:
                     "group": active_group,
                     "interval": interval,
                     "fps": camera_entry["fps"],
+                    "target_fps": target_fps,
                     "status": status,
                     "last_output": last_result,
                     "last_activity": last_activity_iso,
@@ -1082,7 +1151,16 @@ def build_dashboard_payload() -> dict[str, Any]:
             )
 
     average_interval = sum(intervals) / len(intervals) if intervals else 0.0
-    average_fps = sum(fps_values) / len(fps_values) if fps_values else 0.0
+    average_fps = (
+        sum(actual_fps_values) / len(actual_fps_values)
+        if actual_fps_values
+        else 0.0
+    )
+    target_average_fps = (
+        sum(target_fps_values) / len(target_fps_values)
+        if target_fps_values
+        else 0.0
+    )
     recent_alerts = notifications_snapshot[-20:]
     group_entries: list[dict[str, Any]] = []
     running_groups = 0
@@ -1135,6 +1213,7 @@ def build_dashboard_payload() -> dict[str, Any]:
         "alerts_last_hour": alerts_last_hour,
         "average_interval": average_interval,
         "average_fps": average_fps,
+        "target_average_fps": target_average_fps,
         "total_groups": len(group_entries),
         "running_groups": running_groups,
         "page_jobs": len(page_jobs),
