@@ -18,6 +18,7 @@ import re
 import sys
 import argparse
 import logging
+import math
 from collections import defaultdict, deque
 from dataclasses import dataclass
 
@@ -662,6 +663,23 @@ def build_dashboard_payload() -> dict[str, Any]:
                 return False
         return True
 
+    def _percentile(values: list[float], percentile: float) -> float | None:
+        if not values:
+            return None
+        if percentile <= 0:
+            return min(values)
+        if percentile >= 100:
+            return max(values)
+        sorted_vals = sorted(values)
+        k = (len(sorted_vals) - 1) * (percentile / 100.0)
+        f = math.floor(k)
+        c = math.ceil(k)
+        if f == c:
+            return sorted_vals[int(k)]
+        d0 = sorted_vals[int(f)] * (c - k)
+        d1 = sorted_vals[int(c)] * (k - f)
+        return d0 + d1
+
     for notif in notifications_snapshot:
         try:
             ts = float(notif.get("timestamp_epoch", 0.0))
@@ -1082,6 +1100,34 @@ def build_dashboard_payload() -> dict[str, Any]:
         )
 
     page_jobs_running = sum(1 for job in page_jobs if job.get("inference_running"))
+    latency_samples = [
+        float(stats.get("latest_duration"))
+        for stats in source_duration_stats.values()
+        if isinstance(stats.get("latest_duration"), (int, float))
+    ]
+    if not latency_samples:
+        for frame_info in latest_source_frames.values():
+            frame_duration = frame_info.get("frame_duration")
+            if isinstance(frame_duration, (int, float)):
+                latency_samples.append(float(frame_duration))
+
+    average_latency = (
+        sum(latency_samples) / len(latency_samples)
+        if latency_samples
+        else None
+    )
+    latency_p95 = _percentile(latency_samples, 95.0) if latency_samples else None
+    latency_max = max(latency_samples) if latency_samples else None
+
+    try:
+        queue_size = _INFERENCE_QUEUE.qsize()
+    except Exception:
+        queue_size = 0
+    queue_capacity = getattr(_INFERENCE_QUEUE, "maxsize", 0) or 0
+    queue_utilization = (
+        (queue_size / queue_capacity) if queue_capacity else 0.0
+    )
+
     summary = {
         "total_cameras": len(known_ids),
         "online_cameras": online_count,
@@ -1095,6 +1141,13 @@ def build_dashboard_payload() -> dict[str, Any]:
         "page_jobs_running": page_jobs_running,
     }
     summary["total_roi"] = roi_total_count
+    summary["average_latency"] = average_latency
+    summary["latency_p95"] = latency_p95
+    summary["latency_max"] = latency_max
+    summary["latency_samples"] = len(latency_samples)
+    summary["inference_queue_size"] = queue_size
+    summary["inference_queue_capacity"] = queue_capacity
+    summary["inference_queue_utilization"] = queue_utilization
 
     module_details: list[dict[str, Any]] = []
     fastest_measurement: dict[str, Any] | None = None

@@ -145,6 +145,7 @@ function updateSummary(summary = {}) {
   setMetric('metric-fps', summary.average_fps ?? 0, 2);
   setMetric('metric-groups', summary.total_groups ?? 0);
   setMetric('metric-pages', summary.page_jobs ?? 0);
+  setMetric('metric-performance-fps', summary.average_fps ?? 0, 2);
 
   const total = summary.total_cameras ?? 0;
   const online = summary.online_cameras ?? 0;
@@ -157,6 +158,14 @@ function updateSummary(summary = {}) {
   const onlineRate = total ? (online / total) * 100 : 0;
   const runningRate = total ? (running / Math.max(total, 1)) * 100 : 0;
   const alertDensity = total ? alerts / Math.max(total, 1) : 0;
+  const queueSize = summary.inference_queue_size ?? 0;
+  const queueCapacity = summary.inference_queue_capacity ?? 0;
+  const queueUtilization = queueCapacity
+    ? Math.min(Math.max((queueSize / queueCapacity) * 100, 0), 999)
+    : 0;
+  const latencyAverage = summary.average_latency;
+  const latencyP95 = summary.latency_p95;
+  const latencySamples = summary.latency_samples ?? 0;
 
   setElementText('summary-online-rate', `${onlineRate.toFixed(0)}%`);
   setElementText('summary-offline', offline);
@@ -169,6 +178,12 @@ function updateSummary(summary = {}) {
   setElementText('chip-group-running', runningGroups);
   setElementText('chip-camera-running', running);
   setElementText('chip-page-running', pageJobsRunning);
+  setElementText('metric-performance-latency', formatSeconds(latencyAverage));
+  setElementText('metric-performance-latency-p95', formatSeconds(latencyP95));
+  setElementText('metric-performance-latency-samples', latencySamples);
+  setElementText('metric-performance-queue', queueSize);
+  setElementText('metric-performance-queue-max', queueCapacity);
+  setElementText('metric-performance-queue-util', queueCapacity ? queueUtilization.toFixed(0) : '0');
 }
 
 function formatSeconds(value) {

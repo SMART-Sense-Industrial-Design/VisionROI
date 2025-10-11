@@ -111,6 +111,39 @@
     </article>
   </section>
 
+  <section class="dashboard__metrics" aria-label="สรุปประสิทธิภาพระบบ">
+    <article class="metric-card">
+      <div class="metric-card__header">
+        <span class="metric-card__icon bg-primary-subtle text-primary"><i class="bi bi-speedometer2"></i></span>
+        <div>
+          <p class="metric-card__label">FPS เฉลี่ยภาพรวม</p>
+          <p class="metric-card__value"><span id="metric-performance-fps">0.00</span> FPS</p>
+        </div>
+      </div>
+      <p class="metric-card__meta">คำนวณจากกล้องที่กำลังประมวลผลอยู่</p>
+    </article>
+    <article class="metric-card">
+      <div class="metric-card__header">
+        <span class="metric-card__icon bg-info-subtle text-info"><i class="bi bi-clock-history"></i></span>
+        <div>
+          <p class="metric-card__label">Latency เฟรมล่าสุด</p>
+          <p class="metric-card__value"><span id="metric-performance-latency">-</span></p>
+        </div>
+      </div>
+      <p class="metric-card__meta">p95 <span id="metric-performance-latency-p95">-</span> จาก <span id="metric-performance-latency-samples">0</span> แหล่งสัญญาณ</p>
+    </article>
+    <article class="metric-card">
+      <div class="metric-card__header">
+        <span class="metric-card__icon bg-secondary-subtle text-secondary"><i class="bi bi-stack"></i></span>
+        <div>
+          <p class="metric-card__label">สถานะคิวงาน</p>
+          <p class="metric-card__value"><span id="metric-performance-queue">0</span> / <span id="metric-performance-queue-max">0</span></p>
+        </div>
+      </div>
+      <p class="metric-card__meta">ใช้งาน <span id="metric-performance-queue-util">0</span>% ของความจุ</p>
+    </article>
+  </section>
+
   <section class="dashboard__panel dashboard__panel--wide">
     <div class="panel-header">
       <div>
