@@ -75,6 +75,7 @@ class CameraWorker:
         self._stop_evt = threading.Event()
         self._thread: Optional[threading.Thread] = None
         self._q: Queue = Queue(maxsize=1)
+        self._latest_frame = None
         self._fail_count = 0
         self._ffmpeg_cmd = None
         self._ffmpeg_pix_fmt: str | None = None
@@ -1067,6 +1068,7 @@ class CameraWorker:
             self._ffmpeg_failure_start = None
             self._last_frame_ts = time.monotonic()
             frame_copy = frame
+            self._latest_frame = frame_copy
             if self._q.full():
                 with silent():
                     _ = self._q.get_nowait()
@@ -1090,6 +1092,19 @@ class CameraWorker:
             except Empty:
                 continue
         return None
+
+    def get_latest_frame(self):
+        """คืนสำเนาเฟรมล่าสุดถ้ามี โดยไม่ดึงออกจากคิว"""
+        frame = getattr(self, "_latest_frame", None)
+        if frame is None:
+            return None
+        copy_method = getattr(frame, "copy", None)
+        if callable(copy_method):
+            try:
+                return copy_method()
+            except Exception:
+                pass
+        return frame
 
     async def stop(self) -> None:
         self._stop_evt.set()
