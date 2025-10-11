@@ -1081,8 +1081,6 @@ def build_dashboard_payload() -> dict[str, Any]:
             actual_fps_values.append(actual_fps)
         else:
             display_fps = target_fps
-            if target_fps is not None:
-                actual_fps_values.append(target_fps)
 
         camera_entry = {
             "cam_id": cam_id,

@@ -169,3 +169,43 @@ def test_dashboard_uses_actual_fps_when_available(monkeypatch):
     assert camera_entry["fps"] == pytest.approx(0.5, rel=1e-3)
     assert camera_entry["target_fps"] == pytest.approx(2.0, rel=1e-3)
 
+
+def test_dashboard_average_fps_ignores_missing_actual(monkeypatch):
+    import app
+
+    base = time.time()
+    notifications = [
+        {
+            "timestamp_epoch": base,
+            "cam_id": "cam-1",
+            "source": "source-a",
+            "results": [],
+        }
+    ]
+
+    monkeypatch.setattr(app, "load_service_state", lambda: {"cam-1": {"source": "source-a"}})
+    monkeypatch.setattr(app, "get_recent_notifications", lambda limit=None: list(notifications))
+    monkeypatch.setattr(app, "np", object())
+
+    monkeypatch.setattr(app, "camera_sources", {"cam-1": "source-a"})
+    monkeypatch.setattr(app, "active_sources", {"cam-1": "Cam One"})
+    monkeypatch.setattr(app, "inference_groups", {"cam-1": "all"})
+    monkeypatch.setattr(app, "inference_intervals", {"cam-1": 0.25})
+    monkeypatch.setattr(app, "inference_rois", {"cam-1": []})
+
+    class _DummyTask:
+        def done(self):
+            return False
+
+    monkeypatch.setattr(app, "inference_tasks", {"cam-1": _DummyTask()})
+    monkeypatch.setattr(app, "roi_tasks", {})
+
+    payload = app.build_dashboard_payload()
+
+    assert payload["summary"]["average_fps"] == 0.0
+    assert payload["summary"]["target_average_fps"] == pytest.approx(4.0, rel=1e-3)
+
+    camera_entry = payload["cameras"][0]
+    assert camera_entry["fps"] == pytest.approx(4.0, rel=1e-3)
+    assert camera_entry["target_fps"] == pytest.approx(4.0, rel=1e-3)
+
