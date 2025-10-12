@@ -44,10 +44,6 @@ _reader_executor_lock = threading.Lock()
 _reader_executor: ThreadPoolExecutor | None = None
 _reader_thread_locals = threading.local()
 
-_single_reader_init_lock = threading.Lock()
-_single_reader_run_lock = threading.Lock()
-_single_reader: Any | None = None
-
 
 def _resolve_max_readers() -> int:
     env_val = os.getenv("RAPIDOCR_MAX_READERS")
@@ -82,26 +78,10 @@ def _resolve_acquire_timeout() -> float | None:
     return 10.0
 
 
-def _resolve_worker_mode() -> str:
-    env_val = os.getenv("RAPIDOCR_WORKER_MODE", "executor").strip().lower()
-    if env_val in {"executor", "threadpool", "pool"}:
-        return "executor"
-    if env_val in {"lock", "single", "sequential"}:
-        return "lock"
-    if env_val:
-        logger.warning(
-            "[RapidOCR] unknown RAPIDOCR_WORKER_MODE=%s, falling back to executor",
-            env_val,
-        )
-    return "executor"
-
-
-_worker_mode = _resolve_worker_mode()
 _max_reader_pool = _resolve_max_readers()
 _reader_acquire_timeout = _resolve_acquire_timeout()
 logger.info(
-    "[RapidOCR] worker mode=%s, workers=%s, acquire_timeout=%s",
-    _worker_mode,
+    "[RapidOCR] worker mode=threadpool, workers=%s, acquire_timeout=%s",
     _max_reader_pool,
     "infinite" if _reader_acquire_timeout is None else _reader_acquire_timeout,
 )
@@ -506,31 +486,15 @@ def _invoke_reader(frame) -> Any:
     return reader(frame)
 
 
-def _get_single_reader() -> Any:
-    if RapidOCRLib is None:
-        raise RuntimeError("rapidocr_onnxruntime library is not installed")
-    global _single_reader
-    if _single_reader is None:
-        with _single_reader_init_lock:
-            if _single_reader is None:
-                _single_reader = _new_reader_instance()
-                logger.debug("[RapidOCR] created singleton reader instance")
-    return _single_reader
-
-
 def _reset_reader_pool() -> None:
-    global _reader_executor, _single_reader
-    if _worker_mode == "executor":
-        with _reader_executor_lock:
-            if _reader_executor is not None:
-                _reader_executor.shutdown(wait=True, cancel_futures=True)
-                logger.debug("[RapidOCR] ThreadPoolExecutor shutdown completed")
-                _reader_executor = None
-        # thread-local readers จะถูกเก็บกวาดเมื่อ thread pool ถูก shutdown
-        vars(_reader_thread_locals).clear()
-    else:
-        with _single_reader_init_lock:
-            _single_reader = None
+    global _reader_executor
+    with _reader_executor_lock:
+        if _reader_executor is not None:
+            _reader_executor.shutdown(wait=True, cancel_futures=True)
+            logger.debug("[RapidOCR] ThreadPoolExecutor shutdown completed")
+            _reader_executor = None
+    # thread-local readers จะถูกเก็บกวาดเมื่อ thread pool ถูก shutdown
+    vars(_reader_thread_locals).clear()
 
 
 # ======================
@@ -631,25 +595,21 @@ def _prepare_frame_for_reader(frame):
 
 
 def _run_reader(frame):
-    if _worker_mode == "executor":
-        executor = _ensure_reader_executor()
-        future = executor.submit(_invoke_reader, frame)
-        try:
-            if _reader_acquire_timeout is None:
-                return future.result()
-            return future.result(timeout=_reader_acquire_timeout)
-        except FuturesTimeoutError as exc:
-            cancelled = future.cancel()
-            if not cancelled:
-                logger.warning(
-                    "[RapidOCR] OCR task exceeded timeout but could not be cancelled"
-                )
-            raise TimeoutError(
-                "Timed out waiting for available RapidOCR worker thread"
-            ) from exc
-    reader = _get_single_reader()
-    with _single_reader_run_lock:
-        return reader(frame)
+    executor = _ensure_reader_executor()
+    future = executor.submit(_invoke_reader, frame)
+    try:
+        if _reader_acquire_timeout is None:
+            return future.result()
+        return future.result(timeout=_reader_acquire_timeout)
+    except FuturesTimeoutError as exc:
+        cancelled = future.cancel()
+        if not cancelled:
+            logger.warning(
+                "[RapidOCR] OCR task exceeded timeout but could not be cancelled"
+            )
+        raise TimeoutError(
+            "Timed out waiting for available RapidOCR worker thread"
+        ) from exc
 
 
 def _run_ocr_async(frame, roi_id, save, source) -> str:
