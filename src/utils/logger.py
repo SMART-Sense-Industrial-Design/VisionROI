@@ -32,8 +32,15 @@ class _DropOcrResultFilter(logging.Filter):
                 return False
         return True
 
-_DATA_SOURCES_ROOT = Path(__file__).resolve().parents[2] / "data_sources"
-_INFERENCE_ROOT = Path(__file__).resolve().parents[2] / "inference_modules"
+_LOG_ROOT = Path(__file__).resolve().parents[2] / "logs"
+
+
+def _sanitize_component(name: str | None) -> str:
+    if not name:
+        return "default"
+    sanitized = re.sub(r"[^\w.-]+", "_", name.strip())
+    sanitized = sanitized.strip("._")
+    return sanitized or "default"
 
 
 def _normalize_log_filename(name: str | None) -> str:
@@ -57,7 +64,7 @@ def get_logger(
     """คืน logger ที่ตั้งค่า handler ตาม module และ source"""
     src = source or ""
     filename = _normalize_log_filename(log_name)
-    normalized_subdir = (subdir or "").strip().strip("/")
+    normalized_subdir = _sanitize_component(subdir) if subdir else ""
     key = (module_name, src, filename, normalized_subdir)
     logger = _loggers.get(key)
     if logger is not None:
@@ -75,12 +82,11 @@ def get_logger(
                 logger.removeHandler(existing)
                 existing.close()
         logger.setLevel(logging.INFO)
-        if src:
-            log_dir = _DATA_SOURCES_ROOT / src
-        else:
-            log_dir = _INFERENCE_ROOT / module_name
+        primary_component = _sanitize_component(src or module_name)
+        log_dir = _LOG_ROOT / f"log_{primary_component}"
         if normalized_subdir:
             log_dir = log_dir / normalized_subdir
+        _LOG_ROOT.mkdir(parents=True, exist_ok=True)
         log_dir.mkdir(parents=True, exist_ok=True)
         handler = TimedRotatingFileHandler(
             str(log_dir / filename), when="D", interval=1, backupCount=7

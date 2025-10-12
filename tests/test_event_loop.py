@@ -46,6 +46,14 @@ cv2_stub.destroyAllWindows = lambda: None
 import app
 
 
+def _log_dir_for(identifier: str) -> Path:
+    sanitized = re.sub(r"[^\w.-]+", "_", identifier.strip())
+    sanitized = sanitized.strip("._")
+    if not sanitized:
+        sanitized = "default"
+    return Path("logs") / f"log_{sanitized}"
+
+
 async def ticker(duration: float = 0.5, interval: float = 0.01) -> int:
     count = 0
     end = time.monotonic() + duration
@@ -382,8 +390,8 @@ def test_aggregated_roi_logs_separate_files_per_source():
 
     logger_one = None
     logger_two = None
-    log_file_one = Path("data_sources") / source_one / "custom.log"
-    log_file_two = Path("data_sources") / source_two / "custom.log"
+    log_file_one = _log_dir_for(source_one) / "custom.log"
+    log_file_two = _log_dir_for(source_two) / "custom.log"
 
     try:
         logger_one = logger_utils.get_logger("aggregated_roi", source_one)
@@ -449,7 +457,7 @@ def test_mqtt_logs_written_per_source_roi():
 
     source_name = f"mqtt-source-{uuid.uuid4().hex}"
     roi_name = "ทดสอบ MQTT ROI/001"
-    log_dir = Path("data_sources") / source_name / "mqtt"
+    log_dir = _log_dir_for(source_name) / "mqtt"
 
     if log_dir.exists():
         shutil.rmtree(log_dir)
@@ -493,7 +501,7 @@ def test_publish_roi_to_mqtt_logs_successful_publish(monkeypatch):
     source_name = f"mqtt-source-{uuid.uuid4().hex}"
     roi_name = "ROI MQTT ทดสอบ/002"
     config_name = f"cfg-{uuid.uuid4().hex}"
-    log_dir = Path("data_sources") / source_name / "mqtt"
+    log_dir = _log_dir_for(source_name) / "mqtt"
 
     if log_dir.exists():
         shutil.rmtree(log_dir)
