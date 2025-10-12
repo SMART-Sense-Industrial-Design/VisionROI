@@ -647,11 +647,22 @@ class RapidOCR(BaseOCR):
     def __init__(self) -> None:
         super().__init__()
 
+    def _get_reader(self):
+        """คืน callable สำหรับเรียก RapidOCR reader.
+
+        เมธอดนี้ถูกแยกออกมาเพื่อให้เทสหรือโค้ดภายนอกสามารถ monkeypatch
+        เพื่อใส่ reader จำลองได้ โดยปกติจะเดเลเกตไปที่ตัวรันเนอร์จริง
+        (_run_reader) ซึ่งดูแล thread pool ให้พร้อมใช้งาน
+        """
+
+        return _run_reader
+
     def _run_ocr(self, frame, roi_id, save: bool, source: str) -> str:
         text = ""
         try:
             frame = _prepare_frame_for_reader(frame)
-            result = _normalise_reader_output(_run_reader(frame))
+            reader = self._get_reader()
+            result = _normalise_reader_output(reader(frame))
             text = _extract_text(result)
         except Exception as e:
             self.logger.exception(
