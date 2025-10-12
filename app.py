@@ -74,6 +74,8 @@ _stream_disconnect_sent: dict[tuple[str, int], float] = {}
 recent_notifications: list[dict[str, Any]] = []
 MAX_RECENT_NOTIFICATIONS = 200
 
+latest_source_queue_status: dict[str, dict[str, Any]] = {}
+
 MQTT_CONFIG_FILE = "mqtt_configs.json"
 mqtt_configs: dict[str, dict[str, Any]] = {}
 mqtt_config_lock: asyncio.Lock | None = None
@@ -614,6 +616,7 @@ def build_dashboard_payload() -> dict[str, Any]:
     known_ids |= set(inference_tasks)
     known_ids |= set(roi_tasks)
     cameras: list[dict[str, Any]] = []
+    camera_runtime_stats: dict[str, dict[str, Any]] = {}
     group_accumulator: dict[str, dict[str, Any]] = {}
     page_jobs: list[dict[str, Any]] = []
     running_count = 0
@@ -634,6 +637,11 @@ def build_dashboard_payload() -> dict[str, Any]:
     max_actual_samples = 10
     recent_frame_timestamps: dict[str, deque[float]] = {}
     actual_fps_cache: dict[str, float | None] = {}
+    queue_state_snapshot = {
+        str(key): dict(value)
+        for key, value in latest_source_queue_status.items()
+        if isinstance(value, dict)
+    }
 
     def _record_frame_timestamp(identifier: str | None, timestamp: float) -> None:
         if not identifier or timestamp <= 0:
@@ -1091,6 +1099,7 @@ def build_dashboard_payload() -> dict[str, Any]:
             "interval": interval,
             "fps": display_fps,
             "target_fps": target_fps,
+            "actual_fps": actual_fps,
             "status": status,
             "last_output": last_result,
             "last_activity": last_activity_iso,
@@ -1104,6 +1113,16 @@ def build_dashboard_payload() -> dict[str, Any]:
             else None,
         }
         cameras.append(camera_entry)
+
+        stat_entry = {
+            "fps": display_fps,
+            "target_fps": target_fps,
+            "actual_fps": actual_fps,
+            "interval": interval,
+        }
+        camera_runtime_stats[str(cam_id)] = stat_entry
+        if normalized_cam_id and normalized_cam_id != str(cam_id):
+            camera_runtime_stats[normalized_cam_id] = dict(stat_entry)
 
         group_key = active_group or "ไม่ระบุกลุ่ม"
         group_entry = group_accumulator.setdefault(
@@ -1375,23 +1394,48 @@ def build_dashboard_payload() -> dict[str, Any]:
             _clean_optional_str(cam_id)
         )
         if frame_snapshot:
-            source_run_entries.append(
-                {
-                    "cam_id": str(cam_id),
-                    "display_name": info.get("display_name") or str(cam_id),
-                    "group": info.get("group"),
-                    "source": frame_snapshot.get("source") or info.get("source"),
-                    "timestamp": frame_snapshot.get("timestamp"),
-                    "timestamp_epoch": frame_snapshot.get("timestamp_epoch"),
-                    "roi_count": frame_snapshot.get("roi_count"),
-                    "modules": frame_snapshot.get("modules", []),
-                    "frame_duration": frame_snapshot.get("frame_duration"),
-                    "total_duration": frame_snapshot.get("total_duration"),
-                    "fastest": frame_snapshot.get("fastest"),
-                    "slowest": frame_snapshot.get("slowest"),
-                    "interval": info.get("interval"),
-                }
+            run_entry: dict[str, Any] = {
+                "cam_id": str(cam_id),
+                "display_name": info.get("display_name") or str(cam_id),
+                "group": info.get("group"),
+                "source": frame_snapshot.get("source") or info.get("source"),
+                "timestamp": frame_snapshot.get("timestamp"),
+                "timestamp_epoch": frame_snapshot.get("timestamp_epoch"),
+                "roi_count": frame_snapshot.get("roi_count"),
+                "modules": frame_snapshot.get("modules", []),
+                "frame_duration": frame_snapshot.get("frame_duration"),
+                "total_duration": frame_snapshot.get("total_duration"),
+                "fastest": frame_snapshot.get("fastest"),
+                "slowest": frame_snapshot.get("slowest"),
+                "interval": info.get("interval"),
+                "latency_latest": latest_duration_val,
+                "latency_average": average_duration,
+                "latency_min": perf.get("min"),
+                "latency_max": perf.get("max"),
+                "latency_samples": sample_count,
+            }
+
+            cam_key = str(cam_id)
+            clean_key = _clean_optional_str(cam_id)
+            stats_entry = (
+                camera_runtime_stats.get(cam_key)
+                or (clean_key and camera_runtime_stats.get(clean_key))
             )
+            if stats_entry:
+                run_entry["fps"] = stats_entry.get("fps")
+                run_entry["actual_fps"] = stats_entry.get("actual_fps")
+                run_entry["target_fps"] = stats_entry.get("target_fps")
+                if run_entry.get("interval") is None and stats_entry.get("interval") is not None:
+                    run_entry["interval"] = stats_entry.get("interval")
+
+            queue_entry = (
+                queue_state_snapshot.get(cam_key)
+                or (clean_key and queue_state_snapshot.get(clean_key))
+            )
+            if queue_entry:
+                run_entry["queue"] = dict(queue_entry)
+
+            source_run_entries.append(run_entry)
 
     source_run_entries.sort(
         key=lambda item: (
@@ -1746,6 +1790,58 @@ async def run_inference_loop(cam_id: str):
     pending_extensions: dict[tuple[str, float], int] = {}
     pending_roi_start: dict[tuple[str, float], dict[str | int, float]] = {}
 
+    def update_queue_state_for_camera(camera_identifier: str | None) -> None:
+        if not camera_identifier:
+            return
+        entries: list[tuple[float, int, int]] = []
+        for key, expected in pending_expected.items():
+            key_cam, frame_time = key
+            if key_cam != camera_identifier:
+                continue
+            try:
+                expected_int = int(expected or 0)
+            except (TypeError, ValueError):
+                expected_int = 0
+            completed = len(pending_results.get(key, {}))
+            try:
+                frame_time_val = float(frame_time)
+            except (TypeError, ValueError):
+                frame_time_val = 0.0
+            entries.append((frame_time_val, expected_int, completed))
+
+        total_expected = sum(item[1] for item in entries)
+        total_completed = sum(item[2] for item in entries)
+        pending_remaining = max(total_expected - total_completed, 0)
+        inflight_frames = len(entries)
+        latest_epoch: float | None = None
+        for frame_time_val, _, _ in entries:
+            if not isinstance(frame_time_val, (int, float)):
+                continue
+            if latest_epoch is None or frame_time_val > latest_epoch:
+                latest_epoch = float(frame_time_val)
+
+        state = "idle"
+        if pending_remaining > 0:
+            state = "processing"
+            if pending_remaining > MAX_WORKERS:
+                state = "backlog"
+
+        snapshot: dict[str, Any] = {
+            "cam_id": camera_identifier,
+            "pending": int(pending_remaining),
+            "expected": int(total_expected),
+            "completed": int(total_completed),
+            "inflight_frames": int(inflight_frames),
+            "state": state,
+            "last_updated": datetime.utcnow().isoformat() + "Z",
+        }
+        if latest_epoch is not None and latest_epoch > 0:
+            try:
+                snapshot["latest_frame_time"] = datetime.fromtimestamp(latest_epoch).isoformat()
+            except Exception:
+                snapshot["latest_frame_time"] = latest_epoch
+        latest_source_queue_status[camera_identifier] = snapshot
+
     def get_pending_timeout() -> float:
         timeout = inference_result_timeouts.get(cam_id)
         if timeout is None:
@@ -1780,6 +1876,7 @@ async def run_inference_loop(cam_id: str):
                     pending_extensions[key] = pending_extensions.get(key, 0) + 1
                     continue
                 keys.append(key)
+        affected_cams: set[str] = set()
         for key in keys:
             pending_results.pop(key, None)
             pending_expected.pop(key, None)
@@ -1788,6 +1885,9 @@ async def run_inference_loop(cam_id: str):
             pending_context.pop(key, None)
             pending_extensions.pop(key, None)
             pending_roi_start.pop(key, None)
+            affected_cams.add(key[0])
+        for cam_ref in affected_cams:
+            update_queue_state_for_camera(cam_ref)
 
     def flush_pending_result(key: tuple[str, float]) -> None:
         results_map = pending_results.pop(key, None)
@@ -1796,6 +1896,7 @@ async def run_inference_loop(cam_id: str):
         pending_ready.discard(key)
         pending_extensions.pop(key, None)
         pending_roi_start.pop(key, None)
+        update_queue_state_for_camera(key[0])
         if not results_map:
             return
         results_map = dict(results_map)
@@ -2091,6 +2192,7 @@ async def run_inference_loop(cam_id: str):
                         pending_deadlines[pending_key] = (
                             time.time() + get_pending_timeout()
                         )
+                        update_queue_state_for_camera(cam_id)
                         start_map = pending_roi_start.setdefault(
                             pending_key, {}
                         )
@@ -2231,6 +2333,8 @@ async def run_inference_loop(cam_id: str):
                                 ):
                                     flush_pending_result(key)
 
+                                update_queue_state_for_camera(cam_id)
+
                             try:
                                 loop.create_task(process_result())
                             except RuntimeError:
@@ -2306,6 +2410,7 @@ async def run_inference_loop(cam_id: str):
         pending_context.clear()
         pending_extensions.clear()
         pending_roi_start.clear()
+        update_queue_state_for_camera(cam_id)
         for mod_name, (module, _, _, _) in module_cache.items():
             if module is not None:
                 with contextlib.suppress(Exception):
