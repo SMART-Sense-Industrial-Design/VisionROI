@@ -612,10 +612,12 @@ def _run_reader(frame):
         ) from exc
 
 
+
 def _run_ocr_async(frame, roi_id, save, source) -> str:
     try:
         frame = _prepare_frame_for_reader(frame)
         result = _normalise_reader_output(_run_reader(frame))
+
         text = _extract_text(result)
 
         logger.info(
