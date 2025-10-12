@@ -145,7 +145,6 @@ function updateSummary(summary = {}) {
   setMetric('metric-fps', summary.average_fps ?? 0, 2);
   setMetric('metric-groups', summary.total_groups ?? 0);
   setMetric('metric-pages', summary.page_jobs ?? 0);
-  setMetric('metric-performance-fps', summary.average_fps ?? 0, 2);
 
   const total = summary.total_cameras ?? 0;
   const online = summary.online_cameras ?? 0;
@@ -178,12 +177,6 @@ function updateSummary(summary = {}) {
   setElementText('chip-group-running', runningGroups);
   setElementText('chip-camera-running', running);
   setElementText('chip-page-running', pageJobsRunning);
-  setElementText('metric-performance-latency', formatSeconds(latencyAverage));
-  setElementText('metric-performance-latency-p95', formatSeconds(latencyP95));
-  setElementText('metric-performance-latency-samples', latencySamples);
-  setElementText('metric-performance-queue', queueSize);
-  setElementText('metric-performance-queue-max', queueCapacity);
-  setElementText('metric-performance-queue-util', queueCapacity ? queueUtilization.toFixed(0) : '0');
 }
 
 function formatSeconds(value) {
@@ -310,7 +303,7 @@ function createModuleBadge(name) {
   return badge;
 }
 
-function createRoiRunStat(label, value) {
+function createRoiRunStat(label, value, options = {}) {
   const wrapper = document.createElement('div');
   wrapper.className = 'roi-run-card__stat';
 
@@ -321,17 +314,108 @@ function createRoiRunStat(label, value) {
 
   const valueEl = document.createElement('p');
   valueEl.className = 'roi-run-card__stat-value';
+  const { decimals, valueClass, meta } = options ?? {};
   if (typeof value === 'string') {
     valueEl.textContent = value;
   } else if (value === null || value === undefined) {
     valueEl.textContent = '-';
   } else {
     const numeric = Number(value);
-    valueEl.textContent = Number.isFinite(numeric) ? numeric.toString() : '-';
+    if (Number.isFinite(numeric)) {
+      if (Number.isInteger(decimals)) {
+        valueEl.textContent = numeric.toFixed(decimals);
+      } else {
+        valueEl.textContent = numeric.toString();
+      }
+    } else {
+      valueEl.textContent = '-';
+    }
+  }
+  if (valueClass) {
+    valueEl.classList.add(valueClass);
   }
   wrapper.appendChild(valueEl);
 
+  if (meta) {
+    const metaEl = document.createElement('p');
+    metaEl.className = 'roi-run-card__stat-meta';
+    metaEl.textContent = meta;
+    wrapper.appendChild(metaEl);
+  }
+
   return wrapper;
+}
+
+function normalizeQueueState(queue) {
+  if (!queue || typeof queue !== 'object') {
+    return null;
+  }
+  const stateRaw = queue.state ?? queue.status ?? 'unknown';
+  const state = typeof stateRaw === 'string' ? stateRaw.toLowerCase() : 'unknown';
+  const pending = Number(queue.pending);
+  const expected = Number(queue.expected);
+  const inflight = Number(queue.inflight_frames ?? queue.frames ?? queue.inflight);
+  return {
+    state,
+    pending: Number.isFinite(pending) ? pending : null,
+    expected: Number.isFinite(expected) ? expected : null,
+    inflight: Number.isFinite(inflight) ? inflight : null,
+    lastUpdated: queue.last_updated ?? queue.lastUpdated ?? null,
+  };
+}
+
+function getQueueStateLabel(state) {
+  switch (state) {
+    case 'idle':
+      return 'พร้อมทำงาน';
+    case 'processing':
+      return 'กำลังประมวลผล';
+    case 'backlog':
+      return 'คิวหนาแน่น';
+    default:
+      return 'ไม่ทราบ';
+  }
+}
+
+function getQueueStateClass(state) {
+  if (state === 'idle') {
+    return 'roi-run-card__stat-value--queue-idle';
+  }
+  if (state === 'processing') {
+    return 'roi-run-card__stat-value--queue-processing';
+  }
+  if (state === 'backlog') {
+    return 'roi-run-card__stat-value--queue-backlog';
+  }
+  return 'roi-run-card__stat-value--queue-unknown';
+}
+
+function buildQueueStat(queue) {
+  const normalized = normalizeQueueState(queue);
+  if (!normalized) {
+    return null;
+  }
+
+  const metaParts = [];
+  if (normalized.pending !== null && normalized.expected !== null) {
+    metaParts.push(`รอ ${normalized.pending}/${normalized.expected} งาน`);
+  } else if (normalized.pending !== null) {
+    metaParts.push(`รอ ${normalized.pending} งาน`);
+  }
+  if (normalized.inflight && normalized.inflight > 0) {
+    metaParts.push(`${normalized.inflight} เฟรมค้าง`);
+  }
+  if (normalized.lastUpdated) {
+    const relative = formatRelativeTime(normalized.lastUpdated);
+    if (relative) {
+      metaParts.push(`อัปเดต ${relative}`);
+    }
+  }
+
+  return createRoiRunStat('สถานะคิว', getQueueStateLabel(normalized.state), {
+    meta: metaParts.join(' · ') || null,
+    valueClass: getQueueStateClass(normalized.state),
+  });
 }
 
 function createRoiRunExtrema(label, entry, type) {
@@ -429,13 +513,52 @@ function renderSourceRunList(runs = []) {
     stats.appendChild(createRoiRunStat('จำนวน ROI', run?.roi_count));
     const moduleCount = Array.isArray(run?.modules) ? run.modules.length : 0;
     stats.appendChild(createRoiRunStat('จำนวนโมดูล', moduleCount));
-    const runDurationSeconds = Number(
+    const fpsValue = Number(
+      run?.actual_fps !== undefined && run?.actual_fps !== null
+        ? run.actual_fps
+        : run?.fps
+    );
+    if (Number.isFinite(fpsValue)) {
+      const fpsMetaParts = [];
+      if (Number.isFinite(Number(run?.target_fps))) {
+        fpsMetaParts.push(`เป้าหมาย ${Number(run.target_fps).toFixed(2)}`);
+      }
+      if (Number.isFinite(Number(run?.interval))) {
+        fpsMetaParts.push(`Interval ${formatSeconds(run.interval)}`);
+      }
+      stats.appendChild(
+        createRoiRunStat('FPS ล่าสุด', fpsValue, {
+          decimals: 2,
+          meta: fpsMetaParts.join(' · ') || null,
+        }),
+      );
+    }
+
+    const latencySeconds = Number(
       run?.frame_duration !== undefined && run?.frame_duration !== null
         ? run.frame_duration
-        : run?.total_duration
+        : run?.latency_latest !== undefined && run?.latency_latest !== null
+          ? run.latency_latest
+          : run?.total_duration
     );
-    if (Number.isFinite(runDurationSeconds)) {
-      stats.appendChild(createRoiRunStat('เวลารอบนี้', formatSeconds(runDurationSeconds)));
+    if (Number.isFinite(latencySeconds)) {
+      const latencyMetaParts = [];
+      if (Number.isFinite(Number(run?.latency_average))) {
+        latencyMetaParts.push(`เฉลี่ย ${formatSeconds(run.latency_average)}`);
+      }
+      if (Number.isFinite(Number(run?.latency_max))) {
+        latencyMetaParts.push(`สูงสุด ${formatSeconds(run.latency_max)}`);
+      }
+      stats.appendChild(
+        createRoiRunStat('Latency รอบนี้', formatSeconds(latencySeconds), {
+          meta: latencyMetaParts.join(' · ') || null,
+        }),
+      );
+    }
+
+    const queueStatEl = buildQueueStat(run?.queue);
+    if (queueStatEl) {
+      stats.appendChild(queueStatEl);
     }
     card.appendChild(stats);
 

@@ -510,6 +510,28 @@ main.app-main {
   color: var(--color-primary);
 }
 
+.roi-run-card__stat-meta {
+  margin: 0;
+  font-size: 0.78rem;
+  color: rgba(15, 23, 42, 0.58);
+}
+
+.roi-run-card__stat-value--queue-idle {
+  color: #16a34a;
+}
+
+.roi-run-card__stat-value--queue-processing {
+  color: #f59e0b;
+}
+
+.roi-run-card__stat-value--queue-backlog {
+  color: #dc2626;
+}
+
+.roi-run-card__stat-value--queue-unknown {
+  color: rgba(15, 23, 42, 0.7);
+}
+
 .roi-run-card__modules {
   margin-top: 0.25rem;
 }
