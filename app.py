@@ -32,7 +32,11 @@ from datetime import datetime
 from typing import Callable, Awaitable, Any, TypeVar
 from concurrent.futures import ThreadPoolExecutor
 from queue import Queue, Empty
-from src.utils.logger import get_logger
+from src.utils.logger import (
+    get_logger,
+    resolve_log_path,
+    AGGREGATED_ROI_LOG_NAME,
+)
 from src.utils.memory import malloc_trim
 try:
     from websockets.exceptions import ConnectionClosed
@@ -1931,9 +1935,13 @@ async def run_inference_loop(cam_id: str):
             payload_dict['source'] = source_name
         try:
             if source_name:
-                agg_logger = get_logger('aggregated_roi', source_name)
+                agg_logger = get_logger(
+                    'aggregated_roi', source_name, log_name=AGGREGATED_ROI_LOG_NAME
+                )
             else:
-                agg_logger = get_logger('aggregated_roi')
+                agg_logger = get_logger(
+                    'aggregated_roi', log_name=AGGREGATED_ROI_LOG_NAME
+                )
             if agg_logger is not None:
                 sanitized_results: list[dict[str, Any]] = []
                 for res in results_list:
@@ -3234,11 +3242,18 @@ async def read_log():
     if not source:
         return jsonify({"lines": []})
     source = os.path.basename(source.strip())
-    log_path = os.path.realpath(os.path.join(ALLOWED_ROI_DIR, source, "custom.log"))
-    if not _safe_in_base(ALLOWED_ROI_DIR, log_path) or not os.path.exists(log_path):
+    log_path = resolve_log_path(
+        "aggregated_roi", source, log_name=AGGREGATED_ROI_LOG_NAME
+    ).resolve()
+    logs_root = Path("logs").resolve()
+    try:
+        log_path.relative_to(logs_root)
+    except ValueError:
+        return jsonify({"lines": []})
+    if not log_path.exists():
         return jsonify({"lines": []})
     try:
-        with open(log_path, "r") as f:
+        with open(log_path, "r", encoding="utf-8") as f:
             content = f.readlines()[-lines:]
     except Exception:
         content = []

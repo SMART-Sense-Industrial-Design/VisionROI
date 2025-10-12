@@ -10,6 +10,8 @@ _formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
 _loggers: dict[tuple[str, str, str, str], logging.Logger] = {}
 _lock = threading.Lock()
 
+AGGREGATED_ROI_LOG_NAME = "aggregated_roi.log"
+
 _SUPPRESS_INFO_MODULES = {
     "easy_ocr",
     "rapid_ocr",
@@ -32,8 +34,15 @@ class _DropOcrResultFilter(logging.Filter):
                 return False
         return True
 
-_DATA_SOURCES_ROOT = Path(__file__).resolve().parents[2] / "data_sources"
-_INFERENCE_ROOT = Path(__file__).resolve().parents[2] / "inference_modules"
+_LOG_ROOT = Path(__file__).resolve().parents[2] / "logs"
+
+
+def _sanitize_component(name: str | None) -> str:
+    if not name:
+        return "default"
+    sanitized = re.sub(r"[^\w.-]+", "_", name.strip())
+    sanitized = sanitized.strip("._")
+    return sanitized or "default"
 
 
 def _normalize_log_filename(name: str | None) -> str:
@@ -48,6 +57,23 @@ def _normalize_log_filename(name: str | None) -> str:
     return sanitized
 
 
+def resolve_log_path(
+    module_name: str,
+    source: str | None = None,
+    log_name: str | None = None,
+    subdir: str | None = None,
+) -> Path:
+    """คืนพาธเต็มของไฟล์ log ตามพารามิเตอร์เดียวกับ ``get_logger``"""
+
+    filename = _normalize_log_filename(log_name)
+    normalized_subdir = _sanitize_component(subdir) if subdir else ""
+    primary_component = _sanitize_component(source or module_name)
+    log_dir = _LOG_ROOT / f"log_{primary_component}"
+    if normalized_subdir:
+        log_dir = log_dir / normalized_subdir
+    return log_dir / filename
+
+
 def get_logger(
     module_name: str,
     source: str | None = None,
@@ -57,7 +83,7 @@ def get_logger(
     """คืน logger ที่ตั้งค่า handler ตาม module และ source"""
     src = source or ""
     filename = _normalize_log_filename(log_name)
-    normalized_subdir = (subdir or "").strip().strip("/")
+    normalized_subdir = _sanitize_component(subdir) if subdir else ""
     key = (module_name, src, filename, normalized_subdir)
     logger = _loggers.get(key)
     if logger is not None:
@@ -75,15 +101,11 @@ def get_logger(
                 logger.removeHandler(existing)
                 existing.close()
         logger.setLevel(logging.INFO)
-        if src:
-            log_dir = _DATA_SOURCES_ROOT / src
-        else:
-            log_dir = _INFERENCE_ROOT / module_name
-        if normalized_subdir:
-            log_dir = log_dir / normalized_subdir
-        log_dir.mkdir(parents=True, exist_ok=True)
+        log_path = resolve_log_path(module_name, src or None, log_name, subdir)
+        _LOG_ROOT.mkdir(parents=True, exist_ok=True)
+        log_path.parent.mkdir(parents=True, exist_ok=True)
         handler = TimedRotatingFileHandler(
-            str(log_dir / filename), when="D", interval=1, backupCount=7
+            str(log_path), when="D", interval=1, backupCount=7
         )
         handler.setFormatter(_formatter)
         if module_name in _SUPPRESS_INFO_MODULES:
