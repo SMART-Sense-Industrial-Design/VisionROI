@@ -10,6 +10,8 @@ _formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
 _loggers: dict[tuple[str, str, str, str], logging.Logger] = {}
 _lock = threading.Lock()
 
+AGGREGATED_ROI_LOG_NAME = "aggregated_roi.log"
+
 _SUPPRESS_INFO_MODULES = {
     "easy_ocr",
     "rapid_ocr",
@@ -55,6 +57,23 @@ def _normalize_log_filename(name: str | None) -> str:
     return sanitized
 
 
+def resolve_log_path(
+    module_name: str,
+    source: str | None = None,
+    log_name: str | None = None,
+    subdir: str | None = None,
+) -> Path:
+    """คืนพาธเต็มของไฟล์ log ตามพารามิเตอร์เดียวกับ ``get_logger``"""
+
+    filename = _normalize_log_filename(log_name)
+    normalized_subdir = _sanitize_component(subdir) if subdir else ""
+    primary_component = _sanitize_component(source or module_name)
+    log_dir = _LOG_ROOT / f"log_{primary_component}"
+    if normalized_subdir:
+        log_dir = log_dir / normalized_subdir
+    return log_dir / filename
+
+
 def get_logger(
     module_name: str,
     source: str | None = None,
@@ -82,14 +101,11 @@ def get_logger(
                 logger.removeHandler(existing)
                 existing.close()
         logger.setLevel(logging.INFO)
-        primary_component = _sanitize_component(src or module_name)
-        log_dir = _LOG_ROOT / f"log_{primary_component}"
-        if normalized_subdir:
-            log_dir = log_dir / normalized_subdir
+        log_path = resolve_log_path(module_name, src or None, log_name, subdir)
         _LOG_ROOT.mkdir(parents=True, exist_ok=True)
-        log_dir.mkdir(parents=True, exist_ok=True)
+        log_path.parent.mkdir(parents=True, exist_ok=True)
         handler = TimedRotatingFileHandler(
-            str(log_dir / filename), when="D", interval=1, backupCount=7
+            str(log_path), when="D", interval=1, backupCount=7
         )
         handler.setFormatter(_formatter)
         if module_name in _SUPPRESS_INFO_MODULES:

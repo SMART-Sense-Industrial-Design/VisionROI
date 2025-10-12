@@ -390,12 +390,24 @@ def test_aggregated_roi_logs_separate_files_per_source():
 
     logger_one = None
     logger_two = None
-    log_file_one = _log_dir_for(source_one) / "custom.log"
-    log_file_two = _log_dir_for(source_two) / "custom.log"
+    log_file_one = logger_utils.resolve_log_path(
+        "aggregated_roi", source_one, log_name=logger_utils.AGGREGATED_ROI_LOG_NAME
+    )
+    log_file_two = logger_utils.resolve_log_path(
+        "aggregated_roi", source_two, log_name=logger_utils.AGGREGATED_ROI_LOG_NAME
+    )
 
     try:
-        logger_one = logger_utils.get_logger("aggregated_roi", source_one)
-        logger_two = logger_utils.get_logger("aggregated_roi", source_two)
+        logger_one = logger_utils.get_logger(
+            "aggregated_roi",
+            source_one,
+            log_name=logger_utils.AGGREGATED_ROI_LOG_NAME,
+        )
+        logger_two = logger_utils.get_logger(
+            "aggregated_roi",
+            source_two,
+            log_name=logger_utils.AGGREGATED_ROI_LOG_NAME,
+        )
 
         entry_one = {
             "frame_time": 1.0,
@@ -443,7 +455,11 @@ def test_aggregated_roi_logs_separate_files_per_source():
             keys_to_remove = [
                 key
                 for key in list(logger_utils._loggers)
-                if key[0] == "aggregated_roi" and key[1] == (src_name or "")
+                if (
+                    key[0] == "aggregated_roi"
+                    and key[1] == (src_name or "")
+                    and key[2] == logger_utils.AGGREGATED_ROI_LOG_NAME
+                )
             ]
             for key in keys_to_remove:
                 logger_utils._loggers.pop(key, None)

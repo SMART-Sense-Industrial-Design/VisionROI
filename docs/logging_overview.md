@@ -8,12 +8,12 @@
 
 | หมวด log | โฟลเดอร์ปลายทาง | รูปแบบไฟล์/หมายเหตุ | คำอธิบาย |
 | --- | --- | --- | --- |
-| **Aggregated ROI** | `logs/log_<source>/` | `custom.log` (แยกตาม source) | บันทึกผลรวมการตรวจจับ ROI รายกล้องจากงาน background ของ `aggregated_roi`. |
+| **Aggregated ROI** | `logs/log_<source>/` | `aggregated_roi.log` (แยกตาม source) | บันทึกผลรวมการตรวจจับ ROI รายกล้องจากงาน background ของ `aggregated_roi` โดยไม่ปนกับ log ของโมดูล inference. |
 | **MQTT** | `logs/log_<source>/mqtt/` | `log_<roi>.log` ตามชื่อ ROI | จัดเก็บผลการเผยแพร่ข้อความ MQTT ของแต่ละ ROI เพื่อไล่ปัญหาได้ละเอียดถึงระดับพื้นที่สนใจ. |
 | **Inference Queue** | `logs/log_inference_queue/` | `custom.log` | เตือนเมื่อคิวประมวลผลเต็ม ช้า หรือมีข้อผิดพลาดระหว่างดึงงานเข้า worker. |
 | **Websocket Stream** | `logs/log_websocket_stream/` | `custom.log` | แจ้งเตือนการส่งเฟรมขึ้น WebSocket ล่าช้า หรือหลุดการเชื่อมต่อ. |
 | **Camera Startup** | `logs/log_camera_startup/` | `custom.log` | ใช้ติดตามการ warm-up ของ ffmpeg/avfoundation และเหตุผลที่กล้องเริ่มไม่สำเร็จ. |
 | **Inference Modules** | `logs/log_<source>/` | `custom.log` | โมดูล OCR/YOLO (`rapid_ocr`, `easy_ocr`, `typhoon_ocr`, `light_button`, `yolo`, ฯลฯ) จะบันทึกผลไว้ใต้โฟลเดอร์ของ source เดียวกับกล้อง. |
-| **Fallback/ไม่มี source** | `logs/log_<module>/` | `custom.log` | หากไม่มีการระบุ source จะตกไปที่ชื่อโมดูล เช่น `log_base_ocr`, `log_aggregated_roi`. |
+| **Fallback/ไม่มี source** | `logs/log_<module>/` | `custom.log` หรือชื่อไฟล์ที่ระบุ | หากไม่มีการระบุ source จะตกไปที่ชื่อโมดูล เช่น `log_base_ocr`. หากโมดูลกำหนดชื่อไฟล์เอง (เช่น `aggregated_roi.log`) จะใช้ชื่อนั้น. |
 
 > หมายเหตุ: `_sanitize_component` และ `_normalize_log_filename` จะทำความสะอาดชื่อ source/ROI ให้อยู่ในรูปแบบที่ปลอดภัยต่อระบบไฟล์ โดยแทนที่อักขระพิเศษด้วย `_` และเติมนามสกุล `.log` ให้โดยอัตโนมัติหากไม่ได้ระบุไว้
