@@ -41,6 +41,9 @@ _data_sources_root = Path(__file__).resolve().parents[2] / "data_sources"
 
 _reader = None
 _reader_lock = threading.Lock()
+# RapidOCR ยังไม่ยืนยันความเป็น thread-safe ของ reader
+# จึงต้องล็อกระหว่างการเรียกใช้งานจริงเพื่อให้ผลลัพธ์นิ่ง
+_reader_infer_lock = threading.Lock()
 
 last_ocr_times: dict = {}
 last_ocr_results: dict = {}
@@ -504,10 +507,29 @@ def _extract_text(ocr_result: Any) -> str:
 # ===========
 # OCR runners
 # ===========
+def _prepare_frame_for_reader(frame):
+    """แปลงภาพให้พร้อมสำหรับ RapidOCR reader."""
+    if np is not None and hasattr(frame, "flags") and hasattr(frame, "ndim"):
+        # RapidOCR คาดหวัง array ที่ contiguous เสมอ
+        try:
+            if not frame.flags.c_contiguous:
+                frame = np.ascontiguousarray(frame)
+        except AttributeError:
+            pass
+    return frame
+
+
+def _run_reader(reader, frame):
+    # ป้องกัน race condition ระหว่างหลายเธรด
+    with _reader_infer_lock:
+        return reader(frame)
+
+
 def _run_ocr_async(frame, roi_id, save, source) -> str:
     try:
         reader = _get_global_reader()
-        result = _normalise_reader_output(reader(frame))
+        frame = _prepare_frame_for_reader(frame)
+        result = _normalise_reader_output(_run_reader(reader, frame))
         text = _extract_text(result)
 
         logger.info(
@@ -561,7 +583,8 @@ class RapidOCR(BaseOCR):
 
         if reader is not None:
             try:
-                result = _normalise_reader_output(reader(frame))
+                frame = _prepare_frame_for_reader(frame)
+                result = _normalise_reader_output(_run_reader(reader, frame))
                 text = _extract_text(result)
             except Exception as e:
                 self.logger.exception(

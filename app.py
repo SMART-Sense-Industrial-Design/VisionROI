@@ -2048,6 +2048,9 @@ async def run_inference_loop(cam_id: str):
             dst = np.array([[0, 0], [max_w - 1, 0], [max_w - 1, max_h - 1], [0, max_h - 1]], dtype=np.float32)
             matrix = cv2.getPerspectiveTransform(src, dst)
             roi = await asyncio.to_thread(cv2.warpPerspective, frame, matrix, (max_w, max_h))
+            if hasattr(roi, "copy"):
+                # ป้องกันไม่ให้ ROI แชร์บัฟเฟอร์เดียวกับเฟรมต้นฉบับ
+                roi = roi.copy()
             template = r.get('_template')
             if template is not None:
                 try:
@@ -2169,6 +2172,9 @@ async def run_inference_loop(cam_id: str):
                         dst = np.array([[0, 0], [max_w - 1, 0], [max_w - 1, max_h - 1], [0, max_h - 1]], dtype=np.float32)
                         matrix = cv2.getPerspectiveTransform(src, dst)
                         roi = await asyncio.to_thread(cv2.warpPerspective, frame, matrix, (max_w, max_h))
+                        if hasattr(roi, "copy"):
+                            # ทำสำเนา ROI ให้แยกจากเฟรมปัจจุบันก่อนส่งเข้าโมดูล OCR
+                            roi = roi.copy()
                         roi_identifier = r.get('id', i)
                         args = [roi, r.get('id', str(i)), save_flag]
                         if takes_source:
