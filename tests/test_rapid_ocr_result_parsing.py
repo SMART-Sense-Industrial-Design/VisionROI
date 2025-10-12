@@ -1,4 +1,5 @@
 import numpy as np
+import inference_modules.rapid_ocr.custom as custom
 from inference_modules.rapid_ocr.custom import RapidOCR
 
 
@@ -62,3 +63,36 @@ def test_rapid_ocr_removes_scores(monkeypatch):
     frame = np.zeros((10, 10, 3), dtype=np.uint8)
     ocr.process(frame, roi_id='4', save=False, source='', interval=0)
     assert ocr.last_ocr_results['4'] == 'TEXT123 XYZ'
+
+
+def test_prepare_frame_copies_numpy_views():
+    base = np.zeros((12, 12, 3), dtype=np.uint8)
+    view = base[:, :6]
+
+    assert view.base is base
+
+    prepared = custom._prepare_frame_for_reader(view)
+
+    # ต้องได้สำเนาใหม่ที่ไม่แชร์บัฟเฟอร์เดียวกับเฟรมต้นฉบับ
+    assert prepared.base is None
+    assert prepared.flags.c_contiguous
+
+    base[:, :] = 255
+    assert not np.array_equal(prepared, base[:, :6])
+
+
+def test_prepare_frame_copies_arrays_without_own_data():
+    buf = bytearray(12 * 12 * 3)
+    view = np.frombuffer(buf, dtype=np.uint8).reshape(12, 12, 3)
+
+    assert view.base is not None
+    assert not view.flags.owndata
+
+    prepared = custom._prepare_frame_for_reader(view)
+
+    assert prepared.base is None
+    assert prepared.flags.owndata
+    assert prepared.flags.c_contiguous
+
+    buf[:] = b"\xff" * len(buf)
+    assert not np.array_equal(prepared, view)
