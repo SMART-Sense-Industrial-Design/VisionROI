@@ -13,7 +13,7 @@
 </head>
 <body class="app-body">
   <nav class="navbar navbar-expand-lg navbar-dark glass-nav fixed-top">
-    <div class="container-xxl">
+    <div class="container-xxl d-flex align-items-center justify-content-between">
       <a class="navbar-brand" href="/home">
         <span class="brand-icon shadow-sm">
           <img src="{{ url_for('static', filename='images/logo.jpg') }}" class="logo" alt="VisionROI logo">
@@ -23,73 +23,122 @@
           <span class="brand-subtitle">AI Stream Dashboard</span>
         </span>
       </a>
-      <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav" aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
-        <span class="navbar-toggler-icon"></span>
+      <button class="btn btn-outline-light sidebar-toggle" type="button" aria-label="Toggle menu" aria-expanded="true">
+        <i class="bi bi-list"></i>
       </button>
-      <div class="collapse navbar-collapse" id="navbarNav">
-        <ul class="navbar-nav ms-auto mb-2 mb-lg-0 align-items-lg-center">
-          <li class="nav-item">
-            <a href="/home" class="nav-link" data-bs-toggle="tooltip" title="Home">
-              <i class="bi bi-speedometer2 me-2"></i>
-              <span>Home</span>
-            </a>
-          </li>
-          <li class="nav-item">
-            <a href="/docs" class="nav-link" data-bs-toggle="tooltip" title="Documentation">
-              <i class="bi bi-journal-text me-2"></i>
-              <span>Docs</span>
-            </a>
-          </li>
-          <li class="nav-item">
-            <a href="/create_source" class="nav-link" data-bs-toggle="tooltip" title="Create Source">
-              <i class="bi bi-hdd-network me-2"></i>
-              <span>Source</span>
-            </a>
-          </li>
-          <li class="nav-item">
-            <a href="/create_mqtt" class="nav-link" data-bs-toggle="tooltip" title="MQTT Config">
-              <i class="bi bi-broadcast me-2"></i>
-              <span>MQTT</span>
-            </a>
-          </li>
-          <li class="nav-item">
-            <a href="/roi" class="nav-link" data-bs-toggle="tooltip" title="ROI">
-              <i class="bi bi-bounding-box me-2"></i>
-              <span>ROI</span>
-            </a>
-          </li>
-          <li class="nav-item">
-            <a href="/inference" class="nav-link" data-bs-toggle="tooltip" title="Inference Group">
-              <i class="bi bi-cpu me-2"></i>
-              <span>Inference Group</span>
-            </a>
-          </li>
-          <li class="nav-item">
-            <a href="/inference_page" class="nav-link" data-bs-toggle="tooltip" title="Inference Page">
-              <i class="bi bi-kanban me-2"></i>
-              <span>Inference Page</span>
-            </a>
-          </li>
-        </ul>
-      </div>
     </div>
   </nav>
-  {% include 'partials/alert.html' %}
-  <main id="content" class="app-main">
-    <div class="{% block shell_classes %}app-shell container-xxl{% endblock %}">
-      {% block content %}{% endblock %}
-    </div>
-  </main>
+  <div class="sidebar-overlay" id="sidebarOverlay"></div>
+  <div class="app-layout">
+    <aside class="sidebar" id="sidebarNav" aria-label="Main navigation">
+      <div class="sidebar-header d-flex align-items-center justify-content-between">
+        <span class="sidebar-title">เมนูหลัก</span>
+        <button class="btn btn-icon btn-close-sidebar" type="button" aria-label="Close menu">
+          <i class="bi bi-x-lg"></i>
+        </button>
+      </div>
+      <nav class="sidebar-nav" role="navigation">
+        <a href="/home" class="nav-link" data-bs-toggle="tooltip" title="Home">
+          <i class="bi bi-speedometer2 me-2"></i>
+          <span>Home</span>
+        </a>
+        <a href="/docs" class="nav-link" data-bs-toggle="tooltip" title="Documentation">
+          <i class="bi bi-journal-text me-2"></i>
+          <span>Docs</span>
+        </a>
+        <a href="/create_source" class="nav-link" data-bs-toggle="tooltip" title="Create Source">
+          <i class="bi bi-hdd-network me-2"></i>
+          <span>Source</span>
+        </a>
+        <a href="/create_mqtt" class="nav-link" data-bs-toggle="tooltip" title="MQTT Config">
+          <i class="bi bi-broadcast me-2"></i>
+          <span>MQTT</span>
+        </a>
+        <a href="/roi" class="nav-link" data-bs-toggle="tooltip" title="ROI">
+          <i class="bi bi-bounding-box me-2"></i>
+          <span>ROI</span>
+        </a>
+        <a href="/inference" class="nav-link" data-bs-toggle="tooltip" title="Inference Group">
+          <i class="bi bi-cpu me-2"></i>
+          <span>Inference Group</span>
+        </a>
+        <a href="/inference_page" class="nav-link" data-bs-toggle="tooltip" title="Inference Page">
+          <i class="bi bi-kanban me-2"></i>
+          <span>Inference Page</span>
+        </a>
+      </nav>
+    </aside>
+    <main id="content" class="app-main">
+      {% include 'partials/alert.html' %}
+      <div class="{% block shell_classes %}app-shell container-xxl{% endblock %}">
+        {% block content %}{% endblock %}
+      </div>
+    </main>
+  </div>
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
   <script src="{{ url_for('static', filename='js/bootstrap-init.js') }}"></script>
   <script>
     function setActiveLink(path) {
-      document.querySelectorAll('.navbar-nav .nav-link').forEach(link => {
+      document.querySelectorAll('.sidebar-nav .nav-link').forEach(link => {
         link.classList.toggle('active', link.getAttribute('href') === path);
       });
     }
     window.addEventListener('DOMContentLoaded', () => {
+      const body = document.body;
+      const toggleButtons = document.querySelectorAll('.sidebar-toggle');
+      const closeButton = document.querySelector('.btn-close-sidebar');
+      const overlay = document.getElementById('sidebarOverlay');
+
+      function closeSidebarOnMobile() {
+        body.classList.remove('sidebar-open');
+        updateToggleState(false);
+      }
+
+      function handleToggle() {
+        if (window.innerWidth >= 992) {
+          body.classList.toggle('sidebar-collapsed');
+          updateToggleState(!body.classList.contains('sidebar-collapsed'));
+        } else {
+          const isOpen = body.classList.toggle('sidebar-open');
+          updateToggleState(isOpen);
+        }
+      }
+
+      function updateToggleState(isExpanded) {
+        toggleButtons.forEach(button => {
+          button.setAttribute('aria-expanded', String(isExpanded));
+        });
+      }
+
+      toggleButtons.forEach(button => {
+        button.addEventListener('click', handleToggle);
+      });
+
+      if (closeButton) {
+        closeButton.addEventListener('click', closeSidebarOnMobile);
+      }
+
+      if (overlay) {
+        overlay.addEventListener('click', closeSidebarOnMobile);
+      }
+
+      document.addEventListener('keydown', event => {
+        if (event.key === 'Escape' && body.classList.contains('sidebar-open')) {
+          closeSidebarOnMobile();
+        }
+      });
+
+      window.addEventListener('resize', () => {
+        if (window.innerWidth >= 992) {
+          body.classList.remove('sidebar-open');
+          updateToggleState(!body.classList.contains('sidebar-collapsed'));
+        } else {
+          updateToggleState(body.classList.contains('sidebar-open'));
+        }
+      });
+
       setActiveLink(window.location.pathname);
+      updateToggleState(!body.classList.contains('sidebar-collapsed') && window.innerWidth >= 992);
     });
   </script>
 </body>
