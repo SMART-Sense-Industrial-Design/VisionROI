@@ -13,8 +13,7 @@ import threading
 from pathlib import Path
 import gc
 from numbers import Number
-from queue import LifoQueue, Empty, Full
-from contextlib import contextmanager
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from src.utils.logger import get_logger
 from src.utils.image import save_image_async
 
@@ -41,7 +40,9 @@ logger = logging.getLogger(MODULE_NAME)
 logger.setLevel(logging.INFO)
 _data_sources_root = Path(__file__).resolve().parents[2] / "data_sources"
 
-_reader_pool_lock = threading.Lock()
+_reader_executor_lock = threading.Lock()
+_reader_executor: ThreadPoolExecutor | None = None
+_reader_thread_locals = threading.local()
 
 
 def _resolve_max_readers() -> int:
@@ -78,11 +79,9 @@ def _resolve_acquire_timeout() -> float | None:
 
 
 _max_reader_pool = _resolve_max_readers()
-_reader_pool: LifoQueue[Any] = LifoQueue(maxsize=_max_reader_pool)
-_reader_pool_size = 0
 _reader_acquire_timeout = _resolve_acquire_timeout()
 logger.info(
-    "[RapidOCR] reader pool configured: size=%s, acquire_timeout=%s",
+    "[RapidOCR] executor configured: workers=%s, acquire_timeout=%s",
     _max_reader_pool,
     "infinite" if _reader_acquire_timeout is None else _reader_acquire_timeout,
 )
@@ -454,69 +453,47 @@ def _new_reader_instance() -> Any:
     return reader
 
 
-def _acquire_reader() -> Any:
+def _ensure_reader_executor() -> ThreadPoolExecutor:
     if RapidOCRLib is None:
         raise RuntimeError("rapidocr_onnxruntime library is not installed")
 
-    try:
-        return _reader_pool.get_nowait()
-    except Empty:
-        pass
-
-    with _reader_pool_lock:
-        global _reader_pool_size
-        if _reader_pool_size < _max_reader_pool:
-            reader = _new_reader_instance()
-            _reader_pool_size += 1
-            logger.debug(
-                "[RapidOCR] created new reader instance for pool: %s/%s",
-                _reader_pool_size,
-                _max_reader_pool,
-            )
-            return reader
-
-    try:
-        if _reader_acquire_timeout is None:
-            reader = _reader_pool.get()
-        else:
-            reader = _reader_pool.get(timeout=_reader_acquire_timeout)
-        return reader
-    except Empty as exc:
-        raise TimeoutError(
-            "Timed out waiting for available RapidOCR reader instance"
-        ) from exc
+    global _reader_executor
+    if _reader_executor is None:
+        with _reader_executor_lock:
+            if _reader_executor is None:
+                _reader_executor = ThreadPoolExecutor(
+                    max_workers=_max_reader_pool,
+                    thread_name_prefix="rapidocr",
+                )
+                logger.debug(
+                    "[RapidOCR] ThreadPoolExecutor created with %s workers",
+                    _max_reader_pool,
+                )
+    return _reader_executor
 
 
-def _release_reader(reader: Any) -> None:
+def _get_thread_reader() -> Any:
+    reader = getattr(_reader_thread_locals, "reader", None)
     if reader is None:
-        return
-    try:
-        _reader_pool.put_nowait(reader)
-    except Full:
-        with _reader_pool_lock:
-            global _reader_pool_size
-            _reader_pool_size = max(0, _reader_pool_size - 1)
-        logger.debug("[RapidOCR] dropped reader instance because pool is full")
+        reader = _new_reader_instance()
+        _reader_thread_locals.reader = reader
+        logger.debug("[RapidOCR] created thread-local reader instance")
+    return reader
 
 
-@contextmanager
-def _lease_reader():
-    reader = _acquire_reader()
-    try:
-        yield reader
-    finally:
-        _release_reader(reader)
+def _invoke_reader(frame) -> Any:
+    reader = _get_thread_reader()
+    return reader(frame)
 
 
 def _reset_reader_pool() -> None:
-    with _reader_pool_lock:
-        global _reader_pool_size
-        while True:
-            try:
-                _reader_pool.get_nowait()
-            except Empty:
-                break
-        _reader_pool_size = 0
+    global _reader_executor
+    with _reader_executor_lock:
+        if _reader_executor is not None:
+            _reader_executor.shutdown(wait=True, cancel_futures=True)
+            logger.debug("[RapidOCR] ThreadPoolExecutor shutdown completed")
+            _reader_executor = None
+    # thread-local readers จะถูกเก็บกวาดเมื่อ thread pool ถูก shutdown
 
 
 # ======================
@@ -617,8 +594,19 @@ def _prepare_frame_for_reader(frame):
 
 
 def _run_reader(frame):
-    with _lease_reader() as reader:
-        return reader(frame)
+    executor = _ensure_reader_executor()
+    future = executor.submit(_invoke_reader, frame)
+    try:
+        if _reader_acquire_timeout is None:
+            return future.result()
+        return future.result(timeout=_reader_acquire_timeout)
+    except FuturesTimeoutError as exc:
+        cancelled = future.cancel()
+        if not cancelled:
+            logger.warning("[RapidOCR] OCR task exceeded timeout but could not be cancelled")
+        raise TimeoutError(
+            "Timed out waiting for available RapidOCR worker thread"
+        ) from exc
 
 
 def _run_ocr_async(frame, roi_id, save, source) -> str:
