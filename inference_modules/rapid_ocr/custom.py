@@ -584,12 +584,15 @@ def _extract_text(ocr_result: Any) -> str:
 # ===========
 def _prepare_frame_for_reader(frame):
     """แปลงภาพให้พร้อมสำหรับ RapidOCR reader."""
-    if np is not None and hasattr(frame, "flags") and hasattr(frame, "ndim"):
-        # RapidOCR คาดหวัง array ที่ contiguous เสมอ
+    if np is not None and isinstance(frame, np.ndarray):
         try:
             if not frame.flags.c_contiguous:
                 frame = np.ascontiguousarray(frame)
+            if frame.base is not None:
+                frame = frame.copy()
         except AttributeError:
+            # หากเป็นออบเจ็กต์ที่เลียนแบบ NumPy แต่ไม่มี attribute เหล่านี้
+            # ให้ปล่อยผ่านเพื่อไม่ให้เกิด AttributeError ใน runtime
             pass
     return frame
 
