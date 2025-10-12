@@ -512,22 +512,35 @@ def _prepare_frame_for_reader(frame):
     if np is not None and hasattr(frame, "flags") and hasattr(frame, "ndim"):
         # RapidOCR คาดหวัง array ที่ contiguous เสมอ
         try:
+            needs_copy = False
             base = getattr(frame, "base", None)
             if base is not None:
                 # เมื่อ ROI เป็น view ของเฟรมต้นฉบับ buffer จะถูกเปลี่ยนตามเฟรมใหม่
                 # ทำให้ผล OCR แกว่ง ดังนั้นบังคับให้ทำสำเนาเต็มก่อน
                 try:
-                    if base is frame or np is None:
+                    if base is frame:
                         share_memory = False
                     else:
-                        share_memory = bool(np.may_share_memory(frame, base))
+                        share_memory = bool(np.shares_memory(frame, base))
                 except ValueError:
-                    # may_share_memory บางครั้งโยน ValueError หาก shape ไม่สอดคล้อง
+                    # shares_memory บางครั้งโยน ValueError หาก shape ไม่สอดคล้อง
                     share_memory = True
                 except Exception:
                     share_memory = True
                 if share_memory:
-                    frame = frame.copy()
+                    needs_copy = True
+
+            # numpy array ที่ไม่มี owndata (เช่น view ที่ base ไม่ได้เป็น ndarray)
+            # ก็มีพฤติกรรมแกว่งเหมือนกัน ต้อง copy เช่นกัน
+            if not needs_copy and hasattr(frame.flags, "owndata"):
+                try:
+                    if not frame.flags.owndata:
+                        needs_copy = True
+                except AttributeError:
+                    needs_copy = True
+
+            if needs_copy:
+                frame = frame.copy()
 
             if not frame.flags.c_contiguous:
                 frame = np.ascontiguousarray(frame)

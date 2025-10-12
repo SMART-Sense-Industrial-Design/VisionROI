@@ -79,3 +79,20 @@ def test_prepare_frame_copies_numpy_views():
 
     base[:, :] = 255
     assert not np.array_equal(prepared, base[:, :6])
+
+
+def test_prepare_frame_copies_arrays_without_own_data():
+    buf = bytearray(12 * 12 * 3)
+    view = np.frombuffer(buf, dtype=np.uint8).reshape(12, 12, 3)
+
+    assert view.base is not None
+    assert not view.flags.owndata
+
+    prepared = custom._prepare_frame_for_reader(view)
+
+    assert prepared.base is None
+    assert prepared.flags.owndata
+    assert prepared.flags.c_contiguous
+
+    buf[:] = b"\xff" * len(buf)
+    assert not np.array_equal(prepared, view)
