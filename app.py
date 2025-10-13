@@ -180,6 +180,84 @@ def _monotonic_to_wall(monotonic_value: float, *, now_monotonic: float | None = 
     return max(wall_ts, 0.0)
 
 
+def _axis_aligned_roi(
+    frame_img: Any, src_points: "np.ndarray",
+) -> "np.ndarray | None":
+    if frame_img is None or not hasattr(frame_img, "shape"):
+        return None
+    try:
+        frame_shape = tuple(frame_img.shape)
+    except Exception:
+        return None
+    if len(frame_shape) < 2:
+        return None
+    frame_height = int(frame_shape[0])
+    frame_width = int(frame_shape[1])
+    if frame_height <= 0 or frame_width <= 0:
+        return None
+
+    try:
+        xs = src_points[:, 0]
+        ys = src_points[:, 1]
+    except Exception:
+        return None
+
+    try:
+        finite_x = xs[np.isfinite(xs)]
+        finite_y = ys[np.isfinite(ys)]
+    except Exception:
+        return None
+    if finite_x.size == 0 or finite_y.size == 0:
+        return None
+
+    try:
+        min_x = int(max(math.floor(float(finite_x.min())), 0))
+        max_x = int(min(math.ceil(float(finite_x.max())) + 1, frame_width))
+        min_y = int(max(math.floor(float(finite_y.min())), 0))
+        max_y = int(min(math.ceil(float(finite_y.max())) + 1, frame_height))
+    except Exception:
+        return None
+
+    if max_x <= min_x or max_y <= min_y:
+        return None
+
+    try:
+        cropped = frame_img[min_y:max_y, min_x:max_x]
+    except Exception:
+        return None
+    if cropped is None or getattr(cropped, "size", 0) == 0:
+        return None
+
+    if hasattr(cropped, "copy"):
+        try:
+            cropped = cropped.copy()
+        except Exception:
+            return None
+    return cropped
+
+
+def _placeholder_roi(frame_img: Any) -> "np.ndarray | None":
+    if np is None:
+        return None
+    channels = 1
+    dtype = np.uint8
+    shape = getattr(frame_img, "shape", None)
+    if isinstance(shape, tuple) and len(shape) >= 3:
+        try:
+            channels = max(int(shape[2]), 1)
+        except Exception:
+            channels = 1
+    if hasattr(frame_img, "dtype"):
+        try:
+            dtype = frame_img.dtype
+        except Exception:
+            dtype = np.uint8
+    try:
+        return np.zeros((1, 1, channels), dtype=dtype)
+    except Exception:
+        return None
+
+
 def _mark_stream_state(
     cam_id: str,
     *,
@@ -2125,7 +2203,14 @@ async def run_inference_loop(cam_id: str):
             pts = r.get('points', [])
             if len(pts) != 4:
                 continue
-            src = np.array([[p['x'], p['y']] for p in pts], dtype=np.float32)
+            try:
+                src = np.array(
+                    [[float(p['x']), float(p['y'])] for p in pts], dtype=np.float32
+                )
+            except Exception:
+                continue
+            if src.shape != (4, 2):
+                continue
             color = (0, 255, 0)
             width_a = np.linalg.norm(src[0] - src[1])
             width_b = np.linalg.norm(src[2] - src[3])
@@ -2133,9 +2218,19 @@ async def run_inference_loop(cam_id: str):
             height_a = np.linalg.norm(src[0] - src[3])
             height_b = np.linalg.norm(src[1] - src[2])
             max_h = int(max(height_a, height_b))
+            if max_w <= 0 or max_h <= 0:
+                continue
             dst = np.array([[0, 0], [max_w - 1, 0], [max_w - 1, max_h - 1], [0, max_h - 1]], dtype=np.float32)
-            matrix = cv2.getPerspectiveTransform(src, dst)
-            roi = await asyncio.to_thread(cv2.warpPerspective, frame, matrix, (max_w, max_h))
+            try:
+                matrix = cv2.getPerspectiveTransform(src, dst)
+            except Exception:
+                continue
+            try:
+                roi = await asyncio.to_thread(cv2.warpPerspective, frame, matrix, (max_w, max_h))
+            except Exception:
+                continue
+            if roi is None or getattr(roi, "size", 0) == 0:
+                continue
             if hasattr(roi, "copy"):
                 # ป้องกันไม่ให้ ROI แชร์บัฟเฟอร์เดียวกับเฟรมต้นฉบับ
                 roi = roi.copy()
@@ -2216,15 +2311,22 @@ async def run_inference_loop(cam_id: str):
                 continue
             if np is None:
                 continue
-            pts = r.get('points', [])
-            if len(pts) != 4:
-                continue
 
             should_process_roi = roi_matches_group(r.get('group'))
             if not should_process_roi:
                 continue
 
-            src = np.array([[p['x'], p['y']] for p in pts], dtype=np.float32)
+            pts = r.get('points', [])
+            if len(pts) != 4:
+                continue
+            try:
+                src = np.array(
+                    [[float(p['x']), float(p['y'])] for p in pts], dtype=np.float32
+                )
+            except Exception:
+                continue
+            if src.shape != (4, 2):
+                continue
 
             if meets_interval and r.get('module'):
                 mod_name = r.get('module')
@@ -2258,8 +2360,32 @@ async def run_inference_loop(cam_id: str):
                         height_b = np.linalg.norm(src[1] - src[2])
                         max_h = int(max(height_a, height_b))
                         dst = np.array([[0, 0], [max_w - 1, 0], [max_w - 1, max_h - 1], [0, max_h - 1]], dtype=np.float32)
-                        matrix = cv2.getPerspectiveTransform(src, dst)
-                        roi = await asyncio.to_thread(cv2.warpPerspective, frame, matrix, (max_w, max_h))
+                        roi = None
+                        extraction_mode = "warp"
+                        if max_w > 0 and max_h > 0:
+                            try:
+                                matrix = cv2.getPerspectiveTransform(src, dst)
+                            except Exception:
+                                matrix = None
+                            if matrix is not None:
+                                try:
+                                    roi = await asyncio.to_thread(
+                                        cv2.warpPerspective, frame, matrix, (max_w, max_h)
+                                    )
+                                except Exception:
+                                    roi = None
+                        if roi is None or getattr(roi, "size", 0) == 0:
+                            fallback_roi = _axis_aligned_roi(frame, src)
+                            if fallback_roi is not None and getattr(fallback_roi, "size", 0) > 0:
+                                roi = fallback_roi
+                                extraction_mode = "crop"
+                        if roi is None or getattr(roi, "size", 0) == 0:
+                            placeholder = _placeholder_roi(frame)
+                            if placeholder is not None and getattr(placeholder, "size", 0) > 0:
+                                roi = placeholder
+                                extraction_mode = "placeholder"
+                        if roi is None or getattr(roi, "size", 0) == 0:
+                            continue
                         if hasattr(roi, "copy"):
                             # ทำสำเนา ROI ให้แยกจากเฟรมปัจจุบันก่อนส่งเข้าโมดูล OCR
                             roi = roi.copy()
@@ -2312,6 +2438,7 @@ async def run_inference_loop(cam_id: str):
                             module_name=mod_name or '',
                             mqtt_name=str(r.get('mqtt_config') or '').strip(),
                             source_name=source_name,
+                            roi_extraction=extraction_mode,
                         ) -> None:
                             if key not in pending_expected:
                                 return
@@ -2367,6 +2494,8 @@ async def run_inference_loop(cam_id: str):
                                 entry['source'] = source_name
                                 if duration is not None:
                                     entry['duration'] = duration
+                                if roi_extraction != "warp":
+                                    entry['extraction_mode'] = roi_extraction
                                 try:
                                     if roi_img is not None:
                                         encoded, roi_buf = await asyncio.to_thread(
@@ -2480,7 +2609,14 @@ async def run_inference_loop(cam_id: str):
             pts = r.get('points', [])
             if len(pts) != 4:
                 continue
-            src = np.array([[p['x'], p['y']] for p in pts], dtype=np.float32)
+            try:
+                src = np.array(
+                    [[float(p['x']), float(p['y'])] for p in pts], dtype=np.float32
+                )
+            except Exception:
+                continue
+            if src.shape != (4, 2):
+                continue
             src_int = src.astype(int)
             cv2.polylines(frame, [src_int], True, (255, 0, 0), 2)
             label_pt = src_int[0]
