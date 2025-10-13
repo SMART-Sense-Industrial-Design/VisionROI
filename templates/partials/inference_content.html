@@ -1051,6 +1051,9 @@
                     statusEl.innerText = 'สตรีมหยุด';
                     return;
                 }
+                if (event && event.code === 1012) {
+                    statusEl.innerText = 'สตรีมภาพขาดหาย กำลังเชื่อมใหม่...';
+                }
                 scheduleSocketReconnect();
             };
             socket = ws;

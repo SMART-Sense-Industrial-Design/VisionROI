@@ -22,7 +22,7 @@ import math
 from collections import defaultdict, deque
 from dataclasses import dataclass
 
-from types import ModuleType
+from types import ModuleType, FrameType
 from pathlib import Path
 import contextlib
 import inspect
@@ -1523,11 +1523,37 @@ async def _safe_stop(cam_id: str,
 # ========== Graceful shutdown (fast & robust) ==========
 _SHUTTING_DOWN = False  # prevent reentry
 
+
+def _schedule_graceful_exit() -> None:
+    """Schedule :func:`_graceful_exit` regardless of who owns the signal."""
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+
+    if loop and loop.is_running():
+        loop.call_soon_threadsafe(lambda: asyncio.create_task(_graceful_exit()))
+        return
+
+    try:
+        loop = asyncio.get_event_loop()
+    except RuntimeError:
+        loop = None
+
+    if loop and loop.is_running():
+        loop.call_soon_threadsafe(lambda: asyncio.create_task(_graceful_exit()))
+        return
+
+    with contextlib.suppress(RuntimeError):
+        asyncio.run(_graceful_exit())
+
+
 async def _shutdown_cleanup_concurrent():
     # run after_serving cleanup but cap time
     if "_shutdown_cleanup" in globals():
         with contextlib.suppress(Exception, asyncio.TimeoutError):
             await asyncio.wait_for(_shutdown_cleanup(), timeout=2.0)
+
 
 async def _graceful_exit():
     """Cancel tasks, unblock queues, release cameras, then exit fast."""
@@ -1543,11 +1569,7 @@ async def _graceful_exit():
 
 def _sync_signal_handler(signum, frame):
     """Ensure SIGTERM/SIGINT triggers the same fast path."""
-    try:
-        loop = asyncio.get_event_loop()
-        loop.call_soon_threadsafe(lambda: asyncio.create_task(_graceful_exit()))
-    except RuntimeError:
-        os._exit(0)
+    _schedule_graceful_exit()
 
 # install sync handlers early (more reliable than loop.add_signal_handler for our case)
 signal.signal(signal.SIGTERM, _sync_signal_handler)
@@ -2647,7 +2669,8 @@ async def _stream_queue_over_websocket(
 
             if item is None:
                 if not close_sent:
-                    await ws.close(code=1000)
+                    with contextlib.suppress(Exception):
+                        await ws.close(code=1012, reason="stream_outage")
                     close_sent = True
                 break
             try:
@@ -3556,7 +3579,15 @@ if __name__ == "__main__":
 
     if args.use_uvicorn:
         import uvicorn
-        uvicorn.run(
+
+        class VisionROIServer(uvicorn.Server):
+            """Custom server that always triggers our fast shutdown."""
+
+            def handle_exit(self, sig: int, frame: FrameType | None) -> None:  # type: ignore[override]
+                super().handle_exit(sig, frame)
+                _schedule_graceful_exit()
+
+        config = uvicorn.Config(
             "app:app",
             host="0.0.0.0",
             port=args.port,
@@ -3566,5 +3597,7 @@ if __name__ == "__main__":
             timeout_graceful_shutdown=2,
             workers=1,
         )
+        server = VisionROIServer(config)
+        server.run()
     else:
         app.run(port=args.port)
