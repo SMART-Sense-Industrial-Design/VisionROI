@@ -75,6 +75,8 @@ STREAM_OUTAGE_GRACE = float(os.getenv("STREAM_OUTAGE_GRACE", "3.5") or 3.5)
 STREAM_OUTAGE_RETRY = float(os.getenv("STREAM_OUTAGE_RETRY", "1.5") or 1.5)
 _stream_disconnect_sent: dict[tuple[str, int], float] = {}
 
+stream_health: dict[str, dict[str, Any]] = {}
+
 recent_notifications: list[dict[str, Any]] = []
 MAX_RECENT_NOTIFICATIONS = 200
 
@@ -158,6 +160,58 @@ def _stop_inference_workers() -> None:
 
 
 _start_inference_workers()
+
+
+def _utc_iso(ts: float | None) -> str | None:
+    if not isinstance(ts, (int, float)) or ts <= 0:
+        return None
+    try:
+        return datetime.fromtimestamp(float(ts), datetime.UTC).isoformat().replace("+00:00", "Z")
+    except Exception:
+        return None
+
+
+def _monotonic_to_wall(monotonic_value: float, *, now_monotonic: float | None = None) -> float | None:
+    if not isinstance(monotonic_value, (int, float)) or monotonic_value <= 0.0:
+        return None
+    current_monotonic = now_monotonic if isinstance(now_monotonic, (int, float)) else time.monotonic()
+    now_wall = time.time()
+    wall_ts = now_wall - max(current_monotonic - float(monotonic_value), 0.0)
+    return max(wall_ts, 0.0)
+
+
+def _mark_stream_state(
+    cam_id: str,
+    *,
+    state: str,
+    last_frame_time: float | None = None,
+    outage_since: float | None = None,
+    retry_after: float | None = None,
+) -> None:
+    now_wall = time.time()
+    entry: dict[str, Any] = {
+        "state": state,
+        "updated_at": now_wall,
+    }
+    updated_iso = _utc_iso(now_wall)
+    if updated_iso:
+        entry["updated_at_iso"] = updated_iso
+    if isinstance(last_frame_time, (int, float)) and last_frame_time > 0:
+        entry["last_frame_time"] = float(last_frame_time)
+        last_iso = _utc_iso(last_frame_time)
+        if last_iso:
+            entry["last_frame_time_iso"] = last_iso
+    if isinstance(outage_since, (int, float)) and outage_since > 0:
+        entry["outage_since"] = float(outage_since)
+        outage_iso = _utc_iso(outage_since)
+        if outage_iso:
+            entry["outage_since_iso"] = outage_iso
+    if retry_after is not None:
+        try:
+            entry["retry_after"] = float(retry_after)
+        except (TypeError, ValueError):
+            pass
+    stream_health[cam_id] = entry
 
 
 def _free_cam_state(cam_id: str):
@@ -1738,6 +1792,7 @@ async def read_and_queue_frame(
     queue_key = (cam_id, id(queue))
     now_monotonic = time.monotonic()
     frame = await worker.read()
+    outage_signaled = False
     if frame is None:
         last_frame_ts = (
             worker.last_frame_timestamp()
@@ -1757,8 +1812,18 @@ async def read_and_queue_frame(
                 except Exception:
                     pass
                 else:
+                    outage_signaled = True
                     if retry_after > 0:
                         _stream_disconnect_sent[queue_key] = now_monotonic
+            if outage_signaled:
+                last_frame_wall = _monotonic_to_wall(last_frame_ts, now_monotonic=now_monotonic)
+                _mark_stream_state(
+                    cam_id,
+                    state="outage",
+                    last_frame_time=last_frame_wall,
+                    outage_since=last_frame_wall,
+                    retry_after=retry_after,
+                )
         await asyncio.sleep(0.01)
         return
     if np is not None and hasattr(frame, "size") and frame.size == 0:
@@ -1796,6 +1861,7 @@ async def read_and_queue_frame(
     packet = FramePacket(payload=frame_bytes, created_at=time.monotonic(), frame_time=frame_time)
     _stream_disconnect_sent.pop(queue_key, None)
     await queue.put(packet)
+    _mark_stream_state(cam_id, state="active", last_frame_time=frame_time)
     await asyncio.sleep(0)
 
 
@@ -2516,6 +2582,7 @@ async def start_camera_task(
             camera_workers[cam_id] = worker
             camera_resolutions[cam_id] = (worker.width, worker.height)
 
+        _mark_stream_state(cam_id, state="starting")
         task = asyncio.create_task(loop_func(cam_id))
         task_dict[cam_id] = task
         return task, {"status": "started", "cam_id": cam_id}, 200
@@ -2568,6 +2635,7 @@ async def stop_camera_task(
         if not inference_tasks:
             _stop_inference_workers()
 
+        _mark_stream_state(cam_id, state="stopped")
         return task, {"status": status, "cam_id": cam_id}, 200
 
 
@@ -3385,6 +3453,8 @@ async def perform_stop_inference(cam_id: str, save_state: bool = True):
     last_inference_times.pop(cam_id, None)
     inference_result_timeouts.pop(cam_id, None)
     inference_draw_page_boxes.pop(cam_id, None)
+
+    _mark_stream_state(cam_id, state="stopped")
     _free_cam_state(cam_id)
     gc.collect()
     malloc_trim()
@@ -3502,12 +3572,15 @@ async def inference_status(cam_id: str):
     group = inference_groups.get(cam_id)
     if not isinstance(group, str):
         group = ""
-    return jsonify({
+    health = stream_health.get(cam_id)
+    payload = {
         "running": running,
         "cam_id": cam_id,
         "source": source,
         "group": group,
-    })
+        "stream_health": health if isinstance(health, dict) else {"state": "unknown"},
+    }
+    return jsonify(payload)
 
 
 @app.route('/roi_stream_status/<string:cam_id>', methods=["GET"])

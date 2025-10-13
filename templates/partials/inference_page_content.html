@@ -61,6 +61,8 @@
       let rois = [];
       let allRois = [];
       let running = false;
+      let streamActive = false;
+      let currentStreamHealth = null;
       const FRAME_TIMEOUT_MS = 5000;
       let frameWatchdogTimer;
       const {
@@ -136,6 +138,41 @@
         clearTimeoutSafe(frameWatchdogTimer);
         frameWatchdogTimer = undefined;
       };
+
+      const setStreamHealth = health => {
+        if (health && typeof health === 'object') {
+          currentStreamHealth = { ...health };
+        } else {
+          currentStreamHealth = null;
+        }
+      };
+
+      const deriveStreamMessage = defaultText => {
+        if (!running) {
+          return defaultText || '';
+        }
+        const state = currentStreamHealth && typeof currentStreamHealth.state === 'string'
+          ? currentStreamHealth.state
+          : '';
+        if (state === 'outage') {
+          return 'สตรีมภาพขาดหาย กำลังเชื่อมใหม่...';
+        }
+        if (state === 'starting') {
+          return 'กำลังเตรียมสตรีม...';
+        }
+        if (state === 'active') {
+          if (defaultText && defaultText.length > 0) {
+            return defaultText;
+          }
+          return streamActive ? 'Running' : 'กำลังรับสตรีมภาพ...';
+        }
+        if (state === 'stopped') {
+          return 'Stopped';
+        }
+        return defaultText && defaultText.length > 0
+          ? defaultText
+          : (streamActive ? 'Running' : 'กำลังรับสตรีมภาพ...');
+      };
       const scheduleFrameWatchdog = wsInstance => {
         if (FRAME_TIMEOUT_MS <= 0 || !running || socket !== wsInstance) {
           return;
@@ -145,6 +182,11 @@
           frameWatchdogTimer = undefined;
           if (!running || socket !== wsInstance) {
             return;
+          }
+          streamActive = false;
+          setStreamHealth({ state: 'outage' });
+          if (statusEl) {
+            statusEl.innerText = deriveStreamMessage('ไม่พบภาพจากกล้อง กำลังเชื่อมต่อใหม่...');
           }
           try {
             wsInstance.close(4000, 'frame_timeout');
@@ -849,7 +891,8 @@
           }
           return;
         }
-        statusEl.innerText = 'สำเร็จ';
+        setStreamHealth({ state: 'starting' });
+        statusEl.innerText = deriveStreamMessage('สำเร็จ');
         openSocket();
         if (hasAnyRoiEntry) {
           openRoiSocket();
@@ -881,7 +924,8 @@
         socketReconnectAttempts += 1;
         const delay = computeReconnectDelay(socketReconnectAttempts);
         clearTimeoutSafe(socketReconnectTimer);
-        statusEl.innerText = 'เชื่อมต่อภาพใหม่...';
+        streamActive = false;
+        statusEl.innerText = deriveStreamMessage('เชื่อมต่อภาพใหม่...');
         socketReconnectTimer = setTimeout(() => {
           if (!running) {
             return;
@@ -948,7 +992,9 @@
         resetScoreboard();
         roiGroupIndex = new Map();
         activeGroupName = '';
-        statusEl.innerText = 'Stopped';
+        streamActive = false;
+        setStreamHealth({ state: 'stopped' });
+        statusEl.innerText = deriveStreamMessage('Stopped');
         startButton.innerText = 'Resume';
         startButton.disabled = false;
         stopButton.disabled = true;
@@ -975,10 +1021,15 @@
             return;
           }
           socketReconnectAttempts = 0;
-          statusEl.innerText = 'กำลังรับสตรีมภาพ...';
+          streamActive = false;
+          setStreamHealth({ state: 'starting' });
+          statusEl.innerText = deriveStreamMessage('กำลังรับสตรีมภาพ...');
           scheduleFrameWatchdog(ws);
         };
         ws.onmessage = event => {
+          streamActive = true;
+          setStreamHealth({ state: 'active' });
+          statusEl.innerText = deriveStreamMessage('Running');
           scheduleFrameWatchdog(ws);
           const blob = toFrameBlob(event.data);
           if (!blob) {
@@ -1001,11 +1052,13 @@
           }
           const normalClose = event && (event.code === 1000 || event.code === 1001);
           if (normalClose) {
-            statusEl.innerText = 'สตรีมหยุด';
+            setStreamHealth({ state: 'stopped' });
+            statusEl.innerText = deriveStreamMessage('สตรีมหยุด');
             return;
           }
           if (event && event.code === 1012) {
-            statusEl.innerText = 'สตรีมภาพขาดหาย กำลังเชื่อมใหม่...';
+            setStreamHealth({ state: 'outage' });
+            statusEl.innerText = deriveStreamMessage('สตรีมภาพขาดหาย กำลังเชื่อมใหม่...');
           }
           scheduleSocketReconnect();
         };
@@ -1077,6 +1130,7 @@
         let name = sourceSelect.value || '';
         const res = await fetchWithStatus(`/inference_status/${cam}`);
         const data = await res.json();
+        setStreamHealth(data.stream_health);
         const statusSource = typeof data.source === 'string' ? data.source : '';
         const statusGroupRaw = typeof data.group === 'string' ? data.group : '';
         const normalizedStatusGroup = normalizeGroupName(statusGroupRaw);
@@ -1103,6 +1157,7 @@
         const shouldBeRunning = Boolean(data.running && name);
         if (shouldBeRunning) {
           running = true;
+          streamActive = false;
           openSocket();
           const cfgRes = await fetchWithStatus(`/source_config?name=${encodeURIComponent(name)}`);
           const cfg = await cfgRes.json();
@@ -1135,18 +1190,20 @@
           startLogUpdates(logSourceName);
           setRunningUI();
         } else {
-          statusEl.innerText = 'Idle';
+          running = false;
+          streamActive = false;
+          statusEl.innerText = deriveStreamMessage('Idle');
           startButton.innerText = 'Start';
           startButton.disabled = false;
           stopButton.disabled = true;
-          running = false;
           stopLogUpdates();
           resetScoreboard();
         }
       }
 
       function setRunningUI() {
-        statusEl.innerText = 'Running';
+        const text = deriveStreamMessage('Running');
+        statusEl.innerText = text && text.length > 0 ? text : 'Running';
         startButton.disabled = true;
         stopButton.disabled = false;
         startButton.innerText = 'Start';

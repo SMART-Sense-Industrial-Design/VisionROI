@@ -63,6 +63,7 @@
         let allRois = [];
         let running = false;
         let streamActive = false;
+        let currentStreamHealth = null;
         const FRAME_TIMEOUT_MS = 5000;
         let frameWatchdogTimer;
         const {
@@ -144,6 +145,40 @@
           frameWatchdogTimer = undefined;
         };
 
+        const setStreamHealth = health => {
+          if (health && typeof health === 'object') {
+            currentStreamHealth = { ...health };
+          } else {
+            currentStreamHealth = null;
+          }
+        };
+
+        const deriveStreamMessage = defaultText => {
+          if (!running) {
+            return defaultText || '';
+          }
+          const state = currentStreamHealth && typeof currentStreamHealth.state === 'string'
+            ? currentStreamHealth.state
+            : '';
+          if (state === 'outage') {
+            return 'สตรีมภาพขาดหาย กำลังเชื่อมใหม่...';
+          }
+          if (state === 'starting') {
+            return 'กำลังเตรียมสตรีม...';
+          }
+          if (state === 'active') {
+            return defaultText && defaultText.length > 0
+              ? defaultText
+              : (streamActive ? 'Running' : 'กำลังรับสตรีมภาพ...');
+          }
+          if (state === 'stopped') {
+            return 'Stopped';
+          }
+          return defaultText && defaultText.length > 0
+            ? defaultText
+            : (streamActive ? 'Running' : 'กำลังรับสตรีมภาพ...');
+        };
+
         const scheduleFrameWatchdog = wsInstance => {
           if (FRAME_TIMEOUT_MS <= 0 || !running || socket !== wsInstance) {
             return;
@@ -155,8 +190,9 @@
               return;
             }
             streamActive = false;
+            setStreamHealth({ state: 'outage' });
             if (statusEl) {
-              statusEl.innerText = 'ไม่พบภาพจากกล้อง กำลังเชื่อมต่อใหม่...';
+              statusEl.innerText = deriveStreamMessage('ไม่พบภาพจากกล้อง กำลังเชื่อมต่อใหม่...');
             }
             clearCanvas();
             queueFrameForRender(null);
@@ -879,7 +915,8 @@
                 }
                 return;
             }
-            statusEl.innerText = 'กำลังรับสตรีมภาพ...';
+            setStreamHealth({ state: 'starting' });
+            statusEl.innerText = deriveStreamMessage('กำลังรับสตรีมภาพ...');
             clearCanvas();
             queueFrameForRender(null);
 
@@ -915,7 +952,7 @@
             const delay = computeReconnectDelay(socketReconnectAttempts);
             clearTimeoutSafe(socketReconnectTimer);
             streamActive = false;
-            statusEl.innerText = 'เชื่อมต่อภาพใหม่...';
+            statusEl.innerText = deriveStreamMessage('เชื่อมต่อภาพใหม่...');
             clearCanvas();
             queueFrameForRender(null);
             socketReconnectTimer = setTimeout(() => {
@@ -983,7 +1020,8 @@
             allRois = [];
             roiGrid.innerHTML = '';
             streamActive = false;
-            statusEl.innerText = 'Stopped';
+            setStreamHealth({ state: 'stopped' });
+            statusEl.innerText = deriveStreamMessage('Stopped');
             startButton.innerText = 'Resume';
             startButton.disabled = false;
             stopButton.disabled = true;
@@ -1013,7 +1051,8 @@
                 }
                 socketReconnectAttempts = 0;
                 streamActive = false;
-                statusEl.innerText = 'กำลังรับสตรีมภาพ...';
+                setStreamHealth({ state: 'starting' });
+                statusEl.innerText = deriveStreamMessage('กำลังรับสตรีมภาพ...');
                 clearCanvas();
                 queueFrameForRender(null);
                 scheduleFrameWatchdog(ws);
@@ -1021,8 +1060,9 @@
             ws.onmessage = event => {
                 if (!streamActive) {
                     streamActive = true;
+                    setStreamHealth({ state: 'active' });
                     if (statusEl) {
-                        statusEl.innerText = 'Running';
+                        statusEl.innerText = deriveStreamMessage('Running');
                     }
                 }
                 scheduleFrameWatchdog(ws);
@@ -1048,11 +1088,13 @@
                 streamActive = false;
                 const normalClose = event && (event.code === 1000 || event.code === 1001);
                 if (normalClose) {
-                    statusEl.innerText = 'สตรีมหยุด';
+                    setStreamHealth({ state: 'stopped' });
+                    statusEl.innerText = deriveStreamMessage('สตรีมหยุด');
                     return;
                 }
                 if (event && event.code === 1012) {
-                    statusEl.innerText = 'สตรีมภาพขาดหาย กำลังเชื่อมใหม่...';
+                    setStreamHealth({ state: 'outage' });
+                    statusEl.innerText = deriveStreamMessage('สตรีมภาพขาดหาย กำลังเชื่อมใหม่...');
                 }
                 scheduleSocketReconnect();
             };
@@ -1119,6 +1161,7 @@
             let name = sourceSelect.value || '';
             const res = await fetchWithStatus(`/inference_status/${cam}`);
             const data = await res.json();
+            setStreamHealth(data.stream_health);
             const statusSource = typeof data.source === 'string' ? data.source : '';
             const statusGroup = typeof data.group === 'string' ? data.group : '';
             if (statusSource) {
@@ -1220,13 +1263,15 @@
         }
 
         function setRunningUI(message) {
-            if (typeof message === 'string' && message.length > 0) {
-                statusEl.innerText = message;
+            const resolved = deriveStreamMessage(message);
+            if (resolved && resolved.length > 0) {
+                statusEl.innerText = resolved;
                 if (!streamActive) {
                     clearCanvas();
                     queueFrameForRender(null);
                 }
-
+            } else if (typeof message === 'string' && message.length > 0) {
+                statusEl.innerText = message;
             } else if (streamActive) {
                 statusEl.innerText = 'Running';
             } else {
