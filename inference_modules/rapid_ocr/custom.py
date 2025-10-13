@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import time
 from collections import deque
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from typing import Any
 from PIL import Image
 import cv2
@@ -436,6 +436,68 @@ def _normalise_reader_output(result: Any) -> Any:
     return result
 
 
+def _result_structure_is_empty(
+    value: Any,
+    *,
+    _depth: int = 0,
+    _seen: set[int] | None = None,
+) -> bool:
+    if _depth > 5:
+        return False
+    if value is None:
+        return True
+    if isinstance(value, str):
+        return not value.strip()
+    if isinstance(value, Number):
+        return True
+    if _seen is None:
+        _seen = set()
+    try:
+        obj_id = id(value)
+    except Exception:
+        obj_id = None
+    if obj_id is not None:
+        if obj_id in _seen:
+            return True
+        _seen.add(obj_id)
+    if isinstance(value, Mapping):
+        if not value:
+            return True
+        for key in ("text", "texts", "txts"):
+            if key in value and not _result_structure_is_empty(
+                value[key], _depth=_depth + 1, _seen=_seen
+            ):
+                return False
+        return all(
+            _result_structure_is_empty(v, _depth=_depth + 1, _seen=_seen)
+            for v in value.values()
+        )
+    if isinstance(value, Iterable) and not isinstance(value, (bytes, bytearray, str)):
+        empty = True
+        for item in value:
+            empty = False
+            if not _result_structure_is_empty(
+                item, _depth=_depth + 1, _seen=_seen
+            ):
+                return False
+        return empty
+    return False
+
+
+def _log_empty_text_warning(
+    logger_obj: logging.Logger,
+    module_name: str,
+    roi_id: Any,
+    reason: str,
+    details: str | None = None,
+) -> None:
+    prefix = f"roi_id={roi_id} " if roi_id is not None else ""
+    message = f"{prefix}{module_name} OCR returned empty text (reason={reason})"
+    if details:
+        message = f"{message}: {details}"
+    logger_obj.warning(message)
+
+
 def _append_text_value(value: Any, pieces: list[str], queue: deque[Any]) -> bool:
     if value is None:
         return True
@@ -556,22 +618,43 @@ def _run_reader(reader, frame):
 
 
 def _run_ocr_async(frame, roi_id, save, source) -> str:
+    empty_reason: str | None = None
+    empty_details: str | None = None
+    raw_result: Any = None
+    text = ""
     try:
         reader = _get_global_reader()
-        frame = _prepare_frame_for_reader(frame)
-        result = _normalise_reader_output(_run_reader(reader, frame))
-        text = _extract_text(result)
-
-        logger.info(
-            f"roi_id={roi_id} {MODULE_NAME} OCR result: {text}"
-            if roi_id is not None
-            else f"{MODULE_NAME} OCR result: {text}"
-        )
-        with _last_ocr_lock:
-            last_ocr_results[roi_id] = text
     except Exception as e:
         logger.exception(f"roi_id={roi_id} {MODULE_NAME} OCR error: {e}")
-        text = ""
+        empty_reason = "reader_init_failed"
+        empty_details = f"{type(e).__name__}: {e}"
+        reader = None
+
+    if reader is not None:
+        try:
+            frame = _prepare_frame_for_reader(frame)
+            raw_result = _normalise_reader_output(_run_reader(reader, frame))
+            text = _extract_text(raw_result)
+
+            logger.info(
+                f"roi_id={roi_id} {MODULE_NAME} OCR result: {text}"
+                if roi_id is not None
+                else f"{MODULE_NAME} OCR result: {text}"
+            )
+            with _last_ocr_lock:
+                last_ocr_results[roi_id] = text
+
+            if not text and not _result_structure_is_empty(raw_result):
+                empty_reason = "unexpected_payload"
+                empty_details = f"raw_type={type(raw_result).__name__}"
+        except Exception as e:
+            logger.exception(f"roi_id={roi_id} {MODULE_NAME} OCR error: {e}")
+            empty_reason = "runtime_exception"
+            empty_details = f"{type(e).__name__}: {e}"
+            text = ""
+
+    if not text and empty_reason:
+        _log_empty_text_warning(logger, MODULE_NAME, roi_id, empty_reason, empty_details)
 
     if save:
         base_dir = _data_sources_root / source if source else Path(__file__).resolve().parent
@@ -603,6 +686,9 @@ class RapidOCR(BaseOCR):
 
     def _run_ocr(self, frame, roi_id, save: bool, source: str) -> str:
         text = ""
+        empty_reason: str | None = None
+        empty_details: str | None = None
+        raw_result: Any = None
         try:
             reader = self._get_reader()
         except Exception as e:
@@ -610,16 +696,20 @@ class RapidOCR(BaseOCR):
                 f"roi_id={roi_id} {self.MODULE_NAME} OCR init error: {e}"
             )
             reader = None
+            empty_reason = "reader_init_failed"
+            empty_details = f"{type(e).__name__}: {e}"
 
         if reader is not None:
             try:
                 frame = _prepare_frame_for_reader(frame)
-                result = _normalise_reader_output(_run_reader(reader, frame))
-                text = _extract_text(result)
+                raw_result = _normalise_reader_output(_run_reader(reader, frame))
+                text = _extract_text(raw_result)
             except Exception as e:
                 self.logger.exception(
                     f"roi_id={roi_id} {self.MODULE_NAME} OCR error: {e}"
                 )
+                empty_reason = "runtime_exception"
+                empty_details = f"{type(e).__name__}: {e}"
 
         if text:
             self.logger.info(
@@ -627,9 +717,17 @@ class RapidOCR(BaseOCR):
                 if roi_id is not None
                 else f"{self.MODULE_NAME} OCR result: {text}"
             )
+        elif empty_reason is None and not _result_structure_is_empty(raw_result):
+            empty_reason = "unexpected_payload"
+            empty_details = f"raw_type={type(raw_result).__name__}"
 
         if save:
             self._save_image(frame, roi_id, source)
+
+        if not text and empty_reason:
+            _log_empty_text_warning(
+                self.logger, self.MODULE_NAME, roi_id, empty_reason, empty_details
+            )
 
         return text
 
