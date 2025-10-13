@@ -1543,10 +1543,46 @@ async def _graceful_exit():
 
 def _sync_signal_handler(signum, frame):
     """Ensure SIGTERM/SIGINT triggers the same fast path."""
+    loop: asyncio.AbstractEventLoop | None = None
+
+    # กรณี event loop กำลังรันอยู่ในเธรดหลัก (เช่นตอนใช้ uvicorn)
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+
+    if loop and not loop.is_closed():
+        loop.call_soon_threadsafe(lambda: asyncio.create_task(_graceful_exit()))
+        return
+
+    # หากไม่มี loop ที่กำลังรันอยู่ ให้พยายามดึง loop ปัจจุบันจาก policy
     try:
         loop = asyncio.get_event_loop()
-        loop.call_soon_threadsafe(lambda: asyncio.create_task(_graceful_exit()))
     except RuntimeError:
+        os._exit(0)
+        return
+
+    if loop.is_closed():
+        # ไม่มี loop ใช้งานแล้ว รัน cleanup แบบ synchronous
+        try:
+            asyncio.run(_graceful_exit())
+        except Exception:
+            os._exit(0)
+        return
+
+    if loop.is_running():
+        loop.call_soon_threadsafe(lambda: asyncio.create_task(_graceful_exit()))
+        return
+
+    # loop ยังไม่ถูกปิด แต่ไม่ได้รันอยู่ ให้บังคับรันจนจบ
+    try:
+        loop.run_until_complete(_graceful_exit())
+    except RuntimeError:
+        try:
+            asyncio.run(_graceful_exit())
+        except Exception:
+            os._exit(0)
+    except Exception:
         os._exit(0)
 
 # install sync handlers early (more reliable than loop.add_signal_handler for our case)
@@ -3556,7 +3592,8 @@ if __name__ == "__main__":
 
     if args.use_uvicorn:
         import uvicorn
-        uvicorn.run(
+
+        config = uvicorn.Config(
             "app:app",
             host="0.0.0.0",
             port=args.port,
@@ -3566,5 +3603,8 @@ if __name__ == "__main__":
             timeout_graceful_shutdown=2,
             workers=1,
         )
+        server = uvicorn.Server(config)
+        server.install_signal_handlers = False
+        asyncio.run(server.serve())
     else:
         app.run(port=args.port)

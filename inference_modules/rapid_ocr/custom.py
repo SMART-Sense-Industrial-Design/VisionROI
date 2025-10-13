@@ -39,6 +39,31 @@ logger = logging.getLogger(MODULE_NAME)
 logger.setLevel(logging.INFO)
 _data_sources_root = Path(__file__).resolve().parents[2] / "data_sources"
 
+RAPID_OCR_TEXT_SCORE = 0.3
+
+
+def _apply_text_score(reader: Any) -> None:
+    """ตั้งค่า text_score ให้ RapidOCR reader"""
+    applied = False
+    try:
+        if hasattr(reader, "text_score"):
+            setattr(reader, "text_score", RAPID_OCR_TEXT_SCORE)
+            applied = True
+        else:
+            cfg = getattr(reader, "config", None)
+            if isinstance(cfg, dict):
+                global_cfg = cfg.get("Global")
+                if isinstance(global_cfg, dict):
+                    global_cfg["text_score"] = RAPID_OCR_TEXT_SCORE
+                    applied = True
+    except Exception as exc:  # pragma: no cover - defensive logging เท่านั้น
+        logger.warning(f"[RapidOCR-ORT] cannot apply text_score: {exc}")
+
+    if not applied:
+        logger.warning("[RapidOCR-ORT] unable to confirm text_score override; default may remain")
+    else:
+        logger.warning(f"[RapidOCR-ORT] enforced text_score={RAPID_OCR_TEXT_SCORE}")
+
 _reader = None
 _reader_lock = threading.Lock()
 # RapidOCR ยังไม่ยืนยันความเป็น thread-safe ของ reader
@@ -357,7 +382,7 @@ def _new_reader_instance() -> Any:
     # 1) พยายามส่ง providers + model paths เข้า RapidOCRLib โดยตรง (ถ้ารองรับ)
     reader = None
     try:
-        kwargs: dict[str, Any] = {"providers": providers}
+        kwargs: dict[str, Any] = {"providers": providers, "text_score": RAPID_OCR_TEXT_SCORE}
         # ใส่ path ถ้าจับได้ (ชื่อพารามิเตอร์ที่ถูกต้อง)
         if "det" in model_paths:
             kwargs.setdefault("det_model_path", model_paths["det"])
@@ -375,6 +400,12 @@ def _new_reader_instance() -> Any:
     except Exception as e:
         logger.exception(f"[RapidOCR-ORT] RapidOCRLib init failed: {e}")
         raise
+
+    # ตั้งค่า text_score (ซ้ำเพื่อความชัวร์แม้ส่งผ่าน kwargs แล้ว)
+    try:
+        _apply_text_score(reader)
+    except Exception as exc:  # pragma: no cover - defensive logging
+        logger.warning(f"[RapidOCR-ORT] failed to enforce text_score: {exc}")
 
     # อุ่นเครื่องให้สร้าง sessions
     _prime_reader_sessions(reader)
