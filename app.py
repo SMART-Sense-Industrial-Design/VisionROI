@@ -2669,7 +2669,8 @@ async def _stream_queue_over_websocket(
 
             if item is None:
                 if not close_sent:
-                    await ws.close(code=1000)
+                    with contextlib.suppress(Exception):
+                        await ws.close(code=1012, reason="stream_outage")
                     close_sent = True
                 break
             try:
