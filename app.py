@@ -22,7 +22,7 @@ import math
 from collections import defaultdict, deque
 from dataclasses import dataclass
 
-from types import ModuleType
+from types import ModuleType, FrameType
 from pathlib import Path
 import contextlib
 import inspect
@@ -74,6 +74,8 @@ inference_draw_page_boxes: dict[str, bool] = {}
 STREAM_OUTAGE_GRACE = float(os.getenv("STREAM_OUTAGE_GRACE", "3.5") or 3.5)
 STREAM_OUTAGE_RETRY = float(os.getenv("STREAM_OUTAGE_RETRY", "1.5") or 1.5)
 _stream_disconnect_sent: dict[tuple[str, int], float] = {}
+
+stream_health: dict[str, dict[str, Any]] = {}
 
 recent_notifications: list[dict[str, Any]] = []
 MAX_RECENT_NOTIFICATIONS = 200
@@ -158,6 +160,58 @@ def _stop_inference_workers() -> None:
 
 
 _start_inference_workers()
+
+
+def _utc_iso(ts: float | None) -> str | None:
+    if not isinstance(ts, (int, float)) or ts <= 0:
+        return None
+    try:
+        return datetime.fromtimestamp(float(ts), datetime.UTC).isoformat().replace("+00:00", "Z")
+    except Exception:
+        return None
+
+
+def _monotonic_to_wall(monotonic_value: float, *, now_monotonic: float | None = None) -> float | None:
+    if not isinstance(monotonic_value, (int, float)) or monotonic_value <= 0.0:
+        return None
+    current_monotonic = now_monotonic if isinstance(now_monotonic, (int, float)) else time.monotonic()
+    now_wall = time.time()
+    wall_ts = now_wall - max(current_monotonic - float(monotonic_value), 0.0)
+    return max(wall_ts, 0.0)
+
+
+def _mark_stream_state(
+    cam_id: str,
+    *,
+    state: str,
+    last_frame_time: float | None = None,
+    outage_since: float | None = None,
+    retry_after: float | None = None,
+) -> None:
+    now_wall = time.time()
+    entry: dict[str, Any] = {
+        "state": state,
+        "updated_at": now_wall,
+    }
+    updated_iso = _utc_iso(now_wall)
+    if updated_iso:
+        entry["updated_at_iso"] = updated_iso
+    if isinstance(last_frame_time, (int, float)) and last_frame_time > 0:
+        entry["last_frame_time"] = float(last_frame_time)
+        last_iso = _utc_iso(last_frame_time)
+        if last_iso:
+            entry["last_frame_time_iso"] = last_iso
+    if isinstance(outage_since, (int, float)) and outage_since > 0:
+        entry["outage_since"] = float(outage_since)
+        outage_iso = _utc_iso(outage_since)
+        if outage_iso:
+            entry["outage_since_iso"] = outage_iso
+    if retry_after is not None:
+        try:
+            entry["retry_after"] = float(retry_after)
+        except (TypeError, ValueError):
+            pass
+    stream_health[cam_id] = entry
 
 
 def _free_cam_state(cam_id: str):
@@ -1523,11 +1577,37 @@ async def _safe_stop(cam_id: str,
 # ========== Graceful shutdown (fast & robust) ==========
 _SHUTTING_DOWN = False  # prevent reentry
 
+
+def _schedule_graceful_exit() -> None:
+    """Schedule :func:`_graceful_exit` regardless of who owns the signal."""
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+
+    if loop and loop.is_running():
+        loop.call_soon_threadsafe(lambda: asyncio.create_task(_graceful_exit()))
+        return
+
+    try:
+        loop = asyncio.get_event_loop()
+    except RuntimeError:
+        loop = None
+
+    if loop and loop.is_running():
+        loop.call_soon_threadsafe(lambda: asyncio.create_task(_graceful_exit()))
+        return
+
+    with contextlib.suppress(RuntimeError):
+        asyncio.run(_graceful_exit())
+
+
 async def _shutdown_cleanup_concurrent():
     # run after_serving cleanup but cap time
     if "_shutdown_cleanup" in globals():
         with contextlib.suppress(Exception, asyncio.TimeoutError):
             await asyncio.wait_for(_shutdown_cleanup(), timeout=2.0)
+
 
 async def _graceful_exit():
     """Cancel tasks, unblock queues, release cameras, then exit fast."""
@@ -1543,11 +1623,7 @@ async def _graceful_exit():
 
 def _sync_signal_handler(signum, frame):
     """Ensure SIGTERM/SIGINT triggers the same fast path."""
-    try:
-        loop = asyncio.get_event_loop()
-        loop.call_soon_threadsafe(lambda: asyncio.create_task(_graceful_exit()))
-    except RuntimeError:
-        os._exit(0)
+    _schedule_graceful_exit()
 
 # install sync handlers early (more reliable than loop.add_signal_handler for our case)
 signal.signal(signal.SIGTERM, _sync_signal_handler)
@@ -1716,6 +1792,7 @@ async def read_and_queue_frame(
     queue_key = (cam_id, id(queue))
     now_monotonic = time.monotonic()
     frame = await worker.read()
+    outage_signaled = False
     if frame is None:
         last_frame_ts = (
             worker.last_frame_timestamp()
@@ -1735,8 +1812,18 @@ async def read_and_queue_frame(
                 except Exception:
                     pass
                 else:
+                    outage_signaled = True
                     if retry_after > 0:
                         _stream_disconnect_sent[queue_key] = now_monotonic
+            if outage_signaled:
+                last_frame_wall = _monotonic_to_wall(last_frame_ts, now_monotonic=now_monotonic)
+                _mark_stream_state(
+                    cam_id,
+                    state="outage",
+                    last_frame_time=last_frame_wall,
+                    outage_since=last_frame_wall,
+                    retry_after=retry_after,
+                )
         await asyncio.sleep(0.01)
         return
     if np is not None and hasattr(frame, "size") and frame.size == 0:
@@ -1774,6 +1861,7 @@ async def read_and_queue_frame(
     packet = FramePacket(payload=frame_bytes, created_at=time.monotonic(), frame_time=frame_time)
     _stream_disconnect_sent.pop(queue_key, None)
     await queue.put(packet)
+    _mark_stream_state(cam_id, state="active", last_frame_time=frame_time)
     await asyncio.sleep(0)
 
 
@@ -2494,6 +2582,7 @@ async def start_camera_task(
             camera_workers[cam_id] = worker
             camera_resolutions[cam_id] = (worker.width, worker.height)
 
+        _mark_stream_state(cam_id, state="starting")
         task = asyncio.create_task(loop_func(cam_id))
         task_dict[cam_id] = task
         return task, {"status": "started", "cam_id": cam_id}, 200
@@ -2546,6 +2635,7 @@ async def stop_camera_task(
         if not inference_tasks:
             _stop_inference_workers()
 
+        _mark_stream_state(cam_id, state="stopped")
         return task, {"status": status, "cam_id": cam_id}, 200
 
 
@@ -2647,7 +2737,8 @@ async def _stream_queue_over_websocket(
 
             if item is None:
                 if not close_sent:
-                    await ws.close(code=1000)
+                    with contextlib.suppress(Exception):
+                        await ws.close(code=1012, reason="stream_outage")
                     close_sent = True
                 break
             try:
@@ -3362,6 +3453,8 @@ async def perform_stop_inference(cam_id: str, save_state: bool = True):
     last_inference_times.pop(cam_id, None)
     inference_result_timeouts.pop(cam_id, None)
     inference_draw_page_boxes.pop(cam_id, None)
+
+    _mark_stream_state(cam_id, state="stopped")
     _free_cam_state(cam_id)
     gc.collect()
     malloc_trim()
@@ -3479,12 +3572,15 @@ async def inference_status(cam_id: str):
     group = inference_groups.get(cam_id)
     if not isinstance(group, str):
         group = ""
-    return jsonify({
+    health = stream_health.get(cam_id)
+    payload = {
         "running": running,
         "cam_id": cam_id,
         "source": source,
         "group": group,
-    })
+        "stream_health": health if isinstance(health, dict) else {"state": "unknown"},
+    }
+    return jsonify(payload)
 
 
 @app.route('/roi_stream_status/<string:cam_id>', methods=["GET"])
@@ -3556,7 +3652,15 @@ if __name__ == "__main__":
 
     if args.use_uvicorn:
         import uvicorn
-        uvicorn.run(
+
+        class VisionROIServer(uvicorn.Server):
+            """Custom server that always triggers our fast shutdown."""
+
+            def handle_exit(self, sig: int, frame: FrameType | None) -> None:  # type: ignore[override]
+                super().handle_exit(sig, frame)
+                _schedule_graceful_exit()
+
+        config = uvicorn.Config(
             "app:app",
             host="0.0.0.0",
             port=args.port,
@@ -3566,5 +3670,7 @@ if __name__ == "__main__":
             timeout_graceful_shutdown=2,
             workers=1,
         )
+        server = VisionROIServer(config)
+        server.run()
     else:
         app.run(port=args.port)
