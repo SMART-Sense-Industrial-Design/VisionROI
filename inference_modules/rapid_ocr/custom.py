@@ -8,6 +8,7 @@ from PIL import Image
 import cv2
 import logging
 import os
+import platform
 from datetime import datetime
 import threading
 from pathlib import Path
@@ -18,17 +19,13 @@ from src.utils.image import save_image_async
 
 from inference_modules.base_ocr import BaseOCR, np, Image, cv2
 
-# ------------------------------
-# RapidOCR (ONNXRuntime) backend
-# ------------------------------
 try:
-    from rapidocr_onnxruntime import RapidOCR as RapidOCRLib  # type: ignore
-    import rapidocr_onnxruntime as rapidocr_pkg  # for model path probing
+    from rapidocr import RapidOCR as RapidOCRLib  # type: ignore
+    from rapidocr.utils.typings import EngineType  # type: ignore
 except Exception:
     RapidOCRLib = None  # type: ignore[assignment]
-    rapidocr_pkg = None  # type: ignore[assignment]
+    EngineType = None  # type: ignore[assignment]
 
-# onnxruntime ใช้สำหรับตรวจสอบ/เลือก EP
 try:
     import onnxruntime as ort
 except Exception:
@@ -50,371 +47,186 @@ last_ocr_results: dict = {}
 _last_ocr_lock = threading.Lock()
 
 
-# ==============================
-# Utilities สำหรับ ORT/TensorRT
-# ==============================
-def _ensure_default_ort_envs() -> None:
-    os.environ.setdefault("ORT_TENSORRT_ENGINE_CACHE_ENABLE", "1")
-    os.environ.setdefault(
-        "ORT_TENSORRT_ENGINE_CACHE_PATH",
-        str((_data_sources_root / "trt_cache").resolve()),
-    )
-    os.environ.setdefault("ORT_TENSORRT_FP16_ENABLE", "1")
-    os.environ.setdefault("ORT_TENSORRT_VERBOSE_LOGGING", "1")  # เพิ่ม log ของ TRT EP
-    os.environ.setdefault("ORT_CUDA_DEVICE_ID", "0")
-    # ลดความดังของ ORT ใน prod (0=VERBOSE, 3=WARNING)
-    os.environ.setdefault("ORT_LOGGING_LEVEL", "3")
-    os.environ.setdefault("ORT_CUDA_GRAPH_ENABLE", "1")
-    os.environ.setdefault("CUDA_VISIBLE_DEVICES", "0")
+_BACKEND_OVERRIDE_KEYS = ("RAPIDOCR_BACKENDS", "RAPIDOCR_BACKEND")
+_FORCE_PI_ENV = "VISIONROI_FORCE_PI5"
 
 
-def _available_providers() -> list[str]:
-    if ort is None:
-        return []
+def _read_device_model() -> str:
+    path = Path("/proc/device-tree/model")
     try:
-        av = ort.get_available_providers()
-        logger.warning(f"[RapidOCR-ORT] onnxruntime available providers: {av}")
-        return av
-    except Exception as e:
-        logger.warning(f"[RapidOCR-ORT] get_available_providers() failed: {e}")
-        return []
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        return text.replace("\x00", "").strip()
+    except Exception:
+        return ""
 
 
-def _build_provider_priority() -> list[str]:
-    # ให้สามารถ override ผ่าน env ได้
-    env_val = os.getenv("RAPIDOCR_ORT_PROVIDERS")
-    if env_val:
-        providers = [p.strip() for p in env_val.split(",") if p.strip()]
-        return providers
+def _is_raspberry_pi5() -> bool:
+    override = os.getenv(_FORCE_PI_ENV)
+    if override is not None:
+        return override.strip().lower() in {"1", "true", "yes", "on"}
 
-    # ค่าตั้งต้น (จะ reorder ตาม availability ภายหลัง)
-    preferred = ["TensorrtExecutionProvider", "CUDAExecutionProvider", "CPUExecutionProvider"]
-    av = _available_providers()
-    if not av:
-        # หาก onnxruntime ไม่รายงาน provider ใดเลย (เช่นไม่ได้ติดตั้ง GPU EP)
-        # ให้กลับไปใช้ CPU ล้วน เพื่อหลีกเลี่ยง warning จาก ORT ที่พยายามโหลด EP ที่ไม่มี
-        return ["CPUExecutionProvider"]
+    model = _read_device_model().lower()
+    if "raspberry" in model and "pi 5" in model:
+        return True
 
-    chosen = [p for p in preferred if p in av]
-    if not chosen:
-        # กรณีที่รายการ preferred ไม่มีอยู่ใน av (เช่น ใช้ CoreML บน macOS)
-        # ยังต้องแน่ใจว่า CPU อยู่ในลิสต์เพื่อให้ RapidOCR ทำงานได้
-        if "CPUExecutionProvider" in av:
-            chosen.append("CPUExecutionProvider")
-    elif "CPUExecutionProvider" not in chosen:
-        chosen.append("CPUExecutionProvider")
-    return chosen
-
-
-def _build_provider_options_map() -> dict[str, dict]:
-    trt_opts = {
-        "trt_max_workspace_size": 1 << 30,  # 1GB
-        "trt_engine_cache_enable": 1,
-        "trt_engine_cache_path": os.environ.get("ORT_TENSORRT_ENGINE_CACHE_PATH", "trt_cache"),
-        "trt_fp16_enable": int(os.environ.get("ORT_TENSORRT_FP16_ENABLE", "1")),
-        "trt_cuda_graph_enable": 1,
-        "trt_timing_cache_enable": 1,
-        "trt_timing_cache_path": os.environ.get("ORT_TENSORRT_ENGINE_CACHE_PATH", "trt_cache"),
-    }
-    cuda_opts = {
-        "device_id": int(os.environ.get("ORT_CUDA_DEVICE_ID", "0")),
-        "arena_extend_strategy": "kSameAsRequested",
-    }
-    return {
-        "TensorrtExecutionProvider": trt_opts,
-        "CUDAExecutionProvider": cuda_opts,
-        "CPUExecutionProvider": {},
-    }
-
-
-def _select_provider_options(providers: list[str]) -> list[dict]:
-    m = _build_provider_options_map()
-    return [m.get(p, {}) for p in providers]
-
-
-def _make_sess_options() -> "ort.SessionOptions | None":
-    if ort is None:
-        return None
-    so = ort.SessionOptions()
-    so.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
-    so.enable_mem_pattern = True
-    so.enable_cpu_mem_arena = True
     try:
-        import multiprocessing
-        so.intra_op_num_threads = max(1, multiprocessing.cpu_count() // 2)
+        uname = platform.uname()
+        hints = " ".join(
+            [uname.system, uname.node, uname.release, uname.version, uname.machine, uname.processor]
+        ).lower()
+        if "raspberry" in hints and "pi" in hints and "5" in hints:
+            return True
     except Exception:
         pass
-    return so
+    return False
 
 
-def _session_uses_gpu(sess: Any) -> bool:
+def _gpu_execution_available() -> bool:
+    if ort is None:
+        return False
     try:
-        ps = sess.get_providers() if hasattr(sess, "get_providers") else []
-        return any(p in ("TensorrtExecutionProvider", "CUDAExecutionProvider") for p in ps)
-    except Exception:
+        providers = ort.get_available_providers()
+        logger.info(f"[RapidOCR] onnxruntime available providers: {providers}")
+        return any(p in {"CUDAExecutionProvider", "TensorrtExecutionProvider"} for p in providers)
+    except Exception as exc:
+        logger.debug(f"[RapidOCR] failed to query onnxruntime providers: {exc}")
         return False
 
 
-# =======================
-# Model path discovery 🔎
-# =======================
-def _discover_rapidocr_model_paths() -> dict[str, str]:
-    """
-    คืน dict ที่อาจมีคีย์ det/rec/cls -> absolute path ของ .onnx
-    ลำดับค้นหา:
-      1) ENV: RAPIDOCR_DET_PATH / RAPIDOCR_REC_PATH / RAPIDOCR_CLS_PATH
-      2) ~/.rapidocr/**/*.onnx
-      3) โฟลเดอร์ในแพ็กเกจ rapidocr_onnxruntime
-    """
-    found: dict[str, str] = {}
+def _parse_backend_overrides() -> list[str]:
+    for key in _BACKEND_OVERRIDE_KEYS:
+        value = os.getenv(key)
+        if value:
+            tokens = [token.strip().lower() for token in value.split(",") if token.strip()]
+            if tokens:
+                logger.warning(f"[RapidOCR] using backend override from {key}: {tokens}")
+                return tokens
+    return []
 
-    # 1) ENV override
-    env_keys = [("det", "RAPIDOCR_DET_PATH"), ("rec", "RAPIDOCR_REC_PATH"), ("cls", "RAPIDOCR_CLS_PATH")]
-    for k, envk in env_keys:
-        p = os.getenv(envk)
-        if p and Path(p).exists():
-            found[k] = str(Path(p).resolve())
 
-    def _pick_best(cands: list[Path], prefer_sub: str | None = None) -> Path | None:
-        if not cands:
-            return None
-        if prefer_sub:
-            pri = [c for c in cands if prefer_sub in c.name.lower()]
-            if pri:
-                return max(pri, key=lambda x: x.stat().st_size)
-        return max(cands, key=lambda x: x.stat().st_size)
+def _candidate_backends() -> list[str]:
+    overrides = _parse_backend_overrides()
+    if overrides:
+        return overrides
 
-    # 2) ~/.rapidocr scan
+    candidates: list[str] = []
+    if _is_raspberry_pi5():
+        candidates.append("paddle")
+    if _gpu_execution_available():
+        candidates.append("onnxruntime-cuda")
+    candidates.append("onnxruntime")
+    return candidates
+
+
+def _ensure_engine_enum(name: str) -> "EngineType":
+    if EngineType is None:
+        raise RuntimeError("rapidocr EngineType enum is unavailable")
+    mapping = {
+        "onnxruntime": EngineType.ONNXRUNTIME,
+        "onnxruntime-cuda": EngineType.ONNXRUNTIME,
+        "ort": EngineType.ONNXRUNTIME,
+        "cpu": EngineType.ONNXRUNTIME,
+        "openvino": EngineType.OPENVINO,
+        "paddle": EngineType.PADDLE,
+        "torch": EngineType.TORCH,
+    }
+    name_lower = name.lower()
+    if name_lower not in mapping:
+        raise ValueError(f"unknown RapidOCR backend '{name}'")
+    return mapping[name_lower]
+
+
+def _build_params_for_backend(backend: str) -> dict[str, Any]:
+    engine_enum = _ensure_engine_enum(backend)
+    params: dict[str, Any] = {
+        "Global.use_det": False,
+        "Global.use_cls": False,
+        "Det.engine_type": engine_enum,
+        "Cls.engine_type": engine_enum,
+        "Rec.engine_type": engine_enum,
+    }
+
+    backend_lower = backend.lower()
+    if backend_lower in {"onnxruntime", "onnxruntime-cuda", "ort", "cpu"}:
+        use_cuda = backend_lower == "onnxruntime-cuda"
+        params["EngineConfig.onnxruntime.use_cuda"] = use_cuda
+        if use_cuda:
+            device_id = os.getenv("ORT_CUDA_DEVICE_ID")
+            if device_id is not None:
+                try:
+                    params["EngineConfig.onnxruntime.cuda_ep_cfg.device_id"] = int(device_id)
+                except ValueError:
+                    logger.debug(f"[RapidOCR] invalid ORT_CUDA_DEVICE_ID value: {device_id}")
+    elif backend_lower == "paddle":
+        params["EngineConfig.paddle.use_cuda"] = False
+    return params
+
+
+def _log_backend_summary(reader: Any, backend: str) -> None:
     try:
-        home_cache = Path.home() / ".rapidocr"
-        if home_cache.exists():
-            onnx_files = list(home_cache.rglob("*.onnx"))
-            if "det" not in found:
-                det = _pick_best([p for p in onnx_files if "det" in p.name.lower()], "det")
-                if det:
-                    found["det"] = str(det.resolve())
-            if "rec" not in found:
-                rec = _pick_best([p for p in onnx_files if "rec" in p.name.lower() or "crnn" in p.name.lower()], "rec")
-                if rec:
-                    found["rec"] = str(rec.resolve())
-            if "cls" not in found:
-                cls = _pick_best([p for p in onnx_files if "cls" in p.name.lower()], "cls")
-                if cls:
-                    found["cls"] = str(cls.resolve())
-    except Exception as e:
-        logger.debug(f"[RapidOCR-ORT] scan ~/.rapidocr failed: {e}")
-
-    # 3) package folder scan
-    try:
-        if rapidocr_pkg is not None:
-            base = Path(rapidocr_pkg.__file__).resolve().parent
-            onnx_files = list(base.rglob("*.onnx"))
-            if "det" not in found:
-                det = _pick_best([p for p in onnx_files if "det" in p.name.lower()], "det")
-                if det:
-                    found["det"] = str(det.resolve())
-            if "rec" not in found:
-                rec = _pick_best([p for p in onnx_files if "rec" in p.name.lower() or "crnn" in p.name.lower()], "rec")
-                if rec:
-                    found["rec"] = str(rec.resolve())
-            if "cls" not in found:
-                cls = _pick_best([p for p in onnx_files if "cls" in p.name.lower()], "cls")
-                if cls:
-                    found["cls"] = str(cls.resolve())
-    except Exception as e:
-        logger.debug(f"[RapidOCR-ORT] scan rapidocr package failed: {e}")
-
-    logger.warning(f"[RapidOCR-ORT] discovered model paths: {found}")
-    return found
-
-
-# ================
-# Strict build 🔧
-# ================
-def _try_create_session_strict(
-    model_path: str,
-    order: list[str],
-    so: "ort.SessionOptions",
-) -> tuple[Any | None, list[str]]:
-    """
-    สร้าง session แบบ strict:
-      - ขอ EP ทีละตัว (ไม่พ่วง CPU) เพื่อให้เห็น error จริง
-      - ถ้า session ที่ได้ไม่ได้ใช้ EP ที่ขอ (เช็ค s.get_providers()[0]) => ถือว่า fail
-      - ถ้า GPU พังทุกตัว ค่อย fallback CPU ตอนท้าย
-    """
-    errors: list[str] = []
-    for ep in order:
-        try_providers = [ep]
-        try_opts = _select_provider_options(try_providers)
-        try:
-            s = ort.InferenceSession(
-                model_path,
-                sess_options=so,
-                providers=try_providers,
-                provider_options=try_opts,
-            )
-            actual = s.get_providers() if hasattr(s, "get_providers") else []
-            if not actual or actual[0] != ep:
-                raise RuntimeError(f"requested {ep} but actual providers={actual}")
-            logger.warning(f"[RapidOCR-ORT] built session ✔️ requested={ep} actual={actual}")
-            return s, errors
-        except Exception as e:
-            msg = f"{ep} failed or not actually used: {e}"
-            errors.append(msg)
-            logger.warning(f"[RapidOCR-ORT] {_short_model(model_path)} -> {msg}")
-
-    # Fallback CPU (สุดท้ายจริง ๆ)
-    try:
-        s = ort.InferenceSession(
-            model_path,
-            sess_options=so,
-            providers=["CPUExecutionProvider"],
-            provider_options=[{}],
-        )
-        logger.warning(f"[RapidOCR-ORT] fallback CPUExecutionProvider for {_short_model(model_path)}")
-        return s, errors
-    except Exception as e:
-        errors.append(f"CPUExecutionProvider failed too: {e}")
-        logger.exception(f"[RapidOCR-ORT] even CPU failed for {_short_model(model_path)}: {e}")
-        return None, errors
-
-
-def _short_model(p: str) -> str:
-    try:
-        return str(Path(p).name)
-    except Exception:
-        return p
-
-
-def _rebind_internal_sessions_if_cpu_only(reader: Any, providers: list[str], model_paths: dict[str, str]) -> None:
-    """
-    รีบิลด์ใหม่ด้วยลำดับ strict ตาม providers ที่เลือกไว้ (ยึดตาม env ถ้ามี):
-      - CUDA -> TRT (หรือเฉพาะตัวที่มีใน providers)
-      - ถ้า GPU ใช้ไม่ได้ทั้งหมด ค่อย fallback CPU
-    """
-    if ort is None:
-        return
-
-    so = _make_sess_options()
-
-    # ลำดับความพยายาม: ยึดตาม providers ที่ถูกเลือกไว้ (เช่นจาก env)
-    gpu_candidates = ["TensorrtExecutionProvider", "CUDAExecutionProvider"]
-    available = set(_available_providers())
-
-    try_order_env = [ep for ep in providers if ep in gpu_candidates]
-    try_order_env = [ep for ep in try_order_env if ep in available]
-
-    default_try_order = [ep for ep in gpu_candidates if ep in available]
-
-    try_order = try_order_env if try_order_env else default_try_order
-
-    if not try_order:
-        logger.warning(
-            "[RapidOCR-ORT] no GPU execution providers available; skip strict rebuild"
-        )
-        return
-
-    def _rebuild_one(name: str, sess_attr: str, key_in_paths: str):
-        mp = model_paths.get(key_in_paths)
-        if not mp:
-            logger.warning(f"[RapidOCR-ORT] cannot rebuild {name}_sess: model path not found")
+        cfg = getattr(reader, "cfg", None)
+        if cfg is None:
+            logger.warning(f"[RapidOCR] initialized backend='{backend}' (cfg unavailable)")
             return
-        sess, errs = _try_create_session_strict(mp, try_order, so)
-        if errs:
-            logger.warning(f"[RapidOCR-ORT] {_short_model(mp)} GPU init errors: {errs}")
-        if sess is not None:
-            setattr(reader, sess_attr, sess)
-            if hasattr(sess, "get_providers"):
-                logger.warning(f"[RapidOCR-ORT] {sess_attr} providers now = {sess.get_providers()}")
+        det_engine = getattr(getattr(cfg, "Det", None), "engine_type", None)
+        rec_engine = getattr(getattr(cfg, "Rec", None), "engine_type", None)
+        cls_engine = getattr(getattr(cfg, "Cls", None), "engine_type", None)
+        logger.warning(
+            "[RapidOCR] initialized backend='%s' det=%s rec=%s cls=%s",
+            backend,
+            getattr(det_engine, "value", det_engine),
+            getattr(rec_engine, "value", rec_engine),
+            getattr(cls_engine, "value", cls_engine),
+        )
+    except Exception as exc:
+        logger.debug(f"[RapidOCR] unable to inspect backend config: {exc}")
 
-    _rebuild_one("det", "text_det_sess", "det")
-    _rebuild_one("rec", "text_rec_sess", "rec")
-    _rebuild_one("cls", "text_cls_sess", "cls")
 
-
-def _prime_reader_sessions(reader: Any) -> None:
-    """
-    บังคับให้ RapidOCR สร้าง det/rec/cls sessions (แก้เคส lazy-init)
-    """
+def _warmup_reader(reader: Any) -> None:
     try:
         import numpy as _np
+
         dummy = _np.zeros((8, 8, 3), dtype=_np.uint8)
         reader(dummy)
-        logger.warning("[RapidOCR-ORT] warmup call executed to initialize sessions")
-    except Exception as e:
-        logger.warning(f"[RapidOCR-ORT] warmup call failed: {e}")
+        logger.info("[RapidOCR] warm-up call executed successfully")
+    except Exception as exc:
+        logger.debug(f"[RapidOCR] warm-up call failed: {exc}")
 
 
 def _new_reader_instance() -> Any:
     if RapidOCRLib is None:
-        raise RuntimeError("rapidocr_onnxruntime is not installed")
+        raise RuntimeError("rapidocr library is not installed")
 
-    _ensure_default_ort_envs()
-    providers = _build_provider_priority()
-    model_paths = _discover_rapidocr_model_paths()
-    logger.warning(f"[RapidOCR-ORT] requested providers={providers}")
+    candidates = _candidate_backends()
+    errors: list[str] = []
+    logger.warning(f"[RapidOCR] backend candidates: {candidates}")
 
-    # 1) พยายามส่ง providers + model paths เข้า RapidOCRLib โดยตรง (ถ้ารองรับ)
-    reader = None
-    try:
-        kwargs: dict[str, Any] = {"providers": providers}
-        # ใส่ path ถ้าจับได้ (ชื่อพารามิเตอร์ที่ถูกต้อง)
-        if "det" in model_paths:
-            kwargs.setdefault("det_model_path", model_paths["det"])
-        if "rec" in model_paths:
-            kwargs.setdefault("rec_model_path", model_paths["rec"])
-        if "cls" in model_paths:
-            kwargs.setdefault("cls_model_path", model_paths["cls"])
-        kwargs.setdefault("use_det", False)
-        kwargs.setdefault("use_cls", False)
-        reader = RapidOCRLib(**kwargs)  # type: ignore
-        logger.warning("[RapidOCR-ORT] RapidOCRLib created with providers(+model_paths) ✅")
-    except TypeError:
-        reader = RapidOCRLib()  # type: ignore
-        logger.warning("[RapidOCR-ORT] RapidOCRLib ignored providers/paths (fallback) ❌")
-    except Exception as e:
-        logger.exception(f"[RapidOCR-ORT] RapidOCRLib init failed: {e}")
-        raise
+    for backend in candidates:
+        try:
+            params = _build_params_for_backend(backend)
+        except Exception as exc:
+            errors.append(f"{backend}: {exc}")
+            logger.warning(f"[RapidOCR] skipping backend {backend}: {exc}")
+            continue
 
-    # อุ่นเครื่องให้สร้าง sessions
-    _prime_reader_sessions(reader)
+        try:
+            reader = RapidOCRLib(params=params)  # type: ignore[call-arg]
+        except Exception as exc:
+            errors.append(f"{backend}: {exc}")
+            logger.warning(f"[RapidOCR] backend {backend} failed to initialize: {exc}")
+            continue
 
-    # Log providers ของแต่ละ session (รอบแรกหลัง warm-up)
-    try:
-        if hasattr(reader, "text_det_sess"):
-            logger.warning(f"[RapidOCR-ORT] text_det_sess providers={reader.text_det_sess.get_providers()}")
-        if hasattr(reader, "text_rec_sess"):
-            logger.warning(f"[RapidOCR-ORT] text_rec_sess providers={reader.text_rec_sess.get_providers()}")
-        if hasattr(reader, "text_cls_sess"):
-            logger.warning(f"[RapidOCR-ORT] text_cls_sess providers={reader.text_cls_sess.get_providers()}")
-    except Exception as e:
-        logger.debug(f"[RapidOCR-ORT] cannot inspect actual providers: {e}")
+        _log_backend_summary(reader, backend)
+        _warmup_reader(reader)
+        return reader
 
-    # 2) ถ้ายัง CPU-only ให้รีบิลด์ด้วย strict ตามลำดับ (ยึด env ถ้ามี)
-    try:
-        det_ok = hasattr(reader, "text_det_sess") and _session_uses_gpu(reader.text_det_sess)
-        rec_ok = hasattr(reader, "text_rec_sess") and _session_uses_gpu(reader.text_rec_sess)
-        cls_ok = hasattr(reader, "text_cls_sess") and _session_uses_gpu(reader.text_cls_sess)
-        if not (det_ok or rec_ok or cls_ok):
-            logger.warning("[RapidOCR-ORT] sessions appear CPU-only; attempting to rebuild with GPU providers…")
-            _rebind_internal_sessions_if_cpu_only(reader, providers, model_paths)
-
-            # log ซ้ำหลังรีบิลด์
-            if hasattr(reader, "text_det_sess"):
-                logger.warning(f"[RapidOCR-ORT] text_det_sess providers(after)={reader.text_det_sess.get_providers()}")
-            if hasattr(reader, "text_rec_sess"):
-                logger.warning(f"[RapidOCR-ORT] text_rec_sess providers(after)={reader.text_rec_sess.get_providers()}")
-            if hasattr(reader, "text_cls_sess"):
-                logger.warning(f"[RapidOCR-ORT] text_cls_sess providers(after)={reader.text_cls_sess.get_providers()}")
-    except Exception as e:
-        logger.exception(f"[RapidOCR-ORT] post-init GPU self-check failed: {e}")
-
-    return reader
+    error_msg = "; ".join(errors) if errors else "no backend candidates"
+    raise RuntimeError(f"RapidOCR initialization failed: {error_msg}")
 
 
 def _get_global_reader():
     if RapidOCRLib is None:
-        raise RuntimeError("rapidocr_onnxruntime library is not installed")
+        raise RuntimeError("rapidocr library is not installed")
     global _reader
     with _reader_lock:
         if _reader is None:
@@ -678,7 +490,7 @@ class RapidOCR(BaseOCR):
 
     def _get_reader(self):
         if RapidOCRLib is None:
-            raise RuntimeError("rapidocr_onnxruntime library is not installed")
+            raise RuntimeError("rapidocr library is not installed")
         with self._reader_lock:
             if self._reader is None:
                 self._reader = _new_reader_instance()
