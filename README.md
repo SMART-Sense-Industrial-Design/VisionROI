@@ -173,10 +173,11 @@ VisionROI/
 - `Pillow`
 - `easyocr`
 - `rapidocr`
-- `rapidocr_onnxruntime`
 - `pytesseract`
 - `paho-mqtt`
 - `requests`
+
+> ℹ️ โมดูล `rapid_ocr` จะเลือก backend ให้อัตโนมัติ: หากตรวจพบ Raspberry Pi 5 จะพยายามใช้ Paddle engine เพื่อรีดประสิทธิภาพบน ARM, หากมี GPU ที่รองรับ ONNX Runtime (CUDA/TensorRT) จะสลับไปใช้ ONNX Runtime พร้อม CUDA, และในกรณีอื่นจะ fallback เป็น ONNX Runtime (CPU) ให้โดยอัตโนมัติ สามารถ override ด้วย environment `RAPIDOCR_BACKENDS` ได้ตามต้องการ
 
 ### Dependencies เพิ่มเติม (Extras)
 | Extra | แพ็กเกจที่ติดตั้ง | การใช้งานหลัก |
