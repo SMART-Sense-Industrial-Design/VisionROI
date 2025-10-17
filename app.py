@@ -92,6 +92,21 @@ STATE_FILE = "service_state.json"
 PAGE_SCORE_THRESHOLD = 0.4
 DEFAULT_PENDING_RESULT_TIMEOUT = float(os.getenv("INFERENCE_RESULT_TIMEOUT", "10.0") or 10.0)
 
+_NETWORK_STREAM_SCHEMES = {
+    "http",
+    "https",
+    "rtsp",
+    "rtsps",
+    "rtmp",
+    "rtmps",
+    "udp",
+    "tcp",
+    "srt",
+    "webrtc",
+    "ws",
+    "wss",
+}
+
 app = Quart(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 100 * 1024 * 1024
 ALLOWED_ROI_DIR = os.path.realpath("data_sources")
@@ -337,6 +352,38 @@ def _safe_in_base(base: str, target: str) -> bool:
 
 def get_cam_lock(cam_id: str) -> asyncio.Lock:
     return camera_locks.setdefault(cam_id, asyncio.Lock())
+
+
+def _should_force_ffmpeg_backend(source: object, backend: str) -> bool:
+    """Return ``True`` when *source* looks like a network stream and ffmpeg is safer.
+
+    กล้องที่สตรีมผ่าน RTSP/HTTP/RTMP จาก media relay (เช่น mediamtx) มักต้องใช้
+    backend ``ffmpeg`` แทน ``opencv`` เพื่อให้จับเฟรมได้เสถียร โดยเฉพาะกับ build ของ
+    OpenCV ที่ตัดการรองรับ FFmpeg ออก การตรวจสอบนี้จะช่วยสลับ backend ให้อัตโนมัติ
+    เพื่อให้ผู้ใช้ใส่ URL เครือข่ายได้โดยไม่ต้องเปลี่ยนค่าเอง
+    """
+
+    if backend == "ffmpeg":
+        return False
+
+    if isinstance(source, os.PathLike):
+        try:
+            source = os.fspath(source)
+        except TypeError:
+            return False
+
+    if not isinstance(source, str):
+        return False
+
+    src = source.strip()
+    if not src or "://" not in src:
+        return False
+
+    scheme = src.split("://", 1)[0].lower()
+    if not scheme:
+        return False
+
+    return scheme in _NETWORK_STREAM_SCHEMES
 
 
 def save_service_state() -> None:
@@ -687,10 +734,14 @@ mqtt_configs = load_mqtt_configs_from_disk()
 async def restore_service_state() -> None:
     cams = load_service_state()
     for cam_id, cfg in cams.items():
-        camera_sources[cam_id] = cfg.get("source")
+        source_value = cfg.get("source")
+        camera_sources[cam_id] = source_value
         res = cfg.get("resolution") or [None, None]
         camera_resolutions[cam_id] = (res[0], res[1])
-        camera_backends[cam_id] = cfg.get("backend", "opencv")
+        backend_value = cfg.get("backend") or cfg.get("stream_type") or "opencv"
+        if _should_force_ffmpeg_backend(source_value, str(backend_value)):
+            backend_value = "ffmpeg"
+        camera_backends[cam_id] = str(backend_value)
         active_sources[cam_id] = cfg.get("active_source", "")
         group = cfg.get("inference_group")
         inference_intervals[cam_id] = cfg.get("interval", 1.0)
@@ -2928,6 +2979,14 @@ async def apply_camera_settings(cam_id: str, data: dict) -> bool:
         width_val = data.get("width")
         height_val = data.get("height")
         backend = data.get("stream_type", "opencv")
+        if _should_force_ffmpeg_backend(source_val, backend):
+            backend = "ffmpeg"
+            logger = getattr(app, "logger", None)
+            if logger is not None:
+                with contextlib.suppress(Exception):
+                    logger.info(
+                        "force ffmpeg backend for network stream", extra={"cam_id": cam_id}
+                    )
         try:
             w = int(width_val) if width_val not in (None, "") else None
         except ValueError:
