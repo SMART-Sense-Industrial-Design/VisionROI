@@ -187,7 +187,7 @@ def _warmup_reader(reader: Any) -> None:
         import numpy as _np
 
         dummy = _np.zeros((8, 8, 3), dtype=_np.uint8)
-        reader(dummy)
+        _run_reader(reader, dummy)
         logger.info("[RapidOCR] warm-up call executed successfully")
     except Exception as exc:
         logger.debug(f"[RapidOCR] warm-up call failed: {exc}")
@@ -424,9 +424,23 @@ def _prepare_frame_for_reader(frame):
 
 
 def _run_reader(reader, frame):
+    """เรียก RapidOCR แบบบังคับใช้เฉพาะการ Rec."""
+
+    kwargs = {
+        "use_det": False,
+        "use_cls": False,
+        "use_rec": True,
+    }
+
     # ป้องกัน race condition ระหว่างหลายเธรด
     with _reader_infer_lock:
-        return reader(frame)
+        try:
+            return reader(frame, **kwargs)
+        except TypeError as exc:
+            message = str(exc)
+            if "unexpected keyword" not in message and "positional arguments" not in message:
+                raise
+            return reader(frame)
 
 
 def _run_ocr_async(frame, roi_id, save, source) -> str:
