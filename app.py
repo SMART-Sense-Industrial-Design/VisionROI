@@ -3022,7 +3022,7 @@ async def apply_camera_settings(cam_id: str, data: dict) -> bool:
             roi_task = roi_tasks.get(cam_id)
             roi_running = roi_task is not None and not roi_task.done()
             worker_low_latency = (
-                roi_low_latency_flags.get(cam_id, False) if roi_running else False
+                roi_low_latency_flags.get(cam_id, True) if roi_running else False
             )
             if backend == "ffmpeg":
                 src_for_latency = camera_sources.get(cam_id)
@@ -3738,7 +3738,7 @@ async def start_roi_stream(cam_id: str):
         if not cfg_ok:
             return jsonify({"status": "error", "cam_id": cam_id}), 400
     _drain_queue(get_roi_frame_queue(cam_id))
-    desired_low_latency = roi_low_latency_flags.get(cam_id, False)
+    desired_low_latency = roi_low_latency_flags.get(cam_id, True)
     if low_latency_request is not None:
         desired_low_latency = bool(low_latency_request)
     backend = camera_backends.get(cam_id)
