@@ -1233,15 +1233,16 @@ class CameraWorker:
         if "no video data" in lower_line:
             self._handle_no_video_data("ffmpeg stderr", line)
             return
-        bad = (
-            "corrupt decoded frame" in line
-            or "error while decoding" in line
-            or "bad cseq" in line
-            or "Invalid NAL" in line
-            or "non-existing PPS" in line
-            or "max delay reached" in line
+        bad_keywords = (
+            "corrupt decoded frame",
+            "error while decoding",
+            "bad cseq",
+            "invalid nal",
+            "non-existing pps",
+            "max delay reached",
+            "broken pipe",
         )
-        if bad:
+        if any(keyword in lower_line for keyword in bad_keywords):
             self._err_window.append(now)
         # prune window + action
         if now - self._last_err_prune > 0.5:
