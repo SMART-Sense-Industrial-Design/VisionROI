@@ -61,6 +61,7 @@ inference_tasks: dict[str, asyncio.Task | None] = {}
 roi_frame_queues: dict[str, asyncio.Queue["FramePacket | None"]] = {}
 roi_result_queues: dict[str, asyncio.Queue[str | None]] = {}
 roi_tasks: dict[str, asyncio.Task | None] = {}
+roi_low_latency_flags: dict[str, bool] = {}
 inference_rois: dict[str, list[dict]] = {}
 active_sources: dict[str, str] = {}
 save_roi_flags: dict[str, bool] = {}
@@ -315,6 +316,7 @@ def _free_cam_state(cam_id: str):
     camera_backends.pop(cam_id, None)
     active_sources.pop(cam_id, None)
     save_roi_flags.pop(cam_id, None)
+    roi_low_latency_flags.pop(cam_id, None)
     inference_groups.pop(cam_id, None)
     inference_rois.pop(cam_id, None)
     inference_intervals.pop(cam_id, None)
@@ -407,6 +409,7 @@ def save_service_state() -> None:
             "result_timeout": inference_result_timeouts.get(cam_id,
                                                             DEFAULT_PENDING_RESULT_TIMEOUT),
             "draw_page_boxes": inference_draw_page_boxes.get(cam_id),
+            "roi_low_latency": roi_low_latency_flags.get(cam_id),
         }
         for cam_id in cam_ids
     }
@@ -760,6 +763,10 @@ async def restore_service_state() -> None:
             inference_draw_page_boxes.pop(cam_id, None)
         else:
             inference_draw_page_boxes[cam_id] = bool(draw_flag)
+        if "roi_low_latency" in cfg:
+            roi_low_latency_flags[cam_id] = bool(cfg.get("roi_low_latency"))
+        else:
+            roi_low_latency_flags.pop(cam_id, None)
         if cfg.get("inference_running"):
             await perform_start_inference(cam_id, group=group, save_state=False)
         elif group is not None:
@@ -3014,7 +3021,9 @@ async def apply_camera_settings(cam_id: str, data: dict) -> bool:
             width, height = camera_resolutions.get(cam_id, (None, None))
             roi_task = roi_tasks.get(cam_id)
             roi_running = roi_task is not None and not roi_task.done()
-            worker_low_latency = bool(roi_running)
+            worker_low_latency = (
+                roi_low_latency_flags.get(cam_id, True) if roi_running else False
+            )
             if backend == "ffmpeg":
                 src_for_latency = camera_sources.get(cam_id)
                 src_str = str(src_for_latency)
@@ -3719,12 +3728,19 @@ async def start_roi_stream(cam_id: str):
     if inference_tasks.get(cam_id) and not inference_tasks[cam_id].done():
         return jsonify({"status": "inference_running", "cam_id": cam_id}), 400
     data = await request.get_json() or {}
+    if not isinstance(data, dict):
+        data = {}
+    else:
+        data = dict(data)
+    low_latency_request = data.pop("low_latency", None)
     if data:
         cfg_ok = await apply_camera_settings(cam_id, data)
         if not cfg_ok:
             return jsonify({"status": "error", "cam_id": cam_id}), 400
     _drain_queue(get_roi_frame_queue(cam_id))
-    desired_low_latency = True
+    desired_low_latency = roi_low_latency_flags.get(cam_id, True)
+    if low_latency_request is not None:
+        desired_low_latency = bool(low_latency_request)
     backend = camera_backends.get(cam_id)
     src_val = camera_sources.get(cam_id)
     src_str = str(src_val)
@@ -3737,6 +3753,12 @@ async def start_roi_stream(cam_id: str):
         run_roi_loop,
         low_latency=desired_low_latency,
     )
+    if (
+        status == 200
+        and isinstance(resp, dict)
+        and resp.get("status") == "started"
+    ):
+        roi_low_latency_flags[cam_id] = desired_low_latency
     if (
         status == 200
         and isinstance(resp, dict)
