@@ -27,21 +27,24 @@ from src.utils.image import save_image_async
 from inference_modules.base_ocr import BaseOCR, np, Image, cv2
 
 try:
-    from rapidocr import TextRecognizer as RapidOCRLib  # type: ignore
-    from rapidocr.utils.typings import (  # type: ignore
+    from rapidocr_onnxruntime import TextRecognizerONNX
+    from rapidocr_onnxruntime.utils.typings import (
         EngineType,
         LangRec,
         ModelType,
         OCRVersion,
         TaskType,
     )
-except Exception:
-    RapidOCRLib = None  # type: ignore[assignment]
+
+    _RAPIDOCR_PACKAGE_NAME = "rapidocr_onnxruntime"
+except Exception:  # pragma: no cover - library might be unavailable at runtime
+    TextRecognizerONNX = None  # type: ignore[assignment]
     EngineType = None  # type: ignore[assignment]
     LangRec = None  # type: ignore[assignment]
     ModelType = None  # type: ignore[assignment]
     OCRVersion = None  # type: ignore[assignment]
     TaskType = None  # type: ignore[assignment]
+    _RAPIDOCR_PACKAGE_NAME = None
 
 MODULE_NAME = "rapid_ocr"
 logger = logging.getLogger(MODULE_NAME)
@@ -49,6 +52,10 @@ logger.setLevel(logging.INFO)
 _data_sources_root = Path(__file__).resolve().parents[2] / "data_sources"
 
 _DEFAULT_TEXT_RECOGNIZER_CONFIG: dict[str, Any] | None = None
+
+
+def _rapidocr_available() -> bool:
+    return TextRecognizerONNX is not None
 
 def _resolve_max_reader_workers() -> int:
     env_value = (os.getenv("RAPIDOCR_MAX_READERS") or "").strip()
@@ -95,7 +102,7 @@ def _ensure_reader_executor_locked() -> ThreadPoolExecutor:
 
 
 def _acquire_reader_from_pool() -> Any:
-    if RapidOCRLib is None:
+    if not _rapidocr_available():
         raise RuntimeError("rapidocr library is not installed")
 
     try:
@@ -153,22 +160,14 @@ def _load_default_text_recognizer_config() -> dict[str, Any]:
     if _DEFAULT_TEXT_RECOGNIZER_CONFIG is not None:
         return _DEFAULT_TEXT_RECOGNIZER_CONFIG
 
-    missing = [
-        name
-        for name, value in (
-            ("EngineType", EngineType),
-            ("LangRec", LangRec),
-            ("ModelType", ModelType),
-            ("OCRVersion", OCRVersion),
-            ("TaskType", TaskType),
-        )
-        if value is None
-    ]
-    if missing:
-        missing_str = ", ".join(missing)
-        raise RuntimeError(f"rapidocr enums unavailable: {missing_str}")
+    if not _rapidocr_available():
+        raise RuntimeError("rapidocr library is not installed")
 
-    spec = importlib.util.find_spec("rapidocr")
+    if _RAPIDOCR_PACKAGE_NAME is None:
+        raise RuntimeError("rapidocr package metadata is unavailable")
+
+    package_name = _RAPIDOCR_PACKAGE_NAME
+    spec = importlib.util.find_spec(package_name)
     if spec is None or not spec.submodule_search_locations:
         raise RuntimeError("rapidocr package metadata is unavailable")
 
@@ -183,20 +182,25 @@ def _load_default_text_recognizer_config() -> dict[str, Any]:
 
     rec_cfg = cfg.Rec
     try:
-        engine_type = EngineType(rec_cfg.engine_type)
-        model_type = ModelType(rec_cfg.model_type)
-        ocr_version = OCRVersion(rec_cfg.ocr_version)
-        task_type = TaskType(rec_cfg.task_type)
-        lang_type = LangRec(rec_cfg.lang_type)
+        if EngineType is not None:
+            rec_cfg.engine_type = EngineType(rec_cfg.engine_type)
+        if ModelType is not None:
+            rec_cfg.model_type = ModelType(rec_cfg.model_type)
+        if OCRVersion is not None:
+            rec_cfg.ocr_version = OCRVersion(rec_cfg.ocr_version)
+        if TaskType is not None:
+            rec_cfg.task_type = TaskType(rec_cfg.task_type)
+        if LangRec is not None:
+            rec_cfg.lang_type = LangRec(rec_cfg.lang_type)
     except Exception as exc:
         raise RuntimeError(f"invalid enum values in rapidocr config: {exc}") from exc
 
-    rec_cfg.engine_type = engine_type
-    rec_cfg.model_type = model_type
-    rec_cfg.ocr_version = ocr_version
-    rec_cfg.task_type = task_type
-    rec_cfg.lang_type = lang_type
-    rec_cfg.engine_cfg = cfg.EngineConfig[engine_type.value]
+    engine_type_value = (
+        rec_cfg.engine_type.value
+        if hasattr(rec_cfg.engine_type, "value")
+        else rec_cfg.engine_type
+    )
+    rec_cfg.engine_cfg = cfg.EngineConfig[engine_type_value]
     rec_cfg.font_path = cfg.Global.font_path
 
     _DEFAULT_TEXT_RECOGNIZER_CONFIG = OmegaConf.to_container(
@@ -206,9 +210,6 @@ def _load_default_text_recognizer_config() -> dict[str, Any]:
 
 
 def _build_text_recognizer_params() -> Any:
-    if RapidOCRLib is None:
-        raise RuntimeError("rapidocr library is not installed")
-
     base_config = _load_default_text_recognizer_config()
     params = deepcopy(base_config)
     engine_cfg = params.get("engine_cfg")
@@ -238,11 +239,12 @@ def _warmup_reader(reader: Any) -> None:
 
 
 def _new_reader_instance() -> Any:
-    if RapidOCRLib is None:
+    if not _rapidocr_available():
         raise RuntimeError("rapidocr library is not installed")
 
     params = _build_text_recognizer_params()
-    reader = RapidOCRLib(params=params)  # type: ignore[call-arg]
+
+    reader = TextRecognizerONNX(params=params)  # type: ignore[call-arg]
     _warmup_reader(reader)
     return reader
 
@@ -437,7 +439,7 @@ def _prepare_frame_for_reader(frame):
 
 
 def _run_reader(reader, frame):
-    """เรียก TextRecognizer ของ RapidOCR สำหรับงาน Rec เท่านั้น."""
+    """เรียก RapidOCR reader โดยบังคับใช้งาน Rec เท่านั้น."""
 
     request = SimpleNamespace(img=frame, return_word_box=False)
 
