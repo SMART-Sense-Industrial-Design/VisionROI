@@ -3,6 +3,8 @@ from __future__ import annotations
 import time
 from collections import deque
 from collections.abc import Iterable, Mapping
+from concurrent.futures import ThreadPoolExecutor
+from queue import Empty, LifoQueue
 from typing import Any
 from PIL import Image
 import cv2
@@ -35,15 +37,101 @@ logger = logging.getLogger(MODULE_NAME)
 logger.setLevel(logging.INFO)
 _data_sources_root = Path(__file__).resolve().parents[2] / "data_sources"
 
-_reader = None
-_reader_lock = threading.Lock()
-# RapidOCR ยังไม่ยืนยันความเป็น thread-safe ของ reader
-# จึงต้องล็อกระหว่างการเรียกใช้งานจริงเพื่อให้ผลลัพธ์นิ่ง
-_reader_infer_lock = threading.Lock()
+def _resolve_max_reader_workers() -> int:
+    env_value = (os.getenv("RAPIDOCR_MAX_READERS") or "").strip()
+    if env_value:
+        try:
+            parsed = int(env_value)
+            if parsed > 0:
+                return parsed
+            logger.warning(
+                "[RapidOCR] Ignoring non-positive RAPIDOCR_MAX_READERS=%s", env_value
+            )
+        except ValueError:
+            logger.warning(
+                "[RapidOCR] Ignoring invalid RAPIDOCR_MAX_READERS=%s", env_value
+            )
+
+    cpu_count = os.cpu_count() or 1
+    return max(1, cpu_count)
+
+
+_MAX_READER_WORKERS = _resolve_max_reader_workers()
+_reader_pool: LifoQueue[Any] = LifoQueue()
+_reader_pool_lock = threading.Lock()
+_reader_creation_executor: ThreadPoolExecutor | None = None
+_reader_created = 0
+
+logger.info(
+    "[RapidOCR] Reader pool max workers configured to %d", _MAX_READER_WORKERS
+)
 
 last_ocr_times: dict = {}
 last_ocr_results: dict = {}
 _last_ocr_lock = threading.Lock()
+
+
+def _ensure_reader_executor_locked() -> ThreadPoolExecutor:
+    global _reader_creation_executor
+    if _reader_creation_executor is None:
+        _reader_creation_executor = ThreadPoolExecutor(
+            max_workers=_MAX_READER_WORKERS,
+            thread_name_prefix="rapidocr-reader",
+        )
+    return _reader_creation_executor
+
+
+def _acquire_reader_from_pool() -> Any:
+    if RapidOCRLib is None:
+        raise RuntimeError("rapidocr library is not installed")
+
+    try:
+        return _reader_pool.get_nowait()
+    except Empty:
+        pass
+
+    create_executor: ThreadPoolExecutor | None = None
+    should_create = False
+    global _reader_created
+    with _reader_pool_lock:
+        if _reader_created < _MAX_READER_WORKERS:
+            _reader_created += 1
+            should_create = True
+            create_executor = _ensure_reader_executor_locked()
+
+    if should_create and create_executor is not None:
+        future = create_executor.submit(_new_reader_instance)
+        try:
+            reader = future.result()
+        except Exception:
+            with _reader_pool_lock:
+                _reader_created -= 1
+            raise
+        return reader
+
+    # หากไม่มี reader ว่าง ให้รอจนกว่าจะถูกคืนกลับมา
+    return _reader_pool.get()
+
+
+def _release_reader_to_pool(reader: Any) -> None:
+    if reader is None:
+        return
+    _reader_pool.put(reader)
+
+
+def _reset_reader_pool() -> None:
+    global _reader_created, _reader_creation_executor
+    while True:
+        try:
+            reader = _reader_pool.get_nowait()
+        except Empty:
+            break
+        # ปล่อยอ้างอิงเพื่อให้ GC จัดการต่อ
+        del reader
+    _reader_created = 0
+    if _reader_creation_executor is not None:
+        _reader_creation_executor.shutdown(wait=False, cancel_futures=True)
+        _reader_creation_executor = None
 
 
 def _build_onnxruntime_params() -> dict[str, Any]:
@@ -79,16 +167,6 @@ def _new_reader_instance() -> Any:
     reader = RapidOCRLib(params=params)  # type: ignore[call-arg]
     _warmup_reader(reader)
     return reader
-
-
-def _get_global_reader():
-    if RapidOCRLib is None:
-        raise RuntimeError("rapidocr library is not installed")
-    global _reader
-    with _reader_lock:
-        if _reader is None:
-            _reader = _new_reader_instance()
-        return _reader
 
 
 # ======================
@@ -289,15 +367,13 @@ def _run_reader(reader, frame):
         "use_rec": True,
     }
 
-    # ป้องกัน race condition ระหว่างหลายเธรด
-    with _reader_infer_lock:
-        try:
-            return reader(frame, **kwargs)
-        except TypeError as exc:
-            message = str(exc)
-            if "unexpected keyword" not in message and "positional arguments" not in message:
-                raise
-            return reader(frame)
+    try:
+        return reader(frame, **kwargs)
+    except TypeError as exc:
+        message = str(exc)
+        if "unexpected keyword" not in message and "positional arguments" not in message:
+            raise
+        return reader(frame)
 
 
 def _run_ocr_async(frame, roi_id, save, source) -> str:
@@ -305,8 +381,9 @@ def _run_ocr_async(frame, roi_id, save, source) -> str:
     empty_details: str | None = None
     raw_result: Any = None
     text = ""
+    reader = None
     try:
-        reader = _get_global_reader()
+        reader = _acquire_reader_from_pool()
     except Exception as e:
         logger.exception(f"roi_id={roi_id} {MODULE_NAME} OCR error: {e}")
         empty_reason = "reader_init_failed"
@@ -335,6 +412,8 @@ def _run_ocr_async(frame, roi_id, save, source) -> str:
             empty_reason = "runtime_exception"
             empty_details = f"{type(e).__name__}: {e}"
             text = ""
+        finally:
+            _release_reader_to_pool(reader)
 
     if not text and empty_reason:
         _log_empty_text_warning(logger, MODULE_NAME, roi_id, empty_reason, empty_details)
@@ -356,24 +435,15 @@ class RapidOCR(BaseOCR):
 
     def __init__(self) -> None:
         super().__init__()
-        self._reader_lock = threading.Lock()
-        self._reader = None
-
-    def _get_reader(self):
-        if RapidOCRLib is None:
-            raise RuntimeError("rapidocr library is not installed")
-        with self._reader_lock:
-            if self._reader is None:
-                self._reader = _new_reader_instance()
-            return self._reader
 
     def _run_ocr(self, frame, roi_id, save: bool, source: str) -> str:
         text = ""
         empty_reason: str | None = None
         empty_details: str | None = None
         raw_result: Any = None
+        reader = None
         try:
-            reader = self._get_reader()
+            reader = _acquire_reader_from_pool()
         except Exception as e:
             self.logger.exception(
                 f"roi_id={roi_id} {self.MODULE_NAME} OCR init error: {e}"
@@ -393,6 +463,8 @@ class RapidOCR(BaseOCR):
                 )
                 empty_reason = "runtime_exception"
                 empty_details = f"{type(e).__name__}: {e}"
+            finally:
+                _release_reader_to_pool(reader)
 
         if text:
             self.logger.info(
@@ -415,9 +487,7 @@ class RapidOCR(BaseOCR):
         return text
 
     def _cleanup_extra(self) -> None:
-        global _reader
-        with _reader_lock:
-            _reader = None
+        _reset_reader_pool()
         with _last_ocr_lock:
             last_ocr_times.clear()
             last_ocr_results.clear()
@@ -462,9 +532,7 @@ def process(
 
 
 def cleanup() -> None:
-    global _reader
-    with _reader_lock:
-        _reader = None
+    _reset_reader_pool()
     with _last_ocr_lock:
         last_ocr_times.clear()
         last_ocr_results.clear()
