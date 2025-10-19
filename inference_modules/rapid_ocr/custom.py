@@ -560,17 +560,11 @@ def process(
 
     current_time = time.monotonic()
 
+    # interval ถูกเก็บไว้เพื่อความเข้ากันได้ของ API และใช้เป็นตัวบอกเวลาเฟรมภายนอก
     with _last_ocr_lock:
-        last_time = last_ocr_times.get(roi_id)
-    diff_time = 0 if last_time is None else current_time - last_time
-    should_ocr = last_time is None or diff_time >= interval
+        last_ocr_times[roi_id] = current_time
 
-    if should_ocr:
-        with _last_ocr_lock:
-            last_ocr_times[roi_id] = current_time
-        return _run_ocr_async(frame, roi_id, save, source)
-
-    return None
+    return _run_ocr_async(frame, roi_id, save, source)
 
 
 def cleanup() -> None:
