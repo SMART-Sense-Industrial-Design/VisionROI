@@ -133,6 +133,21 @@ def _reset_reader_pool() -> None:
         _reader_creation_executor.shutdown(wait=False, cancel_futures=True)
         _reader_creation_executor = None
 
+
+def _build_onnxruntime_params() -> dict[str, Any]:
+    if EngineType is None:
+        raise RuntimeError("rapidocr EngineType enum is unavailable")
+
+    return {
+        "Global.use_det": False,
+        "Global.use_cls": False,
+        "Det.engine_type": EngineType.ONNXRUNTIME,
+        "Cls.engine_type": EngineType.ONNXRUNTIME,
+        "Rec.engine_type": EngineType.ONNXRUNTIME,
+        "EngineConfig.onnxruntime.use_cuda": False,
+    }
+
+
 def _warmup_reader(reader: Any) -> None:
     try:
         import numpy as _np
@@ -148,7 +163,8 @@ def _new_reader_instance() -> Any:
     if RapidOCRLib is None:
         raise RuntimeError("rapidocr library is not installed")
 
-    reader = RapidOCRLib(det_model=None, cls_model=None, rec_model='onnxruntime')  # type: ignore[call-arg]
+    params = _build_onnxruntime_params()
+    reader = RapidOCRLib(params=params)  # type: ignore[call-arg]
     _warmup_reader(reader)
     return reader
 
