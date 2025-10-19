@@ -8,7 +8,6 @@ from PIL import Image
 import cv2
 import logging
 import os
-import platform
 from datetime import datetime
 import threading
 from pathlib import Path
@@ -47,139 +46,18 @@ last_ocr_results: dict = {}
 _last_ocr_lock = threading.Lock()
 
 
-_BACKEND_OVERRIDE_KEYS = ("RAPIDOCR_BACKENDS", "RAPIDOCR_BACKEND")
-_FORCE_PI_ENV = "VISIONROI_FORCE_PI5"
-
-
-def _read_device_model() -> str:
-    path = Path("/proc/device-tree/model")
-    try:
-        text = path.read_text(encoding="utf-8", errors="ignore")
-        return text.replace("\x00", "").strip()
-    except Exception:
-        return ""
-
-
-def _is_raspberry_pi5() -> bool:
-    override = os.getenv(_FORCE_PI_ENV)
-    if override is not None:
-        return override.strip().lower() in {"1", "true", "yes", "on"}
-
-    model = _read_device_model().lower()
-    if "raspberry" in model and "pi 5" in model:
-        return True
-
-    try:
-        uname = platform.uname()
-        hints = " ".join(
-            [uname.system, uname.node, uname.release, uname.version, uname.machine, uname.processor]
-        ).lower()
-        if "raspberry" in hints and "pi" in hints and "5" in hints:
-            return True
-    except Exception:
-        pass
-    return False
-
-
-def _gpu_execution_available() -> bool:
-    if ort is None:
-        return False
-    try:
-        providers = ort.get_available_providers()
-        logger.info(f"[RapidOCR] onnxruntime available providers: {providers}")
-        return any(p in {"CUDAExecutionProvider", "TensorrtExecutionProvider"} for p in providers)
-    except Exception as exc:
-        logger.debug(f"[RapidOCR] failed to query onnxruntime providers: {exc}")
-        return False
-
-
-def _parse_backend_overrides() -> list[str]:
-    for key in _BACKEND_OVERRIDE_KEYS:
-        value = os.getenv(key)
-        if value:
-            tokens = [token.strip().lower() for token in value.split(",") if token.strip()]
-            if tokens:
-                logger.warning(f"[RapidOCR] using backend override from {key}: {tokens}")
-                return tokens
-    return []
-
-
-def _candidate_backends() -> list[str]:
-    overrides = _parse_backend_overrides()
-    if overrides:
-        return overrides
-
-    candidates: list[str] = []
-    if _is_raspberry_pi5():
-        candidates.append("paddle")
-    if _gpu_execution_available():
-        candidates.append("onnxruntime-cuda")
-    candidates.append("onnxruntime")
-    return candidates
-
-
-def _ensure_engine_enum(name: str) -> "EngineType":
+def _build_onnxruntime_params() -> dict[str, Any]:
     if EngineType is None:
         raise RuntimeError("rapidocr EngineType enum is unavailable")
-    mapping = {
-        "onnxruntime": EngineType.ONNXRUNTIME,
-        "onnxruntime-cuda": EngineType.ONNXRUNTIME,
-        "ort": EngineType.ONNXRUNTIME,
-        "cpu": EngineType.ONNXRUNTIME,
-        "openvino": EngineType.OPENVINO,
-        "paddle": EngineType.PADDLE,
-        "torch": EngineType.TORCH,
-    }
-    name_lower = name.lower()
-    if name_lower not in mapping:
-        raise ValueError(f"unknown RapidOCR backend '{name}'")
-    return mapping[name_lower]
 
-
-def _build_params_for_backend(backend: str) -> dict[str, Any]:
-    engine_enum = _ensure_engine_enum(backend)
-    params: dict[str, Any] = {
+    return {
         "Global.use_det": False,
         "Global.use_cls": False,
-        "Det.engine_type": engine_enum,
-        "Cls.engine_type": engine_enum,
-        "Rec.engine_type": engine_enum,
+        "Det.engine_type": EngineType.ONNXRUNTIME,
+        "Cls.engine_type": EngineType.ONNXRUNTIME,
+        "Rec.engine_type": EngineType.ONNXRUNTIME,
+        "EngineConfig.onnxruntime.use_cuda": False,
     }
-
-    backend_lower = backend.lower()
-    if backend_lower in {"onnxruntime", "onnxruntime-cuda", "ort", "cpu"}:
-        use_cuda = backend_lower == "onnxruntime-cuda"
-        params["EngineConfig.onnxruntime.use_cuda"] = use_cuda
-        if use_cuda:
-            device_id = os.getenv("ORT_CUDA_DEVICE_ID")
-            if device_id is not None:
-                try:
-                    params["EngineConfig.onnxruntime.cuda_ep_cfg.device_id"] = int(device_id)
-                except ValueError:
-                    logger.debug(f"[RapidOCR] invalid ORT_CUDA_DEVICE_ID value: {device_id}")
-    elif backend_lower == "paddle":
-        params["EngineConfig.paddle.use_cuda"] = False
-    return params
-
-
-def _log_backend_summary(reader: Any, backend: str) -> None:
-    try:
-        cfg = getattr(reader, "cfg", None)
-        if cfg is None:
-            logger.warning(f"[RapidOCR] initialized backend='{backend}' (cfg unavailable)")
-            return
-        det_engine = getattr(getattr(cfg, "Det", None), "engine_type", None)
-        rec_engine = getattr(getattr(cfg, "Rec", None), "engine_type", None)
-        cls_engine = getattr(getattr(cfg, "Cls", None), "engine_type", None)
-        logger.warning(
-            "[RapidOCR] initialized backend='%s' det=%s rec=%s cls=%s",
-            backend,
-            getattr(det_engine, "value", det_engine),
-            getattr(rec_engine, "value", rec_engine),
-            getattr(cls_engine, "value", cls_engine),
-        )
-    except Exception as exc:
-        logger.debug(f"[RapidOCR] unable to inspect backend config: {exc}")
 
 
 def _warmup_reader(reader: Any) -> None:
@@ -197,31 +75,10 @@ def _new_reader_instance() -> Any:
     if RapidOCRLib is None:
         raise RuntimeError("rapidocr library is not installed")
 
-    candidates = _candidate_backends()
-    errors: list[str] = []
-    logger.warning(f"[RapidOCR] backend candidates: {candidates}")
-
-    for backend in candidates:
-        try:
-            params = _build_params_for_backend(backend)
-        except Exception as exc:
-            errors.append(f"{backend}: {exc}")
-            logger.warning(f"[RapidOCR] skipping backend {backend}: {exc}")
-            continue
-
-        try:
-            reader = RapidOCRLib(params=params)  # type: ignore[call-arg]
-        except Exception as exc:
-            errors.append(f"{backend}: {exc}")
-            logger.warning(f"[RapidOCR] backend {backend} failed to initialize: {exc}")
-            continue
-
-        _log_backend_summary(reader, backend)
-        _warmup_reader(reader)
-        return reader
-
-    error_msg = "; ".join(errors) if errors else "no backend candidates"
-    raise RuntimeError(f"RapidOCR initialization failed: {error_msg}")
+    params = _build_onnxruntime_params()
+    reader = RapidOCRLib(params=params)  # type: ignore[call-arg]
+    _warmup_reader(reader)
+    return reader
 
 
 def _get_global_reader():
