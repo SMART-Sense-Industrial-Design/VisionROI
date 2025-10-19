@@ -4,13 +4,11 @@ import time
 from collections import deque
 from collections.abc import Iterable, Mapping
 from concurrent.futures import ThreadPoolExecutor
-from copy import deepcopy
 from queue import Empty, LifoQueue
 from types import SimpleNamespace
 from typing import Any
 from PIL import Image
 import cv2
-import importlib.util
 import logging
 import os
 from datetime import datetime
@@ -19,43 +17,23 @@ from pathlib import Path
 import gc
 from numbers import Number
 
-from omegaconf import OmegaConf
-
 from src.utils.logger import get_logger
 from src.utils.image import save_image_async
 
 from inference_modules.base_ocr import BaseOCR, np, Image, cv2
 
 try:
-    from rapidocr_onnxruntime import TextRecognizerONNX
-    from rapidocr_onnxruntime.utils.typings import (
-        EngineType,
-        LangRec,
-        ModelType,
-        OCRVersion,
-        TaskType,
-    )
-
-    _RAPIDOCR_PACKAGE_NAME = "rapidocr_onnxruntime"
+    from rapidocr_onnxruntime import RapidOCR as _RapidOCRRunner
 except Exception:  # pragma: no cover - library might be unavailable at runtime
-    TextRecognizerONNX = None  # type: ignore[assignment]
-    EngineType = None  # type: ignore[assignment]
-    LangRec = None  # type: ignore[assignment]
-    ModelType = None  # type: ignore[assignment]
-    OCRVersion = None  # type: ignore[assignment]
-    TaskType = None  # type: ignore[assignment]
-    _RAPIDOCR_PACKAGE_NAME = None
+    _RapidOCRRunner = None  # type: ignore[assignment]
 
 MODULE_NAME = "rapid_ocr"
 logger = logging.getLogger(MODULE_NAME)
 logger.setLevel(logging.INFO)
 _data_sources_root = Path(__file__).resolve().parents[2] / "data_sources"
 
-_DEFAULT_TEXT_RECOGNIZER_CONFIG: dict[str, Any] | None = None
-
-
 def _rapidocr_available() -> bool:
-    return TextRecognizerONNX is not None
+    return _RapidOCRRunner is not None
 
 def _resolve_max_reader_workers() -> int:
     env_value = (os.getenv("RAPIDOCR_MAX_READERS") or "").strip()
@@ -89,6 +67,7 @@ logger.info(
 last_ocr_times: dict = {}
 last_ocr_results: dict = {}
 _last_ocr_lock = threading.Lock()
+_reader: Any | None = None
 
 
 def _ensure_reader_executor_locked() -> ThreadPoolExecutor:
@@ -140,7 +119,7 @@ def _release_reader_to_pool(reader: Any) -> None:
 
 
 def _reset_reader_pool() -> None:
-    global _reader_created, _reader_creation_executor
+    global _reader_created, _reader_creation_executor, _reader
     while True:
         try:
             reader = _reader_pool.get_nowait()
@@ -152,79 +131,25 @@ def _reset_reader_pool() -> None:
     if _reader_creation_executor is not None:
         _reader_creation_executor.shutdown(wait=False, cancel_futures=True)
         _reader_creation_executor = None
+    _reader = None
 
 
-def _load_default_text_recognizer_config() -> dict[str, Any]:
-    global _DEFAULT_TEXT_RECOGNIZER_CONFIG
-
-    if _DEFAULT_TEXT_RECOGNIZER_CONFIG is not None:
-        return _DEFAULT_TEXT_RECOGNIZER_CONFIG
-
-    if not _rapidocr_available():
-        raise RuntimeError("rapidocr library is not installed")
-
-    if _RAPIDOCR_PACKAGE_NAME is None:
-        raise RuntimeError("rapidocr package metadata is unavailable")
-
-    package_name = _RAPIDOCR_PACKAGE_NAME
-    spec = importlib.util.find_spec(package_name)
-    if spec is None or not spec.submodule_search_locations:
-        raise RuntimeError("rapidocr package metadata is unavailable")
-
-    config_path = Path(spec.submodule_search_locations[0]) / "config.yaml"
-
-    try:
-        cfg = OmegaConf.load(str(config_path))
-    except FileNotFoundError as exc:
-        raise RuntimeError(f"rapidocr config not found at {config_path}") from exc
-    except Exception as exc:  # pragma: no cover - defensive against OmegaConf errors
-        raise RuntimeError(f"failed to load rapidocr config: {exc}") from exc
-
-    rec_cfg = cfg.Rec
-    try:
-        if EngineType is not None:
-            rec_cfg.engine_type = EngineType(rec_cfg.engine_type)
-        if ModelType is not None:
-            rec_cfg.model_type = ModelType(rec_cfg.model_type)
-        if OCRVersion is not None:
-            rec_cfg.ocr_version = OCRVersion(rec_cfg.ocr_version)
-        if TaskType is not None:
-            rec_cfg.task_type = TaskType(rec_cfg.task_type)
-        if LangRec is not None:
-            rec_cfg.lang_type = LangRec(rec_cfg.lang_type)
-    except Exception as exc:
-        raise RuntimeError(f"invalid enum values in rapidocr config: {exc}") from exc
-
-    engine_type_value = (
-        rec_cfg.engine_type.value
-        if hasattr(rec_cfg.engine_type, "value")
-        else rec_cfg.engine_type
-    )
-    rec_cfg.engine_cfg = cfg.EngineConfig[engine_type_value]
-    rec_cfg.font_path = cfg.Global.font_path
-
-    _DEFAULT_TEXT_RECOGNIZER_CONFIG = OmegaConf.to_container(
-        rec_cfg, resolve=True
-    )
-    return _DEFAULT_TEXT_RECOGNIZER_CONFIG
-
-
-def _build_text_recognizer_params() -> Any:
-    base_config = _load_default_text_recognizer_config()
-    params = deepcopy(base_config)
-    engine_cfg = params.get("engine_cfg")
-    if engine_cfg is not None:
-        params["engine_cfg"] = deepcopy(engine_cfg)
+def _build_rapidocr_kwargs() -> dict[str, Any]:
+    params: dict[str, Any] = {}
 
     model_path = (os.getenv("RAPIDOCR_REC_MODEL_PATH") or "").strip()
     if model_path:
-        params["model_path"] = model_path
+        params["rec_model_path"] = model_path
 
     keys_path = (os.getenv("RAPIDOCR_REC_KEYS_PATH") or "").strip()
     if keys_path:
-        params["rec_keys_path"] = keys_path
+        params["rec_char_dict_path"] = keys_path
 
-    return OmegaConf.create(params)
+    providers = (os.getenv("RAPIDOCR_REC_PROVIDERS") or "").strip()
+    if providers:
+        params["rec_providers"] = [p.strip() for p in providers.split(",") if p.strip()]
+
+    return params
 
 
 def _warmup_reader(reader: Any) -> None:
@@ -242,9 +167,11 @@ def _new_reader_instance() -> Any:
     if not _rapidocr_available():
         raise RuntimeError("rapidocr library is not installed")
 
-    params = _build_text_recognizer_params()
+    params = _build_rapidocr_kwargs()
 
-    reader = TextRecognizerONNX(params=params)  # type: ignore[call-arg]
+    global _reader
+    reader = _RapidOCRRunner(**params)  # type: ignore[call-arg]
+    _reader = reader
     _warmup_reader(reader)
     return reader
 
@@ -443,13 +370,43 @@ def _run_reader(reader, frame):
 
     request = SimpleNamespace(img=frame, return_word_box=False)
 
-    try:
-        return reader(request)
-    except TypeError as exc:
-        message = str(exc)
-        if "img" not in message and "TextRecInput" not in message:
-            raise
-        return reader(frame)
+    call_variants = []
+    if hasattr(reader, "ocr"):
+        call_variants.extend(
+            [
+                (lambda: reader.ocr(frame, use_det=False, use_cls=False), "ocr(frame, use_det=False, use_cls=False)"),
+                (lambda: reader.ocr(frame, use_det=False, use_cls=False, use_rec=True), "ocr(frame, use_det=False, use_cls=False, use_rec=True)"),
+                (lambda: reader.ocr(img=frame, use_det=False, use_cls=False), "ocr(img=frame, use_det=False, use_cls=False)"),
+                (lambda: reader.ocr(img=frame, use_det=False, use_cls=False, use_rec=True), "ocr(img=frame, use_det=False, use_cls=False, use_rec=True)"),
+                (lambda: reader.ocr(frame), "ocr(frame)"),
+                (lambda: reader.ocr(request, use_det=False, use_cls=False), "ocr(request, use_det=False, use_cls=False)"),
+                (lambda: reader.ocr(request), "ocr(request)"),
+            ]
+        )
+
+    call_variants.extend(
+        [
+            (lambda: reader(frame, use_det=False, use_cls=False), "reader(frame, use_det=False, use_cls=False)"),
+            (lambda: reader(frame), "reader(frame)"),
+            (lambda: reader(request), "reader(request)"),
+        ]
+    )
+
+    last_exc: Exception | None = None
+    for call, description in call_variants:
+        try:
+            return call()
+        except TypeError as exc:
+            last_exc = exc
+            logger.debug("[RapidOCR] call variant failed: %s (%s)", description, exc)
+        except Exception as exc:
+            last_exc = exc
+            logger.debug("[RapidOCR] call variant raised %s: %s", description, exc)
+
+    if last_exc is not None:
+        raise last_exc
+
+    raise RuntimeError("RapidOCR reader did not accept any call variants")
 
 
 def _run_ocr_async(frame, roi_id, save, source) -> str:
@@ -512,6 +469,15 @@ class RapidOCR(BaseOCR):
     def __init__(self) -> None:
         super().__init__()
 
+    def _get_reader(self):  # pragma: no cover - simple wrapper
+        return _acquire_reader_from_pool()
+
+    def _release_reader(self, reader) -> None:  # pragma: no cover - simple wrapper
+        if reader is None:
+            return
+        if _rapidocr_available():
+            _release_reader_to_pool(reader)
+
     def _run_ocr(self, frame, roi_id, save: bool, source: str) -> str:
         text = ""
         empty_reason: str | None = None
@@ -519,7 +485,7 @@ class RapidOCR(BaseOCR):
         raw_result: Any = None
         reader = None
         try:
-            reader = _acquire_reader_from_pool()
+            reader = self._get_reader()
         except Exception as e:
             self.logger.exception(
                 f"roi_id={roi_id} {self.MODULE_NAME} OCR init error: {e}"
@@ -540,7 +506,7 @@ class RapidOCR(BaseOCR):
                 empty_reason = "runtime_exception"
                 empty_details = f"{type(e).__name__}: {e}"
             finally:
-                _release_reader_to_pool(reader)
+                self._release_reader(reader)
 
         if text:
             self.logger.info(
