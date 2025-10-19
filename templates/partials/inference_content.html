@@ -265,6 +265,7 @@
           }
           let pendingFrame = null;
           let isRendering = false;
+          let frameToken = 0;
 
           const getDisplaySize = (width, height) => {
             if (!video) {
@@ -354,14 +355,7 @@
             });
           };
 
-          const processNext = async () => {
-            if (!pendingFrame) {
-              isRendering = false;
-              return;
-            }
-            isRendering = true;
-            const blob = pendingFrame;
-            pendingFrame = null;
+          const processNext = async (blob, token) => {
             let bitmap;
             try {
               if (allowBitmapDecoding && typeof createImageBitmap === 'function') {
@@ -402,7 +396,10 @@
                 bitmap.close();
               }
               if (pendingFrame) {
-                processNext();
+                const nextBlob = pendingFrame;
+                pendingFrame = null;
+                const nextToken = frameToken;
+                processNext(nextBlob, nextToken);
               } else {
                 isRendering = false;
               }
@@ -413,13 +410,23 @@
             const blob = toFrameBlob(input);
             if (!blob) {
               pendingFrame = null;
+              frameToken += 1;
               hideFallbackImage();
               streamActive = false;
               return;
             }
             pendingFrame = blob;
+            frameToken += 1;
             if (!isRendering) {
-              processNext();
+              isRendering = true;
+              const nextBlob = pendingFrame;
+              pendingFrame = null;
+              const nextToken = frameToken;
+              if (nextBlob) {
+                processNext(nextBlob, nextToken);
+              } else {
+                isRendering = false;
+              }
             }
           };
         })();
