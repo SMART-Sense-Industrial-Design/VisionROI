@@ -8,7 +8,6 @@ from PIL import Image
 import cv2
 import logging
 import os
-import platform
 from datetime import datetime
 import threading
 from pathlib import Path
@@ -47,75 +46,8 @@ last_ocr_results: dict = {}
 _last_ocr_lock = threading.Lock()
 
 
-_BACKEND_OVERRIDE_KEYS = ("RAPIDOCR_BACKENDS", "RAPIDOCR_BACKEND")
-_FORCE_PI_ENV = "VISIONROI_FORCE_PI5"
-
-
-def _read_device_model() -> str:
-    path = Path("/proc/device-tree/model")
-    try:
-        text = path.read_text(encoding="utf-8", errors="ignore")
-        return text.replace("\x00", "").strip()
-    except Exception:
-        return ""
-
-
-def _is_raspberry_pi5() -> bool:
-    override = os.getenv(_FORCE_PI_ENV)
-    if override is not None:
-        return override.strip().lower() in {"1", "true", "yes", "on"}
-
-    model = _read_device_model().lower()
-    if "raspberry" in model and "pi 5" in model:
-        return True
-
-    try:
-        uname = platform.uname()
-        hints = " ".join(
-            [uname.system, uname.node, uname.release, uname.version, uname.machine, uname.processor]
-        ).lower()
-        if "raspberry" in hints and "pi" in hints and "5" in hints:
-            return True
-    except Exception:
-        pass
-    return False
-
-
-def _gpu_execution_available() -> bool:
-    if ort is None:
-        return False
-    try:
-        providers = ort.get_available_providers()
-        logger.info(f"[RapidOCR] onnxruntime available providers: {providers}")
-        return any(p in {"CUDAExecutionProvider", "TensorrtExecutionProvider"} for p in providers)
-    except Exception as exc:
-        logger.debug(f"[RapidOCR] failed to query onnxruntime providers: {exc}")
-        return False
-
-
-def _parse_backend_overrides() -> list[str]:
-    for key in _BACKEND_OVERRIDE_KEYS:
-        value = os.getenv(key)
-        if value:
-            tokens = [token.strip().lower() for token in value.split(",") if token.strip()]
-            if tokens:
-                logger.warning(f"[RapidOCR] using backend override from {key}: {tokens}")
-                return tokens
-    return []
-
-
 def _candidate_backends() -> list[str]:
-    overrides = _parse_backend_overrides()
-    if overrides:
-        return overrides
-
-    candidates: list[str] = []
-    if _is_raspberry_pi5():
-        candidates.append("paddle")
-    if _gpu_execution_available():
-        candidates.append("onnxruntime-cuda")
-    candidates.append("onnxruntime")
-    return candidates
+    return ["onnxruntime"]
 
 
 def _ensure_engine_enum(name: str) -> "EngineType":
