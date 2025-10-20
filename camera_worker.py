@@ -10,6 +10,7 @@ import signal
 import logging
 import select
 import re
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, Tuple
 from queue import Queue, Empty
@@ -30,6 +31,16 @@ def silent():
         yield
     except Exception:
         pass
+
+
+@dataclass
+class FrameReadResult:
+    status: str
+    buffer: bytearray | bytes | None = None
+    bytes_read: int = 0
+    expected: int | None = None
+    detail: str = ""
+
 class CameraWorker:
     """
     backend='opencv' : ใช้ cv2.VideoCapture
@@ -52,6 +63,7 @@ class CameraWorker:
         err_window_secs: float = 5.0,
         err_threshold: int = 25,    # จำนวน error ใน err_window_secs ที่จะทริกเกอร์การรีสตาร์ท/สลับ transport
         avf_pixel_format: str | None = None,
+        ffmpeg_output: str = "rawvideo",
     ) -> None:
         self.src = src
         self.loop = loop
@@ -64,6 +76,11 @@ class CameraWorker:
         self.low_latency = low_latency
         self._loglevel = loglevel
         self.avf_pixel_format = avf_pixel_format
+
+        ffmpeg_output = (ffmpeg_output or "rawvideo").strip().lower()
+        if ffmpeg_output not in {"rawvideo", "mjpeg"}:
+            raise ValueError(f"Unsupported ffmpeg_output: {ffmpeg_output}")
+        self._ffmpeg_output = ffmpeg_output
 
         self._cap = None
         self._proc: subprocess.Popen | None = None
@@ -105,16 +122,9 @@ class CameraWorker:
         self._last_err_prune = 0.0
         self._restart_backoff = 0.0  # exponential backoff ก่อน restart ffmpeg
 
-        # วน fallback: transport (tcp <-> udp) ถ้า build รองรับ
-        self._rtsp_transport_cycle = ["tcp", "udp"] if robust else ["tcp"]
+        # ใช้ RTSP transport แบบ TCP เพียงอย่างเดียว (ตัดการสลับ UDP)
+        self._rtsp_transport_cycle = ["tcp"]
         self._rtsp_transport_idx = 0
-        self._rtsp_udp_disabled = False
-        if self.low_latency and "udp" in self._rtsp_transport_cycle:
-            # โหมดหน่วงต่ำพยายามเริ่มที่ UDP ก่อนเพื่อลดบัฟเฟอร์ของกล้อง/เครือข่าย
-            try:
-                self._rtsp_transport_idx = self._rtsp_transport_cycle.index("udp")
-            except ValueError:
-                self._rtsp_transport_idx = 0
         self._rtsp_transport_initial_idx = self._rtsp_transport_idx
         self._last_transport_switch_ts = 0.0
 
@@ -251,15 +261,15 @@ class CameraWorker:
     def _build_ffmpeg_cmd(self, src: str) -> list[str]:
         """
         สร้างคำสั่ง ffmpeg แบบ robust สำหรับ RTSP (ทุกกล้อง):
-        - บังคับ TCP ก่อน ถ้าแตกเยอะจะ fallback ไป UDP อัตโนมัติ (ถ้า build รองรับ)
-        - genpts/max_delay เพื่อทน jitter
+        - บังคับ TCP ตลอด (ตัดการสลับ UDP)
+        - ปรับ probesize/max_delay เพื่อลด jitter ตามโหมด latency
         - timeout (เฉพาะที่รองรับจริง) ป้องกันแฮงก์
-        - อ่าน stdout เป็น rawvideo/bgr24
+        - อ่าน stdout เป็น rawvideo/bgr24 หรือ MJPEG ตามที่ตั้งค่า
         """
         self._ensure_default_resolution_for_src(str(src))
         cmd = ["ffmpeg", "-hide_banner", "-loglevel", self._loglevel, "-nostdin"]
 
-        transport = self._rtsp_transport_cycle[self._rtsp_transport_idx]
+        transport = "tcp"
         is_rtsp = self._is_rtsp(src)
         is_avf = str(src).startswith("avfoundation:")
         is_v4l2 = str(src).startswith("v4l2:")
@@ -281,15 +291,13 @@ class CameraWorker:
                 cmd += ["-timeout", "5000000"]
 
         if self.low_latency:
-            # ลดเวลาวิเคราะห์และปิดบัฟเฟอร์ภายในให้ ffmpeg ดึงเฟรมล่าสุดเสมอ
-            cmd += ["-probesize", "1M", "-analyzeduration", "500000"]
-            cmd += ["-fflags", "+discardcorrupt+genpts"]
+            # ลดเวลาวิเคราะห์แต่ยังคงบัฟเฟอร์ขั้นต่ำเพื่อเลี่ยงดีซิงค์
+            cmd += ["-probesize", "512k", "-analyzeduration", "200k"]
+            cmd += ["-fflags", "+discardcorrupt"]
             cmd += ["-flags", "low_delay"]
             cmd += ["-avioflags", "direct"]
-            supports_reorder = "reorder_queue_size" in self._ff_global_opts
-            if (is_rtsp or supports_reorder) and not is_avf:
-                cmd += ["-reorder_queue_size", "0"]
-            cmd += ["-max_delay", "100000"]  # 100ms: กัน jitter แต่ยังต่ำกว่าดีฟอลต์มาก
+            cmd += ["-max_delay", "250000"]
+            cmd += ["-vsync", "passthrough", "-fps_mode", "passthrough"]
             cmd += ["-use_wallclock_as_timestamps", "1"]
         else:
             # วิเคราะห์สตรีมมากขึ้นเพื่อความเสถียรและกัน jitter ระดับกลาง
@@ -335,10 +343,15 @@ class CameraWorker:
         if filters:
             cmd += ["-vf", ",".join(filters)]
 
-        # เอาต์พุตเป็น rawvideo/bgr24 ผ่าน stdout
-        cmd += ["-pix_fmt", "bgr24", "-f", "rawvideo", "pipe:1"]
+        if self._ffmpeg_output == "rawvideo":
+            # เอาต์พุตเป็น rawvideo/bgr24 ผ่าน stdout
+            cmd += ["-pix_fmt", "bgr24", "-f", "rawvideo", "pipe:1"]
+            self._ffmpeg_pix_fmt = "bgr24"
+        else:
+            # เอาต์พุตเป็น MJPEG เพื่อลดปัญหาดีซิงค์/เฟรมเสีย
+            cmd += ["-f", "image2pipe", "-vcodec", "mjpeg", "-q:v", "4", "pipe:1"]
+            self._ffmpeg_pix_fmt = "mjpeg"
 
-        self._ffmpeg_pix_fmt = "bgr24"
         self._logger.info("%s ffmpeg cmd: %s", self._log_prefix, " ".join(cmd))
         return cmd
 
@@ -532,6 +545,158 @@ class CameraWorker:
                 return False
             remaining -= len(chunk)
         return remaining <= 0
+
+    def _read_ffmpeg_rawvideo_frame(self, fd: int, frame_size: int) -> FrameReadResult:
+        buffer = bytearray()
+        start_wait = time.monotonic()
+        while len(buffer) < frame_size and not self._stop_evt.is_set():
+            remaining = frame_size - len(buffer)
+            wait_time = max(0.1, min(0.5, self._read_timeout))
+            try:
+                ready, _, _ = select.select([fd], [], [], wait_time)
+            except Exception as exc:
+                self._logger.warning(
+                    "%s select on ffmpeg stdout failed: %s",
+                    self._log_prefix,
+                    exc,
+                )
+                return FrameReadResult(
+                    status="error",
+                    bytes_read=len(buffer),
+                    expected=frame_size,
+                    detail="select_failed",
+                )
+            if not ready:
+                if time.monotonic() - start_wait > self._read_timeout:
+                    return FrameReadResult(
+                        status="timeout",
+                        bytes_read=len(buffer),
+                        expected=frame_size,
+                        detail="no_data",
+                    )
+                continue
+            try:
+                chunk = os.read(fd, remaining)
+            except BlockingIOError:
+                if time.monotonic() - start_wait > self._read_timeout:
+                    self._logger.warning(
+                        "%s stdout temporarily unavailable for %.1fs; last stderr: %s",
+                        self._log_prefix,
+                        self._read_timeout,
+                        self.last_ffmpeg_stderr(),
+                    )
+                    return FrameReadResult(
+                        status="timeout",
+                        bytes_read=len(buffer),
+                        expected=frame_size,
+                        detail="blocking",
+                    )
+                continue
+            except Exception as exc:
+                self._logger.warning(
+                    "%s read from ffmpeg stdout failed: %s",
+                    self._log_prefix,
+                    exc,
+                )
+                return FrameReadResult(
+                    status="error",
+                    bytes_read=len(buffer),
+                    expected=frame_size,
+                    detail="read_failed",
+                )
+            if not chunk:
+                return FrameReadResult(
+                    status="eof",
+                    bytes_read=len(buffer),
+                    expected=frame_size,
+                )
+            buffer.extend(chunk)
+            start_wait = time.monotonic()
+
+        if len(buffer) != frame_size:
+            if 0 < len(buffer) < frame_size:
+                leftover = frame_size - len(buffer)
+                if not self._flush_partial_ffmpeg_frame(fd, leftover):
+                    return FrameReadResult(
+                        status="error",
+                        bytes_read=len(buffer),
+                        expected=frame_size,
+                        detail="flush_failed",
+                    )
+            return FrameReadResult(
+                status="incomplete",
+                bytes_read=len(buffer),
+                expected=frame_size,
+            )
+
+        return FrameReadResult(
+            status="ok",
+            buffer=buffer,
+            bytes_read=frame_size,
+            expected=frame_size,
+        )
+
+    def _read_ffmpeg_mjpeg_frame(self, fd: int) -> FrameReadResult:
+        buffer = self._mjpeg_buffer
+        start_wait = time.monotonic()
+        wait_time = max(0.1, min(0.5, self._read_timeout))
+        while not self._stop_evt.is_set():
+            start_idx = buffer.find(b"\xff\xd8")
+            if start_idx != -1:
+                end_idx = buffer.find(b"\xff\xd9", start_idx + 2)
+                if end_idx != -1:
+                    frame_bytes = buffer[start_idx : end_idx + 2]
+                    del buffer[: end_idx + 2]
+                    return FrameReadResult(
+                        status="ok",
+                        buffer=frame_bytes,
+                        bytes_read=len(frame_bytes),
+                    )
+                if start_idx > 0:
+                    del buffer[:start_idx]
+            try:
+                ready, _, _ = select.select([fd], [], [], wait_time)
+            except Exception as exc:
+                self._logger.warning(
+                    "%s select on ffmpeg stdout failed: %s",
+                    self._log_prefix,
+                    exc,
+                )
+                return FrameReadResult(status="error", detail="select_failed")
+            if not ready:
+                if time.monotonic() - start_wait > self._read_timeout:
+                    return FrameReadResult(
+                        status="timeout",
+                        bytes_read=len(buffer),
+                        detail="no_mjpeg_frame",
+                    )
+                continue
+            try:
+                chunk = os.read(fd, 65536)
+            except BlockingIOError:
+                if time.monotonic() - start_wait > self._read_timeout:
+                    return FrameReadResult(
+                        status="timeout",
+                        bytes_read=len(buffer),
+                        detail="blocking",
+                    )
+                continue
+            except Exception as exc:
+                self._logger.warning(
+                    "%s read from ffmpeg stdout failed: %s",
+                    self._log_prefix,
+                    exc,
+                )
+                return FrameReadResult(status="error", detail="read_failed")
+            if not chunk:
+                return FrameReadResult(status="eof", bytes_read=len(buffer))
+            buffer.extend(chunk)
+            start_wait = time.monotonic()
+            if len(buffer) > 16 * 1024 * 1024:
+                # กันบัฟเฟอร์พองเกินไปหากมีข้อมูลขยะสะสม
+                del buffer[: len(buffer) - 8 * 1024 * 1024]
+
+        return FrameReadResult(status="timeout", bytes_read=len(buffer), detail="stopped")
 
     def ensure_ffmpeg_gone(self) -> None:
         """พยายามให้แน่ใจว่าโปรเซส ffmpeg ถูกปิดจริง ๆ ไม่เหลือแขวน"""
@@ -752,6 +917,7 @@ class CameraWorker:
         self._ffmpeg_fail_count = 0
         self._ffmpeg_failure_start = None
         self._ffmpeg_partial_frame_burst = 0
+        self._mjpeg_buffer = bytearray()
 
     def _note_opencv_failure(self) -> None:
         self._fail_count += 1
@@ -874,18 +1040,20 @@ class CameraWorker:
                 if not (self.width and self.height):
                     time.sleep(0.03)
                     continue
-                frame_size = self._expected_frame_size()
-                if frame_size is None:
-                    self._fail_count += 1
-                    if self._fail_count > 10 and self._fail_count % 10 == 0:
-                        self._logger.warning(
-                            "%s unable to determine frame size for pix_fmt=%s; consecutive failures=%d",
-                            self._log_prefix,
-                            self._ffmpeg_pix_fmt,
-                            self._fail_count,
-                        )
-                    time.sleep(0.05)
-                    continue
+                frame_size = None
+                if self._ffmpeg_output == "rawvideo":
+                    frame_size = self._expected_frame_size()
+                    if frame_size is None:
+                        self._fail_count += 1
+                        if self._fail_count > 10 and self._fail_count % 10 == 0:
+                            self._logger.warning(
+                                "%s unable to determine frame size for pix_fmt=%s; consecutive failures=%d",
+                                self._log_prefix,
+                                self._ffmpeg_pix_fmt,
+                                self._fail_count,
+                            )
+                        time.sleep(0.05)
+                        continue
 
                 stdout = self._proc.stdout
                 if stdout is None:
@@ -895,8 +1063,6 @@ class CameraWorker:
                     time.sleep(0.05)
                     continue
 
-                buffer = bytearray()
-                start_wait = time.monotonic()
                 try:
                     fd = self._stdout_fd if self._stdout_fd is not None else stdout.fileno()
                 except (OSError, ValueError) as exc:
@@ -909,46 +1075,12 @@ class CameraWorker:
                     self._restart_backend()
                     time.sleep(0.05)
                     continue
-                no_video_timeout = False
-                stream_eof = False
-                while len(buffer) < frame_size and not self._stop_evt.is_set():
-                    remaining = frame_size - len(buffer)
-                    wait_time = max(0.1, min(0.5, self._read_timeout))
-                    try:
-                        ready, _, _ = select.select([fd], [], [], wait_time)
-                    except Exception as exc:
-                        self._logger.warning(
-                            "%s select on ffmpeg stdout failed: %s",
-                            self._log_prefix,
-                            exc,
-                        )
-                        break
-                    if not ready:
-                        if time.monotonic() - start_wait > self._read_timeout:
-                            no_video_timeout = True
-                            break
-                        continue
-                    try:
-                        chunk = os.read(fd, remaining)
-                    except BlockingIOError:
-                        if time.monotonic() - start_wait > self._read_timeout:
-                            self._logger.warning(
-                                "%s stdout temporarily unavailable for %.1fs; last stderr: %s",
-                                self._log_prefix,
-                                self._read_timeout,
-                                self.last_ffmpeg_stderr(),
-                            )
-                            break
-                        continue
-                    if not chunk:
-                        stream_eof = True
-                        break
-                    buffer.extend(chunk)
-                    start_wait = time.monotonic()
+                if self._ffmpeg_output == "rawvideo":
+                    result = self._read_ffmpeg_rawvideo_frame(fd, frame_size)
+                else:
+                    result = self._read_ffmpeg_mjpeg_frame(fd)
 
-                buffer_len = len(buffer)
-
-                if stream_eof:
+                if result.status == "eof":
                     self._fail_count += 1
                     if self._fail_count in (1, 10) or self._fail_count % 25 == 0:
                         self._logger.warning(
@@ -962,49 +1094,65 @@ class CameraWorker:
                     time.sleep(0.05)
                     continue
 
-                if no_video_timeout:
+                if result.status == "timeout":
                     self._fail_count += 1
+                    expected_desc = (
+                        f"collected {result.bytes_read}/{result.expected} bytes"
+                        if result.expected
+                        else f"collected {result.bytes_read} bytes"
+                    )
                     self._handle_no_video_data(
                         "stdout timeout",
-                        f"collected {buffer_len}/{frame_size} bytes",
+                        expected_desc,
                         sleep_after=True,
                     )
                     continue
 
-                if buffer_len != frame_size:
-                    if 0 < buffer_len < frame_size:
-                        leftover = frame_size - buffer_len
-                        if not self._flush_partial_ffmpeg_frame(fd, leftover):
-                            self._logger.warning(
-                                "%s unable to flush %d bytes of partial frame; restarting backend",
-                                self._log_prefix,
-                                leftover,
-                            )
-                            self._restart_backend()
-                            time.sleep(0.1)
-                            continue
+                if result.status == "incomplete":
                     self._ffmpeg_partial_frame_burst += 1
                     self._fail_count += 1
                     if self._fail_count in (1, 10) or self._fail_count % 25 == 0:
+                        expected_desc = (
+                            f"{result.bytes_read}/{result.expected} bytes"
+                            if result.expected
+                            else f"{result.bytes_read} bytes"
+                        )
                         self._logger.warning(
-                            "%s received incomplete frame (%d/%d bytes); consecutive failures=%d",
+                            "%s received incomplete frame (%s); dropping frame; consecutive failures=%d",
                             self._log_prefix,
-                            buffer_len,
-                            frame_size,
+                            expected_desc,
                             self._fail_count,
                         )
-                    if self._ffmpeg_partial_frame_burst >= 3:
+                    time.sleep(0.005)
+                    continue
+
+                if result.status == "error":
+                    self._fail_count += 1
+                    if result.detail == "flush_failed" and result.expected:
+                        leftover = max(result.expected - result.bytes_read, 0)
                         self._logger.warning(
-                            "%s repeated partial frames (%d in a row); restarting backend to resync rawvideo",
+                            "%s unable to flush %d bytes of partial frame; restarting backend",
                             self._log_prefix,
-                            self._ffmpeg_partial_frame_burst,
+                            leftover,
                         )
-                        self._ffmpeg_partial_frame_burst = 0
                         self._restart_backend()
                         time.sleep(0.1)
                         continue
+                    if self._fail_count in (1, 10) or self._fail_count % 25 == 0:
+                        self._logger.warning(
+                            "%s read error from ffmpeg (detail=%s); consecutive failures=%d; last stderr: %s",
+                            self._log_prefix,
+                            result.detail or "unknown",
+                            self._fail_count,
+                            self.last_ffmpeg_stderr(),
+                        )
                     if self._fail_count > 100:
                         self._restart_backend()
+                    time.sleep(0.05)
+                    continue
+
+                buffer = result.buffer
+                if not buffer:
                     time.sleep(0.01)
                     continue
 
@@ -1027,6 +1175,7 @@ class CameraWorker:
                 # เฟรมสมบูรณ์แล้ว รีเซ็ตตัวนับ backoff เพื่อให้รีสตาร์ทครั้งถัดไปรอไม่นานเกินไป
                 if self._restart_backoff:
                     self._restart_backoff = 0.0
+                self._ffmpeg_partial_frame_burst = 0
 
             elif self.backend == "opencv":
                 if self._image_path is not None:
@@ -1194,19 +1343,30 @@ class CameraWorker:
         return (time.monotonic() - ts) <= freshness
 
     def _expected_frame_size(self) -> Optional[int]:
-        if not (self.width and self.height):
-            return None
         if self._ffmpeg_pix_fmt == "bgr24":
+            if not (self.width and self.height):
+                return None
             return int(self.width) * int(self.height) * 3
         return None
 
-    def _reshape_ffmpeg_frame(self, buffer: bytearray):
-        if not (self.width and self.height and np is not None):
-            raise RuntimeError("width/height or numpy missing")
+    def _reshape_ffmpeg_frame(self, buffer: bytearray | bytes):
+        if np is None:
+            raise RuntimeError("numpy missing")
         if self._ffmpeg_pix_fmt == "bgr24":
+            if not (self.width and self.height):
+                raise RuntimeError("width/height missing for rawvideo")
             return np.frombuffer(memoryview(buffer), np.uint8).reshape(
                 (int(self.height), int(self.width), 3)
             )
+        if self._ffmpeg_pix_fmt == "mjpeg":
+            arr = np.frombuffer(memoryview(buffer), np.uint8)
+            frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+            if frame is None:
+                raise RuntimeError("unable to decode mjpeg frame")
+            h, w = frame.shape[:2]
+            if not self.width or not self.height:
+                self.width, self.height = w, h
+            return frame
         raise RuntimeError(f"unsupported pix_fmt {self._ffmpeg_pix_fmt}")
 
     # -------- error watchdog / adaptive fallback --------
@@ -1237,30 +1397,6 @@ class CameraWorker:
         )
         return True
 
-    def _disable_udp_transport(self, reason: str) -> bool:
-        """ปิดการใช้งาน UDP transport เมื่อปลายทางไม่รองรับ"""
-        if self._rtsp_udp_disabled:
-            return False
-        if "udp" not in self._rtsp_transport_cycle:
-            self._rtsp_udp_disabled = True
-            return False
-        self._rtsp_transport_cycle = [t for t in self._rtsp_transport_cycle if t != "udp"]
-        if not self._rtsp_transport_cycle:
-            self._rtsp_transport_cycle = ["tcp"]
-        if self._rtsp_transport_idx >= len(self._rtsp_transport_cycle):
-            self._rtsp_transport_idx = 0
-        try:
-            self._rtsp_transport_initial_idx = self._rtsp_transport_cycle.index("tcp")
-        except ValueError:
-            self._rtsp_transport_initial_idx = 0
-        self._rtsp_udp_disabled = True
-        self._logger.warning(
-            "%s disabling UDP RTSP transport (%s)",
-            self._log_prefix,
-            reason,
-        )
-        return True
-
     def _track_ffmpeg_errors(self, line: str) -> None:
         """
         จับแพตเทิร์น error จาก ffmpeg; ถ้ามี burst ภายในหน้าต่างสั้น ๆ:
@@ -1269,19 +1405,6 @@ class CameraWorker:
         """
         now = time.monotonic()
         lower_line = line.lower()
-        if "udp" in lower_line and any(
-            keyword in lower_line
-            for keyword in (
-                "unsupported transport",
-                "461",
-                "not supported",
-                "not available",
-                "disabled",
-                "for tcp only",
-            )
-        ):
-            if self._disable_udp_transport(line.strip() or "server rejected udp"):
-                return
         if "no video data" in lower_line:
             self._handle_no_video_data("ffmpeg stderr", line)
             return
