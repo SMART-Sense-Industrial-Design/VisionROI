@@ -3410,6 +3410,84 @@ async def update_source(name: str):
     return jsonify({"status": "updated"})
 
 
+@app.route("/update_dimensions/<name>", methods=["PATCH"])
+async def update_dimensions(name: str):
+    base_name = os.path.basename(name.strip())
+    if not base_name:
+        return jsonify({"status": "error", "message": "invalid name"}), 400
+
+    directory = os.path.realpath(os.path.join(ALLOWED_ROI_DIR, base_name))
+    if not _safe_in_base(ALLOWED_ROI_DIR, directory):
+        return jsonify({"status": "error", "message": "invalid name"}), 400
+
+    cfg_path = os.path.join(directory, "config.json")
+    if not os.path.exists(cfg_path):
+        return jsonify({"status": "error", "message": "not found"}), 404
+
+    data = await request.get_json() or {}
+    missing = object()
+
+    def parse_dimension(raw_value, field_name):
+        if raw_value is missing:
+            return missing
+        if raw_value is None:
+            return None
+        if isinstance(raw_value, str):
+            raw_value = raw_value.strip()
+            if raw_value == "":
+                return None
+        try:
+            value = int(raw_value)
+        except (TypeError, ValueError):
+            raise ValueError(f"invalid {field_name}")
+        if value <= 0:
+            raise ValueError(f"invalid {field_name}")
+        return value
+
+    try:
+        width_val = parse_dimension(data.get("width", missing), "width")
+        height_val = parse_dimension(data.get("height", missing), "height")
+    except ValueError as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 400
+
+    if width_val is missing and height_val is missing:
+        return jsonify({"status": "error", "message": "missing dimensions"}), 400
+
+    try:
+        with open(cfg_path, "r") as f:
+            cfg = json.load(f)
+
+        updated = False
+
+        if width_val is not missing:
+            if width_val is None:
+                if "width" in cfg:
+                    cfg.pop("width", None)
+                    updated = True
+            elif cfg.get("width") != width_val:
+                cfg["width"] = width_val
+                updated = True
+
+        if height_val is not missing:
+            if height_val is None:
+                if "height" in cfg:
+                    cfg.pop("height", None)
+                    updated = True
+            elif cfg.get("height") != height_val:
+                cfg["height"] = height_val
+                updated = True
+
+        if not updated:
+            return jsonify({"status": "unchanged"})
+
+        with open(cfg_path, "w") as f:
+            json.dump(cfg, f)
+    except Exception:
+        return jsonify({"status": "error", "message": "save failed"}), 500
+
+    return jsonify({"status": "updated"})
+
+
 @app.route("/rename_source/<name>", methods=["PATCH"])
 async def rename_source(name: str):
     old_name = os.path.basename(name.strip())
