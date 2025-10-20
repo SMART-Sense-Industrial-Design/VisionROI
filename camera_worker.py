@@ -751,6 +751,7 @@ class CameraWorker:
         self._next_resolution_probe = 0.0
         self._ffmpeg_fail_count = 0
         self._ffmpeg_failure_start = None
+        self._ffmpeg_partial_frame_burst = 0
 
     def _note_opencv_failure(self) -> None:
         self._fail_count += 1
