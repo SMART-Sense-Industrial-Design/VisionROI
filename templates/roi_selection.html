@@ -167,7 +167,9 @@
         }
 
         function openSocket() {
-            socket = new WebSocket(`ws://${location.host}/ws_roi/${cam}`);
+            const wsScheme = location.protocol === 'https:' ? 'wss' : 'ws';
+            const wsBase = `${wsScheme}://${location.host}`;
+            socket = new WebSocket(`${wsBase}/ws_roi/${cam}`);
             socket.binaryType = "arraybuffer";
             socket.onmessage = function(event) {
                 const blob = new Blob([event.data], { type: "image/jpeg" });
