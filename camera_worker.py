@@ -81,6 +81,7 @@ class CameraWorker:
         if ffmpeg_output not in {"rawvideo", "mjpeg"}:
             raise ValueError(f"Unsupported ffmpeg_output: {ffmpeg_output}")
         self._ffmpeg_output = ffmpeg_output
+        self._mjpeg_buffer = bytearray()
 
         self._cap = None
         self._proc: subprocess.Popen | None = None
