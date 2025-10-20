@@ -129,6 +129,7 @@ def test_camera_worker_restart_ffmpeg_after_poll_failures(monkeypatch):
     worker._err_window = []
     worker._opencv_failure_start = None
     worker._last_stderr = []
+    worker._ffmpeg_output = "rawvideo"
 
     restart_counts: list[int] = []
 
@@ -206,6 +207,7 @@ def test_camera_worker_handles_stdout_fileno_error(monkeypatch):
     worker.width = 1
     worker.height = 1
     worker._ffmpeg_pix_fmt = "bgr24"
+    worker._ffmpeg_output = "rawvideo"
     worker._q = Queue(maxsize=1)
     worker._clear_frame_queue = lambda: None
 
@@ -305,6 +307,7 @@ def test_camera_worker_recovers_after_ffmpeg_stdout_eof(monkeypatch):
         worker._last_stderr = []
         worker._opencv_failure_start = None
         worker._last_returncode_logged = None
+        worker._ffmpeg_output = "rawvideo"
 
         def fake_restart_backend():
             restart_calls.append(worker._fail_count)
