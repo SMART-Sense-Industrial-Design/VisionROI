@@ -96,6 +96,7 @@ class CameraWorker:
         self._ffmpeg_restart_time_threshold = 2.0
         self._ffmpeg_fail_count = 0
         self._ffmpeg_failure_start: float | None = None
+        self._ffmpeg_partial_frame_burst = 0
 
         # robust state
         self._err_window = deque(maxlen=300)
@@ -107,6 +108,7 @@ class CameraWorker:
         # วน fallback: transport (tcp <-> udp) ถ้า build รองรับ
         self._rtsp_transport_cycle = ["tcp", "udp"] if robust else ["tcp"]
         self._rtsp_transport_idx = 0
+        self._rtsp_udp_disabled = False
         if self.low_latency and "udp" in self._rtsp_transport_cycle:
             # โหมดหน่วงต่ำพยายามเริ่มที่ UDP ก่อนเพื่อลดบัฟเฟอร์ของกล้อง/เครือข่าย
             try:
@@ -280,14 +282,14 @@ class CameraWorker:
 
         if self.low_latency:
             # ลดเวลาวิเคราะห์และปิดบัฟเฟอร์ภายในให้ ffmpeg ดึงเฟรมล่าสุดเสมอ
-            cmd += ["-probesize", "256k", "-analyzeduration", "0"]
-            cmd += ["-fflags", "+discardcorrupt+nobuffer"]
+            cmd += ["-probesize", "1M", "-analyzeduration", "500000"]
+            cmd += ["-fflags", "+discardcorrupt+genpts"]
             cmd += ["-flags", "low_delay"]
             cmd += ["-avioflags", "direct"]
             supports_reorder = "reorder_queue_size" in self._ff_global_opts
             if (is_rtsp or supports_reorder) and not is_avf:
                 cmd += ["-reorder_queue_size", "0"]
-            cmd += ["-max_delay", "0"]
+            cmd += ["-max_delay", "100000"]  # 100ms: กัน jitter แต่ยังต่ำกว่าดีฟอลต์มาก
             cmd += ["-use_wallclock_as_timestamps", "1"]
         else:
             # วิเคราะห์สตรีมมากขึ้นเพื่อความเสถียรและกัน jitter ระดับกลาง
@@ -749,6 +751,7 @@ class CameraWorker:
         self._next_resolution_probe = 0.0
         self._ffmpeg_fail_count = 0
         self._ffmpeg_failure_start = None
+        self._ffmpeg_partial_frame_burst = 0
 
     def _note_opencv_failure(self) -> None:
         self._fail_count += 1
@@ -980,6 +983,7 @@ class CameraWorker:
                             self._restart_backend()
                             time.sleep(0.1)
                             continue
+                    self._ffmpeg_partial_frame_burst += 1
                     self._fail_count += 1
                     if self._fail_count in (1, 10) or self._fail_count % 25 == 0:
                         self._logger.warning(
@@ -989,6 +993,16 @@ class CameraWorker:
                             frame_size,
                             self._fail_count,
                         )
+                    if self._ffmpeg_partial_frame_burst >= 3:
+                        self._logger.warning(
+                            "%s repeated partial frames (%d in a row); restarting backend to resync rawvideo",
+                            self._log_prefix,
+                            self._ffmpeg_partial_frame_burst,
+                        )
+                        self._ffmpeg_partial_frame_burst = 0
+                        self._restart_backend()
+                        time.sleep(0.1)
+                        continue
                     if self._fail_count > 100:
                         self._restart_backend()
                     time.sleep(0.01)
@@ -1066,6 +1080,7 @@ class CameraWorker:
             self._restart_backoff = 0.0
             self._ffmpeg_fail_count = 0
             self._ffmpeg_failure_start = None
+            self._ffmpeg_partial_frame_burst = 0
             self._last_frame_ts = time.monotonic()
             # เก็บอ้างอิงเฟรมล่าสุดแบบไม่คัดลอกเพื่อไม่ให้ลูปหลักเสียเวลาเพิ่ม
             frame_ref = frame
@@ -1222,6 +1237,30 @@ class CameraWorker:
         )
         return True
 
+    def _disable_udp_transport(self, reason: str) -> bool:
+        """ปิดการใช้งาน UDP transport เมื่อปลายทางไม่รองรับ"""
+        if self._rtsp_udp_disabled:
+            return False
+        if "udp" not in self._rtsp_transport_cycle:
+            self._rtsp_udp_disabled = True
+            return False
+        self._rtsp_transport_cycle = [t for t in self._rtsp_transport_cycle if t != "udp"]
+        if not self._rtsp_transport_cycle:
+            self._rtsp_transport_cycle = ["tcp"]
+        if self._rtsp_transport_idx >= len(self._rtsp_transport_cycle):
+            self._rtsp_transport_idx = 0
+        try:
+            self._rtsp_transport_initial_idx = self._rtsp_transport_cycle.index("tcp")
+        except ValueError:
+            self._rtsp_transport_initial_idx = 0
+        self._rtsp_udp_disabled = True
+        self._logger.warning(
+            "%s disabling UDP RTSP transport (%s)",
+            self._log_prefix,
+            reason,
+        )
+        return True
+
     def _track_ffmpeg_errors(self, line: str) -> None:
         """
         จับแพตเทิร์น error จาก ffmpeg; ถ้ามี burst ภายในหน้าต่างสั้น ๆ:
@@ -1230,6 +1269,19 @@ class CameraWorker:
         """
         now = time.monotonic()
         lower_line = line.lower()
+        if "udp" in lower_line and any(
+            keyword in lower_line
+            for keyword in (
+                "unsupported transport",
+                "461",
+                "not supported",
+                "not available",
+                "disabled",
+                "for tcp only",
+            )
+        ):
+            if self._disable_udp_transport(line.strip() or "server rejected udp"):
+                return
         if "no video data" in lower_line:
             self._handle_no_video_data("ffmpeg stderr", line)
             return
