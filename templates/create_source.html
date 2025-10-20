@@ -233,9 +233,99 @@
                 });
                 streamTd.appendChild(streamSelect);
                 const widthTd = document.createElement('td');
-                widthTd.textContent = src.width ?? '';
+                const widthInput = document.createElement('input');
+                widthInput.type = 'number';
+                widthInput.className = 'form-control form-control-sm';
+                widthInput.value = src.width ?? '';
+                widthInput.placeholder = 'ไม่ระบุ';
+                widthInput.min = '1';
                 const heightTd = document.createElement('td');
-                heightTd.textContent = src.height ?? '';
+                const heightInput = document.createElement('input');
+                heightInput.type = 'number';
+                heightInput.className = 'form-control form-control-sm';
+                heightInput.value = src.height ?? '';
+                heightInput.placeholder = 'ไม่ระบุ';
+                heightInput.min = '1';
+
+                let originalWidth = widthInput.value;
+                let originalHeight = heightInput.value;
+
+                const normaliseDimension = (value) => {
+                    if (value === null || value === undefined) return '';
+                    const str = String(value).trim();
+                    return str;
+                };
+
+                const saveDimensions = async (newWidthRaw, newHeightRaw) => {
+                    const newWidth = normaliseDimension(newWidthRaw);
+                    const newHeight = normaliseDimension(newHeightRaw);
+
+                    if (newWidth === normaliseDimension(originalWidth) && newHeight === normaliseDimension(originalHeight)) {
+                        return;
+                    }
+
+                    const payload = {
+                        width: newWidth === '' ? null : newWidth,
+                        height: newHeight === '' ? null : newHeight,
+                    };
+
+                    widthInput.disabled = true;
+                    heightInput.disabled = true;
+                    try {
+                        const res = await fetch(`/update_dimensions/${encodeURIComponent(src.name)}`, {
+                            method: 'PATCH',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(payload)
+                        });
+                        const data = await res.json();
+                        if (res.ok && (data.status === 'updated' || data.status === 'unchanged')) {
+                            originalWidth = payload.width === null ? '' : payload.width;
+                            originalHeight = payload.height === null ? '' : payload.height;
+                            showAlert('อัปเดตขนาดวิดีโอแล้ว', 'success');
+                            await loadSources();
+                        } else {
+                            widthInput.value = originalWidth;
+                            heightInput.value = originalHeight;
+                            showAlert(data.message || 'อัปเดตไม่สำเร็จ', 'error');
+                        }
+                    } catch (err) {
+                        widthInput.value = originalWidth;
+                        heightInput.value = originalHeight;
+                        showAlert('อัปเดตไม่สำเร็จ', 'error');
+                    } finally {
+                        widthInput.disabled = false;
+                        heightInput.disabled = false;
+                    }
+                };
+
+                widthInput.addEventListener('blur', (e) => {
+                    void saveDimensions(e.target.value, heightInput.value);
+                });
+                widthInput.addEventListener('keydown', (e) => {
+                    if (e.key === 'Enter') {
+                        e.preventDefault();
+                        widthInput.blur();
+                    } else if (e.key === 'Escape') {
+                        widthInput.value = originalWidth;
+                        widthInput.blur();
+                    }
+                });
+
+                heightInput.addEventListener('blur', (e) => {
+                    void saveDimensions(widthInput.value, e.target.value);
+                });
+                heightInput.addEventListener('keydown', (e) => {
+                    if (e.key === 'Enter') {
+                        e.preventDefault();
+                        heightInput.blur();
+                    } else if (e.key === 'Escape') {
+                        heightInput.value = originalHeight;
+                        heightInput.blur();
+                    }
+                });
+
+                widthTd.appendChild(widthInput);
+                heightTd.appendChild(heightInput);
                 const actionTd = document.createElement('td');
                 const delBtn = document.createElement('button');
                 delBtn.textContent = 'ลบ';
