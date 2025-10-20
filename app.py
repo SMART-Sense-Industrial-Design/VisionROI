@@ -388,6 +388,26 @@ def _should_force_ffmpeg_backend(source: object, backend: str) -> bool:
     return scheme in _NETWORK_STREAM_SCHEMES
 
 
+def _default_roi_low_latency(backend: str | None, source: object) -> bool:
+    """เลือกค่าเริ่มต้นของ low latency สำหรับ ROI stream ตาม backend/source."""
+
+    if isinstance(backend, str) and backend.lower() == "ffmpeg":
+        if isinstance(source, os.PathLike):
+            try:
+                source = os.fspath(source)
+            except TypeError:
+                return True
+        if isinstance(source, str):
+            src = source.strip().lower()
+            if src.startswith(("rtsp://", "rtsps://", "rtmp://", "http://", "https://")):
+                return False
+            if src.startswith("avfoundation:"):
+                return False
+        return True
+
+    return True
+
+
 def save_service_state() -> None:
     cam_ids = (
         set(camera_sources)
@@ -3738,14 +3758,17 @@ async def start_roi_stream(cam_id: str):
         if not cfg_ok:
             return jsonify({"status": "error", "cam_id": cam_id}), 400
     _drain_queue(get_roi_frame_queue(cam_id))
-    desired_low_latency = roi_low_latency_flags.get(cam_id, True)
-    if low_latency_request is not None:
-        desired_low_latency = bool(low_latency_request)
+    stored_latency_pref = roi_low_latency_flags.get(cam_id)
     backend = camera_backends.get(cam_id)
     src_val = camera_sources.get(cam_id)
     src_str = str(src_val)
-    if backend == "ffmpeg" and src_str.startswith("avfoundation:"):
-        desired_low_latency = False
+    if low_latency_request is not None:
+        desired_low_latency = bool(low_latency_request)
+    elif stored_latency_pref is not None:
+        desired_low_latency = bool(stored_latency_pref)
+    else:
+        desired_low_latency = _default_roi_low_latency(backend, src_val)
+
 
     _, resp, status = await start_camera_task(
         cam_id,
