@@ -32,8 +32,8 @@ logger = logging.getLogger(MODULE_NAME)
 logger.setLevel(logging.INFO)
 _data_sources_root = Path(__file__).resolve().parents[2] / "data_sources"
 
-_DEFAULT_USE_DET = True
-_DEFAULT_USE_CLS = True
+_DEFAULT_USE_DET = False
+_DEFAULT_USE_CLS = False
 _DEFAULT_USE_REC = True
 
 def _rapidocr_available() -> bool:
