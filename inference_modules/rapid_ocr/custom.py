@@ -32,6 +32,10 @@ logger = logging.getLogger(MODULE_NAME)
 logger.setLevel(logging.INFO)
 _data_sources_root = Path(__file__).resolve().parents[2] / "data_sources"
 
+_DEFAULT_USE_DET = True
+_DEFAULT_USE_CLS = True
+_DEFAULT_USE_REC = True
+
 def _rapidocr_available() -> bool:
     return _RapidOCRRunner is not None
 
@@ -366,27 +370,27 @@ def _prepare_frame_for_reader(frame):
 
 
 def _run_reader(reader, frame):
-    """เรียก RapidOCR reader โดยบังคับใช้งาน Rec เท่านั้น."""
+    """เรียก RapidOCR reader พร้อมควบคุมการใช้งานโมดูลย่อยผ่านคอนฟิกเดียว."""
 
     request = SimpleNamespace(img=frame, return_word_box=False)
+    det_cls_kwargs = dict(use_det=_DEFAULT_USE_DET, use_cls=_DEFAULT_USE_CLS)
+    det_cls_rec_kwargs = {**det_cls_kwargs, "use_rec": _DEFAULT_USE_REC}
 
     call_variants = []
     if hasattr(reader, "ocr"):
         call_variants.extend(
             [
-                (lambda: reader.ocr(frame, use_det=False, use_cls=False), "ocr(frame, use_det=False, use_cls=False)"),
-                (lambda: reader.ocr(frame, use_det=False, use_cls=False, use_rec=True), "ocr(frame, use_det=False, use_cls=False, use_rec=True)"),
-                (lambda: reader.ocr(img=frame, use_det=False, use_cls=False), "ocr(img=frame, use_det=False, use_cls=False)"),
-                (lambda: reader.ocr(img=frame, use_det=False, use_cls=False, use_rec=True), "ocr(img=frame, use_det=False, use_cls=False, use_rec=True)"),
+                (lambda: reader.ocr(frame, **det_cls_rec_kwargs), "ocr(frame, **det_cls_rec_kwargs)"),
+                (lambda: reader.ocr(img=frame, **det_cls_rec_kwargs), "ocr(img=frame, **det_cls_rec_kwargs)"),
                 (lambda: reader.ocr(frame), "ocr(frame)"),
-                (lambda: reader.ocr(request, use_det=False, use_cls=False), "ocr(request, use_det=False, use_cls=False)"),
+                (lambda: reader.ocr(request, **det_cls_rec_kwargs), "ocr(request, **det_cls_rec_kwargs)"),
                 (lambda: reader.ocr(request), "ocr(request)"),
             ]
         )
 
     call_variants.extend(
         [
-            (lambda: reader(frame, use_det=False, use_cls=False), "reader(frame, use_det=False, use_cls=False)"),
+            (lambda: reader(frame, **det_cls_rec_kwargs), "reader(frame, **det_cls_rec_kwargs)"),
             (lambda: reader(frame), "reader(frame)"),
             (lambda: reader(request), "reader(request)"),
         ]
