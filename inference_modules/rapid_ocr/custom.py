@@ -369,7 +369,7 @@ def _run_reader(reader, frame):
     """เรียก RapidOCR reader โดยยึดค่าพื้นฐานจากจุดกำหนดเดียว."""
 
     reader_kwargs = {
-        "use_det": False,
+        "use_det": True,
         "use_cls": False,
         "use_rec": True,
     }
