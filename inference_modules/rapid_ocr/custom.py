@@ -23,7 +23,7 @@ from src.utils.image import save_image_async
 from inference_modules.base_ocr import BaseOCR, np, Image, cv2
 
 try:
-    from rapidocr_onnxruntime import RapidOCR as _RapidOCRRunner
+    from rapidocr import RapidOCR as _RapidOCRRunner
 except Exception:  # pragma: no cover - library might be unavailable at runtime
     _RapidOCRRunner = None  # type: ignore[assignment]
 
