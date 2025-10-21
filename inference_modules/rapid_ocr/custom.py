@@ -366,7 +366,13 @@ def _prepare_frame_for_reader(frame):
 
 
 def _run_reader(reader, frame):
-    """เรียก RapidOCR reader โดยบังคับใช้งาน Rec เท่านั้น."""
+    """เรียก RapidOCR reader โดยยึดค่าพื้นฐานจากจุดกำหนดเดียว."""
+
+    reader_kwargs = {
+        "use_det": True,
+        "use_cls": False,
+        "use_rec": True,
+    }
 
     request = SimpleNamespace(img=frame, return_word_box=False)
 
@@ -374,19 +380,17 @@ def _run_reader(reader, frame):
     if hasattr(reader, "ocr"):
         call_variants.extend(
             [
-                (lambda: reader.ocr(frame, use_det=False, use_cls=False), "ocr(frame, use_det=False, use_cls=False)"),
-                (lambda: reader.ocr(frame, use_det=False, use_cls=False, use_rec=True), "ocr(frame, use_det=False, use_cls=False, use_rec=True)"),
-                (lambda: reader.ocr(img=frame, use_det=False, use_cls=False), "ocr(img=frame, use_det=False, use_cls=False)"),
-                (lambda: reader.ocr(img=frame, use_det=False, use_cls=False, use_rec=True), "ocr(img=frame, use_det=False, use_cls=False, use_rec=True)"),
+                (lambda: reader.ocr(frame, **reader_kwargs), "ocr(frame, **reader_kwargs)"),
+                (lambda: reader.ocr(img=frame, **reader_kwargs), "ocr(img=frame, **reader_kwargs)"),
                 (lambda: reader.ocr(frame), "ocr(frame)"),
-                (lambda: reader.ocr(request, use_det=False, use_cls=False), "ocr(request, use_det=False, use_cls=False)"),
+                (lambda: reader.ocr(request, **reader_kwargs), "ocr(request, **reader_kwargs)"),
                 (lambda: reader.ocr(request), "ocr(request)"),
             ]
         )
 
     call_variants.extend(
         [
-            (lambda: reader(frame, use_det=False, use_cls=False), "reader(frame, use_det=False, use_cls=False)"),
+            (lambda: reader(frame, **reader_kwargs), "reader(frame, **reader_kwargs)"),
             (lambda: reader(frame), "reader(frame)"),
             (lambda: reader(request), "reader(request)"),
         ]
