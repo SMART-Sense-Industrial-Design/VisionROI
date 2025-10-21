@@ -495,7 +495,15 @@ def _run_rapidocr_pipeline(
     return text
 
 
-def _run_ocr_async(frame, roi_id, save, source) -> str:
+def _run_ocr_async(
+    frame,
+    roi_id,
+    save,
+    source,
+    logger_obj: logging.Logger | None = None,
+) -> str:
+    logger_to_use = logger_obj or logger
+
     def _save_async(prepared_frame, inner_roi_id, inner_source):
         base_dir = (
             _data_sources_root / inner_source
@@ -507,7 +515,7 @@ def _run_ocr_async(frame, roi_id, save, source) -> str:
         os.makedirs(save_dir, exist_ok=True)
         filename = datetime.now().strftime("%Y%m%d%H%M%S%f") + ".jpg"
         path = save_dir / filename
-        save_image_async(str(path), prepared_frame)
+        save_image_async(str(path), prepared_frame, logger=logger_to_use)
 
     def _store_last_result(text_value: str) -> None:
         with _last_ocr_lock:
@@ -520,7 +528,7 @@ def _run_ocr_async(frame, roi_id, save, source) -> str:
         source,
         acquire_reader=_acquire_reader_from_pool,
         release_reader=_release_reader_to_pool,
-        logger_obj=logger,
+        logger_obj=logger_to_use,
         module_name=MODULE_NAME,
         log_if_empty=True,
         save_callback=_save_async,
@@ -594,7 +602,7 @@ def process(
     with _last_ocr_lock:
         last_ocr_times[roi_id] = current_time
 
-    return _run_ocr_async(frame, roi_id, save, source)
+    return _run_ocr_async(frame, roi_id, save, source, logger)
 
 
 def cleanup() -> None:
