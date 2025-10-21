@@ -6,7 +6,7 @@ from collections.abc import Iterable, Mapping
 from concurrent.futures import ThreadPoolExecutor
 from queue import Empty, LifoQueue
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, Callable
 from PIL import Image
 import cv2
 import logging
@@ -63,6 +63,7 @@ _reader_pool: LifoQueue[Any] = LifoQueue()
 _reader_pool_lock = threading.Lock()
 _reader_creation_executor: ThreadPoolExecutor | None = None
 _reader_created = 0
+_call_variant_cache: dict[type, str] = {}
 
 logger.info(
     "[RapidOCR] Reader pool max workers configured to %d", _MAX_READER_WORKERS
@@ -132,6 +133,7 @@ def _reset_reader_pool() -> None:
         # ปล่อยอ้างอิงเพื่อให้ GC จัดการต่อ
         del reader
     _reader_created = 0
+    _call_variant_cache.clear()
     if _reader_creation_executor is not None:
         _reader_creation_executor.shutdown(wait=False, cancel_futures=True)
         _reader_creation_executor = None
@@ -376,7 +378,7 @@ def _run_reader(reader, frame):
     det_cls_kwargs = dict(use_det=_DEFAULT_USE_DET, use_cls=_DEFAULT_USE_CLS)
     det_cls_rec_kwargs = {**det_cls_kwargs, "use_rec": _DEFAULT_USE_REC}
 
-    call_variants = []
+    call_variants: list[tuple[Callable[[], Any], str]] = []
     if hasattr(reader, "ocr"):
         call_variants.extend(
             [
@@ -396,10 +398,17 @@ def _run_reader(reader, frame):
         ]
     )
 
+    reader_type = type(reader)
+    preferred_description = _call_variant_cache.get(reader_type)
+    if preferred_description:
+        call_variants.sort(key=lambda item: 0 if item[1] == preferred_description else 1)
+
     last_exc: Exception | None = None
     for call, description in call_variants:
         try:
-            return call()
+            result = call()
+            _call_variant_cache[reader_type] = description
+            return result
         except TypeError as exc:
             last_exc = exc
             logger.debug("[RapidOCR] call variant failed: %s (%s)", description, exc)
@@ -413,58 +422,111 @@ def _run_reader(reader, frame):
     raise RuntimeError("RapidOCR reader did not accept any call variants")
 
 
-def _run_ocr_async(frame, roi_id, save, source) -> str:
+def _format_log_message(roi_id: Any, module_name: str, suffix: str) -> str:
+    prefix = f"roi_id={roi_id} " if roi_id is not None else ""
+    return f"{prefix}{module_name} {suffix}"
+
+
+def _run_rapidocr_pipeline(
+    frame,
+    roi_id,
+    save: bool,
+    source: str,
+    *,
+    acquire_reader: Callable[[], Any],
+    release_reader: Callable[[Any], None],
+    logger_obj: logging.Logger,
+    module_name: str,
+    log_if_empty: bool,
+    save_callback: Callable[[Any, Any, str], None] | None = None,
+    post_text_callback: Callable[[str], None] | None = None,
+    init_error_suffix: str = "OCR init error",
+) -> str:
+    text = ""
     empty_reason: str | None = None
     empty_details: str | None = None
     raw_result: Any = None
-    text = ""
-    reader = None
+    prepared_frame = frame
+    reader: Any | None = None
+
     try:
-        reader = _acquire_reader_from_pool()
-    except Exception as e:
-        logger.exception(f"roi_id={roi_id} {MODULE_NAME} OCR error: {e}")
+        reader = acquire_reader()
+    except Exception as exc:
+        logger_obj.exception(
+            _format_log_message(roi_id, module_name, f"{init_error_suffix}: {exc}")
+        )
         empty_reason = "reader_init_failed"
-        empty_details = f"{type(e).__name__}: {e}"
-        reader = None
-
-    if reader is not None:
+        empty_details = f"{type(exc).__name__}: {exc}"
+    else:
         try:
-            frame = _prepare_frame_for_reader(frame)
-            raw_result = _normalise_reader_output(_run_reader(reader, frame))
+            prepared_frame = _prepare_frame_for_reader(frame)
+            raw_result = _normalise_reader_output(_run_reader(reader, prepared_frame))
             text = _extract_text(raw_result)
+            if post_text_callback is not None:
+                post_text_callback(text)
 
-            logger.info(
-                f"roi_id={roi_id} {MODULE_NAME} OCR result: {text}"
-                if roi_id is not None
-                else f"{MODULE_NAME} OCR result: {text}"
-            )
-            with _last_ocr_lock:
-                last_ocr_results[roi_id] = text
+            if text or log_if_empty:
+                logger_obj.info(
+                    _format_log_message(roi_id, module_name, f"OCR result: {text}")
+                )
 
-            if not text and not _result_structure_is_empty(raw_result):
+            if not text and empty_reason is None and not _result_structure_is_empty(raw_result):
                 empty_reason = "unexpected_payload"
                 empty_details = f"raw_type={type(raw_result).__name__}"
-        except Exception as e:
-            logger.exception(f"roi_id={roi_id} {MODULE_NAME} OCR error: {e}")
+        except Exception as exc:
+            logger_obj.exception(
+                _format_log_message(roi_id, module_name, f"OCR error: {exc}")
+            )
             empty_reason = "runtime_exception"
-            empty_details = f"{type(e).__name__}: {e}"
+            empty_details = f"{type(exc).__name__}: {exc}"
             text = ""
         finally:
-            _release_reader_to_pool(reader)
+            try:
+                release_reader(reader)
+            except Exception:
+                logger_obj.debug("[RapidOCR] Failed to release reader", exc_info=True)
 
     if not text and empty_reason:
-        _log_empty_text_warning(logger, MODULE_NAME, roi_id, empty_reason, empty_details)
+        _log_empty_text_warning(logger_obj, module_name, roi_id, empty_reason, empty_details)
 
-    if save:
-        base_dir = _data_sources_root / source if source else Path(__file__).resolve().parent
-        roi_folder = f"{roi_id}" if roi_id is not None else "roi"
+    if save and save_callback is not None:
+        save_callback(prepared_frame, roi_id, source)
+
+    return text
+
+
+def _run_ocr_async(frame, roi_id, save, source) -> str:
+    def _save_async(prepared_frame, inner_roi_id, inner_source):
+        base_dir = (
+            _data_sources_root / inner_source
+            if inner_source
+            else Path(__file__).resolve().parent
+        )
+        roi_folder = f"{inner_roi_id}" if inner_roi_id is not None else "roi"
         save_dir = base_dir / "images" / roi_folder
         os.makedirs(save_dir, exist_ok=True)
         filename = datetime.now().strftime("%Y%m%d%H%M%S%f") + ".jpg"
         path = save_dir / filename
-        save_image_async(str(path), frame)
+        save_image_async(str(path), prepared_frame)
 
-    return text
+    def _store_last_result(text_value: str) -> None:
+        with _last_ocr_lock:
+            last_ocr_results[roi_id] = text_value
+
+    return _run_rapidocr_pipeline(
+        frame,
+        roi_id,
+        save,
+        source,
+        acquire_reader=_acquire_reader_from_pool,
+        release_reader=_release_reader_to_pool,
+        logger_obj=logger,
+        module_name=MODULE_NAME,
+        log_if_empty=True,
+        save_callback=_save_async,
+        post_text_callback=_store_last_result,
+        init_error_suffix="OCR error",
+    )
 
 
 class RapidOCR(BaseOCR):
@@ -483,54 +545,18 @@ class RapidOCR(BaseOCR):
             _release_reader_to_pool(reader)
 
     def _run_ocr(self, frame, roi_id, save: bool, source: str) -> str:
-        text = ""
-        empty_reason: str | None = None
-        empty_details: str | None = None
-        raw_result: Any = None
-        reader = None
-        try:
-            reader = self._get_reader()
-        except Exception as e:
-            self.logger.exception(
-                f"roi_id={roi_id} {self.MODULE_NAME} OCR init error: {e}"
-            )
-            reader = None
-            empty_reason = "reader_init_failed"
-            empty_details = f"{type(e).__name__}: {e}"
-
-        if reader is not None:
-            try:
-                frame = _prepare_frame_for_reader(frame)
-                raw_result = _normalise_reader_output(_run_reader(reader, frame))
-                text = _extract_text(raw_result)
-            except Exception as e:
-                self.logger.exception(
-                    f"roi_id={roi_id} {self.MODULE_NAME} OCR error: {e}"
-                )
-                empty_reason = "runtime_exception"
-                empty_details = f"{type(e).__name__}: {e}"
-            finally:
-                self._release_reader(reader)
-
-        if text:
-            self.logger.info(
-                f"roi_id={roi_id} {self.MODULE_NAME} OCR result: {text}"
-                if roi_id is not None
-                else f"{self.MODULE_NAME} OCR result: {text}"
-            )
-        elif empty_reason is None and not _result_structure_is_empty(raw_result):
-            empty_reason = "unexpected_payload"
-            empty_details = f"raw_type={type(raw_result).__name__}"
-
-        if save:
-            self._save_image(frame, roi_id, source)
-
-        if not text and empty_reason:
-            _log_empty_text_warning(
-                self.logger, self.MODULE_NAME, roi_id, empty_reason, empty_details
-            )
-
-        return text
+        return _run_rapidocr_pipeline(
+            frame,
+            roi_id,
+            save,
+            source,
+            acquire_reader=self._get_reader,
+            release_reader=self._release_reader,
+            logger_obj=self.logger,
+            module_name=self.MODULE_NAME,
+            log_if_empty=False,
+            save_callback=self._save_image,
+        )
 
     def _cleanup_extra(self) -> None:
         _reset_reader_pool()
