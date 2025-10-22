@@ -134,7 +134,7 @@ _VARIANTS_DIRECT: tuple[_ReaderCallVariant, ...] = (
     _ReaderCallVariant("reader(request)", True, _call_direct_request),
 )
 
-_cached_reader_variant: _ReaderCallVariant | None = None
+_reader_variant_cache: dict[int, _ReaderCallVariant] = {}
 _reader_variant_lock = threading.Lock()
 
 logger.info(
@@ -209,6 +209,8 @@ def _reset_reader_pool() -> None:
         _reader_creation_executor.shutdown(wait=False, cancel_futures=True)
         _reader_creation_executor = None
     _reader = None
+    with _reader_variant_lock:
+        _reader_variant_cache.clear()
 
 
 def _build_rapidocr_kwargs() -> dict[str, Any]:
@@ -451,11 +453,12 @@ def _iter_call_variants(reader: Any) -> Iterable[_ReaderCallVariant]:
 def _run_reader(reader, frame):
     """เรียก RapidOCR reader โดยยึดค่าพื้นฐานจากจุดกำหนดเดียว."""
 
-    global _cached_reader_variant
-
+    reader_id = id(reader)
     request: SimpleNamespace | None = None
 
-    cached_variant = _cached_reader_variant
+    with _reader_variant_lock:
+        cached_variant = _reader_variant_cache.get(reader_id)
+
     if cached_variant is not None:
         if cached_variant.needs_request:
             request = SimpleNamespace(img=frame, return_word_box=False)
@@ -468,14 +471,14 @@ def _run_reader(reader, frame):
                 exc,
             )
             with _reader_variant_lock:
-                if _cached_reader_variant is cached_variant:
-                    _cached_reader_variant = None
+                if _reader_variant_cache.get(reader_id) is cached_variant:
+                    _reader_variant_cache.pop(reader_id, None)
             request = None
         except Exception:
             # หากเกิดข้อผิดพลาดอื่น ให้ล้าง cache แล้วลองแบบอื่น
             with _reader_variant_lock:
-                if _cached_reader_variant is cached_variant:
-                    _cached_reader_variant = None
+                if _reader_variant_cache.get(reader_id) is cached_variant:
+                    _reader_variant_cache.pop(reader_id, None)
             raise
 
     last_exc: Exception | None = None
@@ -498,7 +501,7 @@ def _run_reader(reader, frame):
             continue
 
         with _reader_variant_lock:
-            _cached_reader_variant = variant
+            _reader_variant_cache[reader_id] = variant
         return result
 
     if last_exc is not None:
