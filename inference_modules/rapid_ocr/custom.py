@@ -6,7 +6,7 @@ from collections.abc import Iterable, Mapping
 from concurrent.futures import ThreadPoolExecutor
 from queue import Empty, LifoQueue
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, Callable, NamedTuple
 from PIL import Image
 import cv2
 import logging
@@ -59,6 +59,83 @@ _reader_pool: LifoQueue[Any] = LifoQueue()
 _reader_pool_lock = threading.Lock()
 _reader_creation_executor: ThreadPoolExecutor | None = None
 _reader_created = 0
+
+
+_READER_KWARGS: dict[str, Any] = {
+    "use_det": False,
+    "use_cls": False,
+    "use_rec": True,
+}
+
+
+class _ReaderCallVariant(NamedTuple):
+    description: str
+    needs_request: bool
+    caller: Callable[[Any, Any, Mapping[str, Any], SimpleNamespace | None], Any]
+
+
+def _call_ocr_frame(reader: Any, frame: Any, kwargs: Mapping[str, Any], request: SimpleNamespace | None) -> Any:
+    return reader.ocr(frame, **kwargs)
+
+
+def _call_ocr_img(reader: Any, frame: Any, kwargs: Mapping[str, Any], request: SimpleNamespace | None) -> Any:
+    return reader.ocr(img=frame, **kwargs)
+
+
+def _call_ocr_frame_only(reader: Any, frame: Any, kwargs: Mapping[str, Any], request: SimpleNamespace | None) -> Any:
+    return reader.ocr(frame)
+
+
+def _call_ocr_request_kwargs(
+    reader: Any, frame: Any, kwargs: Mapping[str, Any], request: SimpleNamespace | None
+) -> Any:
+    if request is None:
+        raise TypeError("request is required for this call variant")
+    return reader.ocr(request, **kwargs)
+
+
+def _call_ocr_request_only(
+    reader: Any, frame: Any, kwargs: Mapping[str, Any], request: SimpleNamespace | None
+) -> Any:
+    if request is None:
+        raise TypeError("request is required for this call variant")
+    return reader.ocr(request)
+
+
+def _call_direct_kwargs(
+    reader: Any, frame: Any, kwargs: Mapping[str, Any], request: SimpleNamespace | None
+) -> Any:
+    return reader(frame, **kwargs)
+
+
+def _call_direct_only(reader: Any, frame: Any, kwargs: Mapping[str, Any], request: SimpleNamespace | None) -> Any:
+    return reader(frame)
+
+
+def _call_direct_request(
+    reader: Any, frame: Any, kwargs: Mapping[str, Any], request: SimpleNamespace | None
+) -> Any:
+    if request is None:
+        raise TypeError("request is required for this call variant")
+    return reader(request)
+
+
+_VARIANTS_WITH_OCR: tuple[_ReaderCallVariant, ...] = (
+    _ReaderCallVariant("ocr(frame, **reader_kwargs)", False, _call_ocr_frame),
+    _ReaderCallVariant("ocr(img=frame, **reader_kwargs)", False, _call_ocr_img),
+    _ReaderCallVariant("ocr(frame)", False, _call_ocr_frame_only),
+    _ReaderCallVariant("ocr(request, **reader_kwargs)", True, _call_ocr_request_kwargs),
+    _ReaderCallVariant("ocr(request)", True, _call_ocr_request_only),
+)
+
+_VARIANTS_DIRECT: tuple[_ReaderCallVariant, ...] = (
+    _ReaderCallVariant("reader(frame, **reader_kwargs)", False, _call_direct_kwargs),
+    _ReaderCallVariant("reader(frame)", False, _call_direct_only),
+    _ReaderCallVariant("reader(request)", True, _call_direct_request),
+)
+
+_cached_reader_variant: _ReaderCallVariant | None = None
+_reader_variant_lock = threading.Lock()
 
 logger.info(
     "[RapidOCR] Reader pool max workers configured to %d", _MAX_READER_WORKERS
@@ -365,47 +442,64 @@ def _prepare_frame_for_reader(frame):
     return frame
 
 
+def _iter_call_variants(reader: Any) -> Iterable[_ReaderCallVariant]:
+    if hasattr(reader, "ocr"):
+        yield from _VARIANTS_WITH_OCR
+    yield from _VARIANTS_DIRECT
+
+
 def _run_reader(reader, frame):
     """เรียก RapidOCR reader โดยยึดค่าพื้นฐานจากจุดกำหนดเดียว."""
 
-    reader_kwargs = {
-        "use_det": False,
-        "use_cls": False,
-        "use_rec": True,
-    }
+    global _cached_reader_variant
 
-    request = SimpleNamespace(img=frame, return_word_box=False)
+    request: SimpleNamespace | None = None
 
-    call_variants = []
-    if hasattr(reader, "ocr"):
-        call_variants.extend(
-            [
-                (lambda: reader.ocr(frame, **reader_kwargs), "ocr(frame, **reader_kwargs)"),
-                (lambda: reader.ocr(img=frame, **reader_kwargs), "ocr(img=frame, **reader_kwargs)"),
-                (lambda: reader.ocr(frame), "ocr(frame)"),
-                (lambda: reader.ocr(request, **reader_kwargs), "ocr(request, **reader_kwargs)"),
-                (lambda: reader.ocr(request), "ocr(request)"),
-            ]
-        )
-
-    call_variants.extend(
-        [
-            (lambda: reader(frame, **reader_kwargs), "reader(frame, **reader_kwargs)"),
-            (lambda: reader(frame), "reader(frame)"),
-            (lambda: reader(request), "reader(request)"),
-        ]
-    )
+    cached_variant = _cached_reader_variant
+    if cached_variant is not None:
+        if cached_variant.needs_request:
+            request = SimpleNamespace(img=frame, return_word_box=False)
+        try:
+            return cached_variant.caller(reader, frame, _READER_KWARGS, request)
+        except (TypeError, AttributeError) as exc:
+            logger.debug(
+                "[RapidOCR] cached call variant %s unusable: %s",
+                cached_variant.description,
+                exc,
+            )
+            with _reader_variant_lock:
+                if _cached_reader_variant is cached_variant:
+                    _cached_reader_variant = None
+            request = None
+        except Exception:
+            # หากเกิดข้อผิดพลาดอื่น ให้ล้าง cache แล้วลองแบบอื่น
+            with _reader_variant_lock:
+                if _cached_reader_variant is cached_variant:
+                    _cached_reader_variant = None
+            raise
 
     last_exc: Exception | None = None
-    for call, description in call_variants:
+    for variant in _iter_call_variants(reader):
+        if variant.needs_request and request is None:
+            request = SimpleNamespace(img=frame, return_word_box=False)
         try:
-            return call()
-        except TypeError as exc:
+            result = variant.caller(reader, frame, _READER_KWARGS, request)
+        except (TypeError, AttributeError) as exc:
             last_exc = exc
-            logger.debug("[RapidOCR] call variant failed: %s (%s)", description, exc)
+            logger.debug(
+                "[RapidOCR] call variant failed: %s (%s)", variant.description, exc
+            )
+            continue
         except Exception as exc:
             last_exc = exc
-            logger.debug("[RapidOCR] call variant raised %s: %s", description, exc)
+            logger.debug(
+                "[RapidOCR] call variant raised %s: %s", variant.description, exc
+            )
+            continue
+
+        with _reader_variant_lock:
+            _cached_reader_variant = variant
+        return result
 
     if last_exc is not None:
         raise last_exc
