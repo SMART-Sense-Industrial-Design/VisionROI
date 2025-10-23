@@ -467,8 +467,9 @@ def _run_ocr_async(frame, roi_id, save, source) -> str:
     return text
 
 
-class RapidOCR(BaseOCR):
+class TestRapidOCR(BaseOCR):
     MODULE_NAME = "rapid_ocr"
+    __test__ = False  # ป้องกัน pytest พยายามเก็บคลาสนี้เป็นชุดทดสอบ
 
     def __init__(self) -> None:
         super().__init__()

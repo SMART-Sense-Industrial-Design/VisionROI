@@ -1,10 +1,10 @@
 import numpy as np
 import inference_modules.rapid_ocr.custom as custom
-from inference_modules.rapid_ocr.custom import RapidOCR
+from inference_modules.rapid_ocr.custom import TestRapidOCR
 
 
 def test_rapid_ocr_accepts_dict_results(monkeypatch):
-    ocr = RapidOCR()
+    ocr = TestRapidOCR()
     ocr.last_ocr_results.clear()
     class DummyReader:
         def __call__(self, frame):
@@ -16,7 +16,7 @@ def test_rapid_ocr_accepts_dict_results(monkeypatch):
 
 
 def test_rapid_ocr_accepts_object_with_text(monkeypatch):
-    ocr = RapidOCR()
+    ocr = TestRapidOCR()
     ocr.last_ocr_results.clear()
 
     class DummyOutput:
@@ -34,7 +34,7 @@ def test_rapid_ocr_accepts_object_with_text(monkeypatch):
 
 
 def test_rapid_ocr_accepts_object_with_txts(monkeypatch):
-    ocr = RapidOCR()
+    ocr = TestRapidOCR()
     ocr.last_ocr_results.clear()
 
     class DummyOutput:
@@ -52,7 +52,7 @@ def test_rapid_ocr_accepts_object_with_txts(monkeypatch):
 
 
 def test_rapid_ocr_removes_scores(monkeypatch):
-    ocr = RapidOCR()
+    ocr = TestRapidOCR()
     ocr.last_ocr_results.clear()
 
     class DummyReader:
