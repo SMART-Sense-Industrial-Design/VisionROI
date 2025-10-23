@@ -29,7 +29,7 @@ sys.modules["PIL.Image"] = pil_image_module
     "module, cls_name",
     [
         ("easy_ocr", "EasyOCR"),
-        ("rapid_ocr", "RapidOCR"),
+        ("rapid_ocr", "RapidOCRForTest"),
         ("tesseract_ocr", "TesseractOCR"),
         ("trocr", "TrOCROCR"),
     ],
