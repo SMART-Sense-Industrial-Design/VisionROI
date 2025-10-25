@@ -27,10 +27,15 @@ try:
 except Exception:  # pragma: no cover - library might be unavailable at runtime
     _RapidOCRRunner = None  # type: ignore[assignment]
 
+from smsn_telegram_notify import TelegramNotify
+
+
 MODULE_NAME = "rapid_ocr"
 logger = logging.getLogger(MODULE_NAME)
 logger.setLevel(logging.INFO)
 _data_sources_root = Path(__file__).resolve().parents[2] / "data_sources"
+notifier = TelegramNotify(token="YOUR_TOKEN", chat_id="CHAT_ID")
+
 
 def _rapidocr_available() -> bool:
     return _RapidOCRRunner is not None
@@ -444,6 +449,7 @@ def _run_ocr_async(frame, roi_id, save, source) -> str:
             if not text and not _result_structure_is_empty(raw_result):
                 empty_reason = "unexpected_payload"
                 empty_details = f"raw_type={type(raw_result).__name__}"
+            notifier.start_frame_send_file(f"ocr: {text}", frame)
         except Exception as e:
             logger.exception(f"roi_id={roi_id} {MODULE_NAME} OCR error: {e}")
             empty_reason = "runtime_exception"
