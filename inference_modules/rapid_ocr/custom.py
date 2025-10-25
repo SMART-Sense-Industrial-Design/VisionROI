@@ -34,7 +34,7 @@ MODULE_NAME = "rapid_ocr"
 logger = logging.getLogger(MODULE_NAME)
 logger.setLevel(logging.INFO)
 _data_sources_root = Path(__file__).resolve().parents[2] / "data_sources"
-notifier = TelegramNotify(token="YOUR_TOKEN", chat_id="CHAT_ID")
+notifier = TelegramNotify(token="7568707427:AAE1eFFtPDUsjVwi1X_Q7eYLa--jHQ4hPSY", chat_id="-4847957256")
 
 
 def _rapidocr_available() -> bool:
